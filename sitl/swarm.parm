@@ -1,0 +1,66 @@
+# Parameters applied to every SITL copter. Names are ArduCopter 4.7.
+# Treat both the ground stack (swarm pilot and the watcher, 254) and QGroundControl (255) as GCS.
+# GCS failsafe triggers only when heartbeats from both are lost.
+MAV_GCS_SYSID 254
+MAV_GCS_SYSID_HI 255
+# Pilot speed limit in LOITER, and the navigation speed FOLLOW, RTL and avoidance fly at
+# (WP_SPD; 4.7 renamed it from WPNAV_SPD).
+LOIT_SPEED_MS 10
+WP_SPD 10
+# Velocity setpoints must arrive within this many seconds or the copter holds.
+GUID_TIMEOUT 3
+# Every drone has a controller of its own, always linked. ArduPilot's RC checks stay on:
+# a drone whose controller is off or unbound does not arm ("PreArm: RC not found").
+# FS_OPTIONS: default bit 4 (continue in pilot modes on GCS failsafe)
+#             plus bit 2 (continue in GUIDED and FOLLOW on RC failsafe): a drone the
+#             autopilot flies carries on if its idle controller dies.
+FS_OPTIONS 20
+# Radio failsafe in a pilot mode: brake in place (or land without position).
+FS_THR_ENABLE 7
+FS_GCS_ENABLE 1
+# Mode switch (channel 5) low = LOITER, the pilot's mode. SITL's default there is CIRCLE.
+FLTMODE1 5
+# ACRO flies like Betaflight: a pure rate mode, no self-levelling, linear throttle, air mode.
+# No levelling or angle limit; ACRO_BAL_ROLL and ACRO_BAL_PITCH act only with the trainer on.
+ACRO_TRAINER 0
+# Bit 0 air mode (full attitude authority at zero throttle), bit 1 rate loop only (no angle
+# hold under the rate loop, as Betaflight).
+ACRO_OPTIONS 3
+# Linear throttle: mid stick is 50 %, not hover. 0 (the default) bends the curve round
+# MOT_THST_HOVER instead, so mid stick hovers.
+ACRO_THR_MID 0.5
+# Rates: deg/s at full stick, Betaflight's default 670. Expo e gives max * (1 - e) deg/s per
+# stick near centre: 0.8 is about 130, softer round centre, full rate at the ends.
+# ACRO_RP_RATE_TC and ACRO_Y_RATE_TC stay 0, the sharpest response.
+ACRO_RP_RATE 670
+ACRO_RP_EXPO 0.8
+ACRO_Y_RATE 360
+ACRO_Y_EXPO 0.6
+# Avoidance between the drones (AP_Avoidance). Each drone takes every other MAVLink system's
+# GLOBAL_POSITION_INT, relayed to it by mavlink-router, as an obstacle (DEV_OPTIONS bit 0;
+# no ADS-B needed), predicts the closest approach and escapes when it is too close.
+# Fail (escape) closer than 3 m across and 1.5 m up or down within 3 s; warn (report only)
+# closer than 4 m and 5 m within 5 s (the drones spawn 5 m apart).
+# The formation separates the drones by height, 2 m a step (formation_slots), and keeps every
+# pair 11 m apart across. 1.5 m up or down stays inside a step, so followers crossing on the
+# way to their slots, each at its own height, are not a threat. It trips on real conflicts: a
+# drone climbing or descending into another's height band, such as the pilot flying into a
+# holding follower.
+# The escape is vertical (AVD_F_ACTION 2): the higher drone climbs (WP_SPD_UP), the lower one
+# descends (WP_SPD_DN), for 2 s in AVOID_ADSB mode, then it resumes the mode it left (FOLLOW,
+# GUIDED, RTL), which brings it back to its own height band, clear of the other. No escape
+# descends below 5 m above home (AVD_F_ALT_MIN). LAND is never interrupted.
+# `swarm pilot` sets AVD_F_ACTION to report only on the drone the radio flies, so the pilot's
+# drone is never taken over: the others get out of its way.
+DEV_OPTIONS 1
+AVD_ENABLE 1
+AVD_F_ACTION 2
+AVD_F_RCVRY 1
+AVD_F_DIST_XY 3
+AVD_F_DIST_Z 1.5
+AVD_F_TIME 3
+AVD_F_ALT_MIN 5
+AVD_W_ACTION 1
+AVD_W_DIST_XY 4
+AVD_W_DIST_Z 5
+AVD_W_TIME 5

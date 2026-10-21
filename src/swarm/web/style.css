@@ -1,0 +1,921 @@
+:root {
+  --panel: rgba(12, 16, 21, 0.86);
+  --panel-edge: rgba(255, 255, 255, 0.08);
+  --text: #e8edf2;
+  --muted: #8b98a5;
+  --accent: #7fe3ff;
+  --brand: #8ab6c8;
+  --leader: #ffc53d;
+  --ok: #3ddc84;
+  --warn: #ffb020;
+  --bad: #ff5a5a;
+  --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: Inter, "Segoe UI", Roboto, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0f13;
+  color: var(--text);
+  font: 13px/1.35 var(--sans);
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+.cesium-viewer-bottom {
+  left: 12px;
+  bottom: 4px;
+}
+
+.cesium-credit-lightbox-overlay {
+  z-index: 50;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* top bar */
+#topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: linear-gradient(to bottom, rgba(8, 11, 15, 0.95), rgba(8, 11, 15, 0.78));
+  border-bottom: 1px solid var(--panel-edge);
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.brand b {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.brand-mark {
+  width: 20px;
+  height: 20px;
+  fill: var(--brand);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--panel-edge);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.chip.muted {
+  color: var(--muted);
+}
+
+#phase {
+  color: var(--accent);
+  border-color: rgba(127, 227, 255, 0.35);
+}
+
+#link .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+#link.live .dot {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+
+#link.replay .dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+#link.stale .dot {
+  background: var(--bad);
+}
+
+.clock {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* fleet panel */
+#fleet {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 306px;
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+.panel-title {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  margin: 2px 2px 8px;
+}
+
+.panel-title .panel-action {
+  float: right;
+  margin-top: -2px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--panel-edge);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font: 700 10px/16px var(--sans);
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.panel-title .panel-action:hover {
+  color: var(--text);
+}
+
+.panel-title .panel-action.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(127, 227, 255, 0.08);
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 4px 1fr auto;
+  gap: 2px 10px;
+  padding: 8px 10px 8px 0;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.card:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.card.selected {
+  border-color: var(--accent);
+  background: rgba(127, 227, 255, 0.08);
+}
+
+.card .swatch {
+  grid-row: 1 / span 3;
+  border-radius: 0 3px 3px 0;
+  position: relative;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* A wider target than the bar itself. */
+.card .swatch::after {
+  content: "";
+  position: absolute;
+  inset: -8px -10px -8px 0;
+}
+
+.card .swatch:hover {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.color-picker {
+  position: fixed;
+  z-index: 20;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.color-picker-title {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.color-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 26px);
+  gap: 8px;
+}
+
+.color-picker-grid button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+}
+
+.color-picker-grid button:hover,
+.color-picker-grid button:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 2px;
+}
+
+.color-picker-grid button.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.card .name {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* RP (remotely piloted) or AUT (autonomous), after the callsign. */
+.card .ctl {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+  color: var(--muted);
+  font: 700 10px/14px var(--mono);
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+
+.card .ctl.rp {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.card .role {
+  justify-self: end;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.role.leader {
+  background: var(--leader);
+  color: #1b1400;
+}
+
+/* A drone the radio flies that is not the leader (swarm.launch take_over). */
+.role.pilot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text);
+  color: var(--text);
+}
+
+.role.follower {
+  background: rgba(127, 227, 255, 0.2);
+  color: var(--accent);
+}
+
+.role.landing {
+  background: rgba(255, 90, 90, 0.2);
+  color: var(--bad);
+}
+
+.role.parked {
+  background: rgba(61, 220, 132, 0.18);
+  color: var(--ok);
+}
+
+/* The mode as an annunciator light, after the callsign. */
+.card .mode {
+  --light: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 0 5px 0 4px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--light) 55%, transparent);
+  background: color-mix(in srgb, var(--light) 14%, transparent);
+  color: var(--light);
+  font: 700 10px/14px var(--mono);
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+
+.card .mode .light {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--light);
+  box-shadow: 0 0 6px var(--light);
+}
+
+.card .mode.manual {
+  --light: var(--warn);
+}
+
+.card .mode.hold {
+  --light: var(--ok);
+}
+
+.card .mode.auto {
+  --light: var(--accent);
+}
+
+.card .mode.recover {
+  --light: var(--bad);
+}
+
+/* Disarmed: the light is off. */
+.card .mode.disarmed {
+  --light: var(--muted);
+}
+
+.card .mode.disarmed .light {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+
+
+/* The battery: remaining as a bar, then the voltage. */
+.battery {
+  grid-column: 2 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.battery .level {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.battery .level span {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+
+.battery .volts {
+  font: 600 11.5px var(--mono);
+  color: var(--text);
+}
+
+
+/* toolbar */
+#toolbar {
+  position: absolute;
+  left: 12px;
+  bottom: 34px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  z-index: 10;
+  max-width: calc(100% - 344px);
+}
+
+#toolbar .group {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 9px;
+  backdrop-filter: blur(6px);
+}
+
+#toolbar button {
+  border: 0;
+  background: transparent;
+  padding: 6px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+}
+
+#toolbar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#toolbar button.on {
+  background: rgba(127, 227, 255, 0.16);
+  color: var(--accent);
+}
+
+#toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Tilt and FOV, at the end of the camera bar. */
+.sensor-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: 4px;
+  padding: 0 8px 0 12px;
+  border-left: 1px solid var(--panel-edge);
+}
+
+.sensor-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sensor-controls input {
+  width: 92px;
+  accent-color: var(--accent);
+}
+
+.sensor-controls output {
+  font-family: var(--mono);
+  color: var(--text);
+  min-width: 34px;
+}
+
+/* compass */
+#compass {
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  width: 46px;
+  height: 46px;
+  padding: 3px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 50%;
+  background: var(--panel);
+  cursor: pointer;
+  z-index: 10;
+}
+
+#compass svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+#compass circle {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+}
+
+#compass .needle-n {
+  fill: var(--bad);
+}
+
+#compass .needle-s {
+  fill: #d7dde3;
+}
+
+#compass text {
+  fill: var(--text);
+  font: 700 6px var(--sans);
+  text-anchor: middle;
+}
+
+/* status */
+#status {
+  position: absolute;
+  right: 12px;
+  bottom: 34px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  z-index: 10;
+}
+
+#cursor-mgrs {
+  color: var(--accent);
+}
+
+#cursor-ll,
+#cursor-elev {
+  color: var(--muted);
+}
+
+/* toasts */
+#toasts {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-left: 3px solid var(--accent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  animation: toast-in 0.25s ease-out;
+  white-space: nowrap;
+}
+
+.toast.leader {
+  border-left-color: var(--leader);
+}
+
+.toast.bad {
+  border-left-color: var(--bad);
+}
+
+.toast.fade {
+  opacity: 0;
+  transition: opacity 0.6s;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* FPV overlay. It spans the whole camera image, under the panels, which stay up; the readouts
+   on its right sit clear of the fleet panel (272 px wide, 12 px from the edge). */
+#fpv {
+  --panel-inset: 318px;
+  position: absolute;
+  inset: 44px 0 0 0;
+  z-index: 5;
+  pointer-events: none;
+  font-family: var(--mono);
+  color: #d9ffe9;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+}
+
+#fpv[hidden] {
+  display: none;
+}
+
+.fpv-frame span {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border: 2px solid rgba(217, 255, 233, 0.8);
+}
+
+.fpv-frame span:nth-child(1) {
+  top: 40px;
+  left: 40px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.fpv-frame span:nth-child(2) {
+  top: 40px;
+  right: 40px;
+  border-left: 0;
+  border-bottom: 0;
+}
+
+.fpv-frame span:nth-child(3) {
+  bottom: 40px;
+  right: 40px;
+  border-left: 0;
+  border-top: 0;
+}
+
+.fpv-frame span:nth-child(4) {
+  bottom: 40px;
+  left: 40px;
+  border-right: 0;
+  border-top: 0;
+}
+
+.fpv-cross {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(#d9ffe9, #d9ffe9) center / 2px 18px no-repeat,
+    linear-gradient(#d9ffe9, #d9ffe9) center / 18px 2px no-repeat;
+  border: 1.5px solid rgba(217, 255, 233, 0.6);
+  border-radius: 50%;
+}
+
+.fpv-top,
+.fpv-bottom {
+  position: absolute;
+  left: 110px;
+  right: calc(110px + var(--panel-inset));
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+
+.fpv-top {
+  top: 50px;
+}
+
+.fpv-bottom {
+  bottom: 124px;
+}
+
+/* The camera feed: the map cropped to the camera's frame (app.js cropToCamera), black round
+   it, as goggles show it. */
+body.camera-feed {
+  background: #000;
+}
+
+body.camera-feed #map {
+  right: auto;
+  bottom: auto;
+}
+
+/* A camera has no compass. */
+body.camera-feed #compass {
+  display: none;
+}
+
+/* ArduPilot's OSD (osd.js) over the camera's frame, in the HUD's place. */
+#osd {
+  position: fixed;
+}
+
+#fpv.osd > :not(#osd, .fpv-exit) {
+  display: none;
+}
+
+#fpv-cam.no-feed {
+  color: var(--bad);
+}
+
+.fpv-top .rec {
+  color: var(--bad);
+}
+
+.fpv-left,
+.fpv-right {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.fpv-left {
+  left: 56px;
+}
+
+.fpv-right {
+  right: calc(56px + var(--panel-inset));
+}
+
+.fpv-left b,
+.fpv-right b {
+  display: block;
+  font-size: 26px;
+  margin: 2px 0;
+}
+
+.fpv-exit {
+  position: absolute;
+  right: calc(20px + var(--panel-inset));
+  top: 10px;
+  pointer-events: auto;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+@media (max-width: 760px) {
+  /* The fleet panel sits across the bottom here: the HUD's bottom row goes up under its top
+     row, both across the full width. */
+  #fpv {
+    --panel-inset: 0px;
+  }
+
+  .fpv-top,
+  .fpv-bottom {
+    left: 16px;
+    right: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px 14px;
+    font-size: 12px;
+  }
+
+  .fpv-bottom {
+    top: 74px;
+    bottom: auto;
+  }
+
+  #fleet {
+    top: auto;
+    bottom: 120px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 32%;
+  }
+
+  #toolbar {
+    max-width: calc(100% - 24px);
+    bottom: 60px;
+  }
+
+  #status {
+    left: 12px;
+    right: auto;
+    bottom: 26px;
+  }
+
+  #source,
+  .clock {
+    display: none;
+  }
+}
+
+/* card dials (instruments.js), in glass-cockpit colours on black: white scales and
+   references, green live values, yellow aircraft symbol, cyan pilot input */
+.card-instruments {
+  grid-column: 2 / span 2;
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 5px;
+  --scale: #ffffff;
+  --live: #3df25a;
+  --aircraft: #ffd500;
+  --input: #00e1ff;
+}
+
+.card-instruments .panel {
+  fill: #000;
+}
+
+.card-instruments .rim,
+.card-instruments .tick {
+  fill: none;
+  stroke: var(--scale);
+  stroke-opacity: 0.75;
+  stroke-width: 1;
+}
+
+.card-instruments .tick.ref {
+  stroke-opacity: 1;
+  stroke-width: 1.6;
+}
+
+.card-instruments .needle {
+  stroke: var(--live);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.card-instruments .horizon,
+.card-instruments .bank {
+  stroke: var(--scale);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.card-instruments .hub {
+  fill: var(--scale);
+}
+
+.card-instruments .wings {
+  fill: none;
+  stroke: var(--aircraft);
+  stroke-width: 2;
+  stroke-linecap: square;
+  paint-order: stroke;
+}
+
+.card-instruments .north,
+.card-instruments .label {
+  fill: var(--scale);
+  font: 700 8px var(--mono);
+}
+
+.card-instruments .number {
+  fill: var(--scale);
+  font: 700 6.5px var(--mono);
+}
+
+/* The altimeter's drum counter: a window of rolling digits under the dial. */
+.card-instruments .drum {
+  fill: #000;
+  stroke: var(--scale);
+  stroke-opacity: 0.75;
+  stroke-width: 0.8;
+}
+
+.card-instruments .digit {
+  fill: var(--live);
+  font: 700 11px var(--mono);
+}
+
+.card-instruments .hit {
+  fill: transparent;
+}
+
+.card-instruments .value {
+  fill: var(--live);
+  font: 600 11px var(--mono);
+}
+
+.card-instruments .track {
+  fill: none;
+  stroke: var(--scale);
+  stroke-opacity: 0.6;
+  stroke-width: 0.8;
+}
+
+.card-instruments .zero {
+  stroke: var(--scale);
+  stroke-width: 1;
+}
+
+.card-instruments .mark {
+  fill: var(--input);
+}
+
+.card-instruments .fill {
+  fill: var(--input);
+  opacity: 0.4;
+}
+
+.card-instruments:not(.pilot) .meter {
+  opacity: 0.4;
+}
+
+.card-instruments.no-sticks .mark,
+.card-instruments.no-sticks .fill {
+  display: none;
+}
+

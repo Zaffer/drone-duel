@@ -1,0 +1,12 @@
+.venv/
+external/
+__pycache__/
+*.pyc
+logs/
+*.tlog
+*.BIN
+mav.parm
+eeprom.bin
+.pytest_cache/
+.ruff_cache/
+.env.local

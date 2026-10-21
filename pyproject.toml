@@ -1,0 +1,55 @@
+[project]
+name = "drone-duel"
+version = "0.1.0"
+description = "Multi-drone leader-follower coordination over MAVLink (ArduPilot SITL and hardware)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pymavlink>=2.4.48",
+    "numpy>=2.0",
+    "matplotlib>=3.9",
+]
+
+[project.scripts]
+swarm = "swarm.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "basedpyright>=1.20",
+    # swarm.fpvmodel scales the drone model's textures.
+    "pillow>=11",
+]
+# Tools needed to build and launch ArduPilot SITL (sim_vehicle.py, waf, mavgen).
+sitl = [
+    "empy==3.3.4",
+    "pexpect",
+    "future",
+    "lxml",
+    "pyserial",
+    "psutil",
+    "MAVProxy",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.10"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "swarm"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N", "ANN"]
+
+[tool.basedpyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
