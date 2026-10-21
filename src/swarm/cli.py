@@ -218,10 +218,13 @@ def _view_server(
     from swarm.view import ViewConfig, ViewServer
 
     settings = _settings(args)
+    fence = settings.fence
     config = ViewConfig(
         markers=markers,
         land_radius_m=settings.swarm.landing_zone_radius_m,
         leader_radius_m=settings.swarm.liftoff_max_leader_distance_m,
+        point_b=settings.field.point_b,
+        fence=list(fence.corners) if fence.enabled else [],
         host=args.view_host,
         http_port=args.view_port,
     )
@@ -409,6 +412,7 @@ def _watched_sim(args: argparse.Namespace) -> "Iterator[ViewServer | None]":
             osd = OsdFeed(copters)
             osd.start()
             viewer.osd = osd
+            viewer.sim = stack
         # The pilot's link reports vehicles, their messages and warnings; the watcher's would
         # repeat every one.
         logging.getLogger(WATCH_LINK_LOG).setLevel(logging.ERROR)

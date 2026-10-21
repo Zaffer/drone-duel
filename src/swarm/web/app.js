@@ -5,9 +5,14 @@
 // the field its video; in the sim, every drone where its physics puts it (swarm.physics), with
 // none of the map's symbols. Over the camera feed, ArduPilot's own OSD as the goggles draw it
 // from MSP DisplayPort (swarm.osd); without it (a replay), a HUD from the telemetry instead.
+//
+// The Duel panel plays a match against another player's COP (duelmatch.js): in their turns
+// they fly the drones at this player's truck, and the map here turns into the truck's drive.
+// ?room=CODE&as=host|guest in the address opens the room on load.
 
 import { BaseMap } from "./basemap.js";
 import { Director } from "./director.js";
+import { DuelMatch } from "./duelmatch.js";
 import { callsign, controlMode, DEFAULT_COLOR, DRONE_COLORS, Fleet } from "./fleet.js";
 import { Instruments } from "./instruments.js";
 import { OsdView } from "./osd.js";
@@ -81,6 +86,7 @@ const plans = new PlanLayer(fleet, options);
 const camera = viewer.camera;
 const defaultFov = camera.frustum.fov;
 const director = new Director(viewer, fleet);
+const duel = new DuelMatch({ fleet, map, config, toast, setDriving });
 
 const state = {
   mode: "free", // free | follow | fpv | camera | auto
@@ -131,6 +137,7 @@ events.onmessage = (e) => {
   state.lastFrameAt = performance.now();
   announce(state.prev, frame);
   fleet.update(frame);
+  duel.frame();
   for (const v of frame.vehicles) instruments.get(v.sysid)?.update(v);
   plans.update();
   state.prev = frame;
@@ -168,6 +175,19 @@ function freeCamera() {
   state.mode = "free";
   refreshButtons();
 }
+
+/** Hand the map over to the duel's truck (`on`), or take it back: the COP's panels, symbols,
+ * plans and keys step aside for the drive's while it lasts. */
+function setDriving(on) {
+  if (on) freeCamera();
+  document.body.classList.toggle("driving", on);
+  fleet.driving = on;
+  viewer.entities.show = !on;
+  plans.update();
+  if (!on) overview(0.8);
+}
+
+const driving = () => document.body.classList.contains("driving");
 
 function overview(duration = 1.2) {
   freeCamera();
@@ -449,7 +469,7 @@ handler.setInputAction((click) => {
 
 // Double click: follow a drone, or fly halfway in toward the ground point.
 handler.setInputAction((click) => {
-  if (state.mode === "auto" || throughCamera()) return;
+  if (state.mode === "auto" || throughCamera() || driving()) return;
   const id = viewer.scene.pick(click.position)?.id?.id;
   if (typeof id === "string" && id.startsWith("vehicle-")) {
     select(Number(id.slice(8)));
@@ -654,6 +674,7 @@ const actions = {
   camera: () => (state.mode === "camera" ? freeCamera() : enterCamera("camera")),
   auto: () => (state.mode === "auto" ? freeCamera() : autoCamera()),
   exit: freeCamera,
+  duel: () => duel.togglePanel(),
   selectAll: () => {
     fleet.selectAll = !fleet.selectAll;
     refreshButtons();
@@ -676,7 +697,7 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.target instanceof HTMLInputElement) return;
+  if (e.target instanceof HTMLInputElement || driving()) return;
   const key = e.key.toLowerCase();
   if (key === "escape" && !colorPicker.hidden) return closeColorPicker();
   if (key === "0") actions.selectAll();
@@ -693,6 +714,7 @@ document.addEventListener("keydown", (e) => {
   else if (key === "m") toggle("mission");
   else if (key === "g") toggle("fence");
   else if (key === "k") toggle("controlArea");
+  else if (key === "d") actions.duel();
   else if (key === "escape") freeCamera();
 });
 
@@ -789,4 +811,5 @@ window.swarmView = {
   autoCamera,
   freeCamera,
   select,
+  duel,
 };

@@ -136,3 +136,11 @@ def test_without_follow_targets_the_pilots_drone_leads() -> None:
     roles = {v["sysid"]: v["role"] for v in snap["vehicles"]}
     assert snap["leader"] == 1
     assert roles == {1: "leader", 2: "watched"}
+
+
+def test_a_drone_gone_quiet_is_published_with_its_link_down() -> None:
+    quiet = _vehicle(2, apm.COPTER_MODE_LOITER, north=-5)
+    quiet.last_position_s = time.monotonic() - 10
+    snap = _watch(FakeLink([_vehicle(1, apm.COPTER_MODE_LOITER), quiet]))
+    assert [(v["sysid"], v["link"]) for v in snap["vehicles"]] == [(1, True), (2, False)]
+    assert all(v["nav"] for v in snap["vehicles"])

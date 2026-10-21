@@ -61,6 +61,8 @@ CESIUM_VERSION="${CESIUM_VERSION:-1.145.0}"
 MILSYMBOL_VERSION="${MILSYMBOL_VERSION:-3.0.4}"
 MGRS_VERSION="${MGRS_VERSION:-2.2.0}"
 RAPIER_VERSION="${RAPIER_VERSION:-0.20.0}"
+TRYSTERO_VERSION="${TRYSTERO_VERSION:-0.26.0}"
+SECP256K1_VERSION="${SECP256K1_VERSION:-3.2.0}"
 fetch_npm() {  # package version [directory under external/web, default the package]
     local dir="$WEB/${3:-$1}"
     if [ ! -f "$dir/.version-$2" ]; then
@@ -76,6 +78,12 @@ fetch_npm milsymbol "$MILSYMBOL_VERSION"
 fetch_npm mgrs "$MGRS_VERSION"
 # Physics for the drive page (`swarm drive`), its WebAssembly inlined.
 fetch_npm @dimforge/rapier3d-compat "$RAPIER_VERSION" rapier
+# Peer-to-peer WebRTC for the duel (duel.js): Trystero over Nostr relays, as ES modules that
+# index.html and drive.html map by name.
+fetch_npm trystero "$TRYSTERO_VERSION"
+fetch_npm @trystero-p2p/nostr "$TRYSTERO_VERSION" trystero-nostr
+fetch_npm @trystero-p2p/core "$TRYSTERO_VERSION" trystero-core
+fetch_npm @noble/secp256k1 "$SECP256K1_VERSION" noble-secp256k1
 # The drone model is committed with the viewer (src/swarm/web/models/, built by swarm.fpvmodel).
 
 echo "setup complete"

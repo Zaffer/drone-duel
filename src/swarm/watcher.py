@@ -174,6 +174,8 @@ class Watcher:
             rows.append(
                 VehicleSnapshot(
                     sysid=v.sysid,
+                    link=self._fresh(v),
+                    nav=v.position_ok,
                     mode=mode_name(v.mode),
                     armed=v.armed,
                     pilot=v.armed and v.in_pilot_mode,

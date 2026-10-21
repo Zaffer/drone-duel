@@ -8,9 +8,10 @@ also streams every copter's physics (swarm.physics) to a page showing a camera f
 state as it comes, unbuffered: what a camera would see, not the telemetry; and every copter's
 ArduPilot OSD (swarm.osd), each screen as it is drawn, to lay over it. The page is
 swarm/web/, with its drone and truck models (swarm.fpvmodel, swarm.truckmodel), and
-drive.html beside it, a truck to drive on the map's 3D tiles (`swarm drive`); the libraries
-they load (CesiumJS, milsymbol, mgrs, Rapier) are in external/web/, fetched by
-scripts/setup.sh. Map keys come from the environment or .env.local.
+drive.html beside it, a truck to drive on the map's 3D tiles (`swarm drive`). The two pages
+meet in the duel peer to peer, browser to browser (duel.js), not through this server. The
+libraries they load (CesiumJS, milsymbol, mgrs, Rapier, Trystero) are in external/web/,
+fetched by scripts/setup.sh. Map keys come from the environment or .env.local.
 """
 
 import json
@@ -22,7 +23,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -67,6 +68,15 @@ CONTENT_TYPES = {
 }
 
 
+class SimControl(Protocol):
+    """The sim's copters, for the duel: a crashed drone is destroyed, and every one comes back
+    for its pilot's next turn (swarm.sim.SimStack)."""
+
+    def destroy(self, sysid: int) -> bool: ...
+
+    def reset(self) -> None: ...
+
+
 class Feed(Protocol):
     def latest(self) -> dict[int, tuple[int, Any]]:
         """Per copter: how many states so far, and the last, a dataclass."""
@@ -81,6 +91,10 @@ class Marker(TypedDict):
 
 class ViewVehicle(TypedDict):
     sysid: int
+    link: bool
+    """Its link is up: heard from lately. A destroyed drone's last report stays, link down."""
+    nav: bool
+    """Its EKF can navigate: a sim copter just restarted cannot take off until it can."""
     mode: str
     armed: bool
     pilot: bool
@@ -131,6 +145,8 @@ def to_view_frame(snap: dict[str, Any], fallback_origin: LocalFrame) -> ViewFram
         vehicles.append(
             ViewVehicle(
                 sysid=v["sysid"],
+                link=v.get("link", True),
+                nav=v.get("nav", True),
                 mode=v["mode"],
                 armed=v["armed"],
                 pilot=v.get("pilot", False),
@@ -262,6 +278,11 @@ class ViewConfig:
     land_radius_m: float = 25.0
     leader_radius_m: float = LEADER_RADIUS_M
     """Followers lift off only this close to the leader; drawn around it."""
+    point_b: tuple[float, float] | None = None
+    """Where the duel's truck starts, [lat, lon]; the telemetry's point B wins once it comes."""
+    fence: list[tuple[float, float]] = field(default_factory=list[tuple[float, float]])
+    """The fence's corners, [lat, lon] in order round; empty with the fence off. The duel's
+    truck must keep inside it."""
     host: str = "127.0.0.1"
     http_port: int = DEFAULT_HTTP_PORT
     telemetry_port: int = DEFAULT_PORT
@@ -291,6 +312,8 @@ class ViewServer:
         """Every copter's physics in the sim, for /physics; None elsewhere."""
         self.osd: OsdFeed | None = None
         """Every copter's OSD in the sim, for /osd; None elsewhere."""
+        self.sim: SimControl | None = None
+        """The sim's copters, for the duel's /sim/destroy and /sim/reset; None elsewhere."""
 
     @property
     def url(self) -> str:
@@ -310,7 +333,10 @@ class ViewServer:
             "markers": self.config.markers,
             "landRadiusM": self.config.land_radius_m,
             "leaderRadiusM": self.config.leader_radius_m,
+            "pointB": self.config.point_b,
+            "fence": self.config.fence,
             "replay": self.replay.name if self.replay else None,
+            "sim": self.sim is not None,
         }
 
     def start(self) -> None:
@@ -333,7 +359,8 @@ class ViewServer:
             t = threading.Thread(target=target, name=name, daemon=True)
             t.start()
             self._threads.append(t)
-        missing = [p for p in ("cesium", "milsymbol", "mgrs") if not (VENDOR / p).exists()]
+        libraries = ("cesium", "milsymbol", "mgrs", "trystero")
+        missing = [p for p in libraries if not (VENDOR / p).exists()]
         if missing:
             log.warning("viewer libraries missing (%s); run scripts/setup.sh", ", ".join(missing))
         log.info("3D viewer: %s", self.url)
@@ -414,6 +441,37 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 self._file(VENDOR, path.removeprefix("/vendor/"))
             else:
                 self._file(WEB, path.lstrip("/") or "index.html")
+
+        def do_POST(self) -> None:  # noqa: N802
+            """The duel's sim controls. Only from this machine, and only as JSON: a web page
+            elsewhere cannot send JSON here without a CORS preflight, which is refused."""
+            path = self.path.split("?", 1)[0]
+            sim = server.sim
+            if path not in ("/sim/destroy", "/sim/reset") or sim is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            loopback = self.client_address[0] in ("127.0.0.1", "::1")
+            json_body = self.headers.get("Content-Type", "").startswith("application/json")
+            if not loopback or not json_body:
+                self.send_error(HTTPStatus.FORBIDDEN)
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                body: Any = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self.send_error(HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/sim/destroy":
+                sysid = body.get("sysid") if isinstance(body, dict) else None
+                if not isinstance(sysid, int):
+                    self.send_error(HTTPStatus.BAD_REQUEST)
+                    return
+                done = sim.destroy(sysid)
+            else:
+                # SITL takes a few seconds to stop and start again: answer at once.
+                threading.Thread(target=sim.reset, name="sim-reset", daemon=True).start()
+                done = True
+            self._send(json.dumps({"ok": done}).encode(), ".json")
 
         def _send(self, body: bytes, suffix: str) -> None:
             self.send_response(HTTPStatus.OK)

@@ -64,8 +64,17 @@ export class TileColliders {
     this.focus = new C.Cartesian3();
     this.debug = false;
     this.stats = { tiles: 0, triangles: 0, buildMs: 0, pending: 0 };
-    tileset.tileVisible.addEventListener((tile) => this._drawn.add(tile));
-    viewer.scene.postRender.addEventListener(() => this._frame());
+    this._unlisten = [
+      tileset.tileVisible.addEventListener((tile) => this._drawn.add(tile)),
+      viewer.scene.postRender.addEventListener(() => this._frame()),
+    ];
+  }
+
+  /** Stop following the map and take the debug lines off it. The colliders go with the world. */
+  destroy() {
+    for (const off of this._unlisten) off();
+    this.setDebug(false);
+    this.built.clear();
   }
 
   /** The tiles drawn this frame that the car needs and that are not built yet, nearest first. */

@@ -96,9 +96,19 @@ export class Car {
 
     this.modelMatrix = new C.Matrix4();
     this.model = null;
+    this.scene = scene;
+    this._destroyed = false;
     C.Model.fromGltfAsync({ url: TRUCK_URI, modelMatrix: this.modelMatrix }).then((model) => {
-      this.model = scene.primitives.add(model);
+      if (this._destroyed) model.destroy();
+      else this.model = scene.primitives.add(model);
     });
+  }
+
+  /** Take the truck off the map. Its body goes with the world. */
+  destroy() {
+    this._destroyed = true;
+    if (this.model) this.scene.primitives.remove(this.model);
+    this.model = null;
   }
 
   /** Put the car at rest at local `position` heading `heading` (radians from east, CCW). */

@@ -13,6 +13,10 @@ DEFAULT_PORT = 14600
 
 class VehicleSnapshot(TypedDict):
     sysid: int
+    link: bool
+    """Its position is fresh (swarm.watcher WatcherConfig.position_stale_s): the link is up."""
+    nav: bool
+    """Its EKF can navigate (VehicleState.position_ok): it can take off in GUIDED."""
     mode: str
     armed: bool
     pilot: bool

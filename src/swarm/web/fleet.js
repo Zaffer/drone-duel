@@ -13,6 +13,10 @@
 // The camera feed (Fleet.feed) shows what a drone's camera would: in the sim, every drone
 // where its physics (swarm.physics) puts it, as each state arrives, at its real size, and the
 // truck; none of the map's symbols, labels, trails, slots or plans.
+//
+// In the duel (duelpilot.js) the other player's truck stands in for the one parked on B
+// (Fleet.duelTruck): B's truck is put away, and the range and bearing line points at theirs.
+// A drone the duel has destroyed (Fleet.lost) goes from the map until its sim brings it back.
 
 import { cameraAxes, FadeMaterialProperty, viewCorners } from "./sensor.js";
 import { poof } from "./smoke.js";
@@ -28,7 +32,7 @@ const DELAY_S = Number(new URLSearchParams(location.search).get("delay") ?? 0.25
 /** A drone's physics this old is gone: the camera feed falls back to its telemetry. */
 const PHYSICS_STALE_MS = 500;
 /** Entities the camera feed shows: real things, not map symbols. */
-const PHYSICAL_ID = /^(vehicle-\d+|target-B-truck)$/;
+const PHYSICAL_ID = /^(vehicle-\d+|target-B-truck|duel-truck)$/;
 const KEEP_SAMPLES_S = 5;
 const TRAIL_S = 120;
 const TRAIL_STEP_S = 0.5;
@@ -46,6 +50,9 @@ const TRUCK_URI = "/models/military-truck.glb";
 const TRUCK_HEADING_DEG = 0;
 /** The truck's size, mirrors included (swarm.truckmodel). */
 const TRUCK_SIZE_M = { length: 4.9, width: 2.3, height: 1.75 };
+/** The drone and truck models, for the duel's pages to draw them as the COP does. */
+export const DRONE_MODEL = { uri: MODEL_URI, scale: MODEL_SCALE, headingOffset: MODEL_HEADING_OFFSET };
+export const TRUCK_MODEL = { uri: TRUCK_URI, size: TRUCK_SIZE_M };
 /** A drone this close to the truck has struck it, allowing for GPS error. */
 const HIT_MARGIN_M = 1;
 /** A drone must get this much further away before its next hit counts, so GPS jitter at the
@@ -173,6 +180,13 @@ export class Fleet {
       for (const e of added) this._feedShow(e);
     });
     this.target = new TargetView(this);
+    /** The duel's truck (duelpilot.js) while its driver is sending it, else null:
+     * {currentPosition()}. */
+    this.duelTruck = null;
+    /** Drones out of the duel, destroyed: not drawn, whatever their last report. */
+    this.lost = new Set();
+    /** The map is the duel's drive (dueldriver.js): no fleet, symbols or plans on it. */
+    this.driving = false;
     this.parkLine = this.viewer.entities.add({
       polyline: {
         arcType: C.ArcType.NONE,
@@ -297,7 +311,7 @@ export class Fleet {
   _addRangeBearing() {
     const ends = () => {
       const from = this.vehicles.get(this.selected)?.currentPosition();
-      const to = this.target.currentPosition();
+      const to = (this.duelTruck ?? this.target).currentPosition();
       return from && to ? [from, to] : null;
     };
     const color = C.Color.fromCssColorString("#f2f5f7");
@@ -455,7 +469,7 @@ class VehicleView {
     this.physicsAt = 0;
 
     const opts = fleet.options;
-    const placed = () => this.base !== null;
+    const placed = () => this.base !== null && !fleet.lost.has(this.sysid);
     const visible = new C.CallbackProperty(() => placed() && fleet.fpv !== this.sysid, false);
     const isLeader = () => fleet.leader === this.sysid;
     const isSelected = () => fleet.isSelected(this.sysid);
@@ -735,6 +749,16 @@ class VehicleView {
     return pos && { pos, axes: this.cameraAxes(), physical: false };
   }
 
+  /** The latest frame's position and model rotation, Earth-fixed, not smoothed or delayed;
+   * undefined until the drone is placed. */
+  framePose() {
+    const v = this.data;
+    if (!v || this.base === null) return undefined;
+    const pos = this._cartesian(v.lat, v.lon, v.alt);
+    const hpr = new C.HeadingPitchRoll(v.heading + MODEL_HEADING_OFFSET, v.pitch, v.roll);
+    return { pos, quat: C.Transforms.headingPitchRollQuaternion(pos, hpr) };
+  }
+
   /** Height above home of the smoothed position. */
   currentAlt() {
     const p = this.currentPosition();
@@ -906,7 +930,7 @@ class TargetView {
         uri: TRUCK_URI,
         minimumPixelSize: 32,
         maximumScale: 20,
-        show: new C.CallbackProperty(placed, false),
+        show: new C.CallbackProperty(() => placed() && !fleet.duelTruck, false),
       },
     });
     const radius = fleet.config.landRadiusM ?? 25;
@@ -957,7 +981,7 @@ class TargetView {
   /** Puff smoke where a drone comes onto the truck. A drone already on it when the page opens
    * has not just struck it. */
   checkHits(vehicles) {
-    if (!this.latest || this.height === null) return;
+    if (!this.latest || this.height === null || this.fleet.duelTruck) return;
     for (const view of vehicles) {
       const v = view.data;
       if (!v || view.base === null) continue;

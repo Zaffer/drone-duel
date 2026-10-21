@@ -485,6 +485,397 @@ button {
   min-width: 34px;
 }
 
+/* duel panel (duelmatch.js), under the compass */
+#duel {
+  position: absolute;
+  top: 112px;
+  left: 12px;
+  width: 280px;
+  max-height: calc(100% - 200px);
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  z-index: 12;
+}
+
+#duel[hidden],
+#duel [hidden],
+#duel-final[hidden],
+#drive-notice[hidden] {
+  display: none;
+}
+
+#duel button,
+#duel-final button {
+  border: 1px solid var(--panel-edge);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+#duel button:hover:not(:disabled),
+#duel-final button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#duel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#duel .duel-primary {
+  color: var(--accent);
+  border-color: rgba(127, 227, 255, 0.45);
+  background: rgba(127, 227, 255, 0.1);
+}
+
+#duel input {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font: 13px var(--mono);
+}
+
+.duel-hint {
+  margin: 0 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.duel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.duel-code-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.duel-code-row input {
+  flex: 1;
+  letter-spacing: 0.12em;
+}
+
+.duel-code-row b {
+  flex: 1;
+  color: var(--text);
+  font: 600 16px var(--mono);
+  letter-spacing: 0.14em;
+}
+
+.duel-peer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.duel-peer i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.duel-peer.live i {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+
+.duel-status {
+  padding: 5px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.duel-status.live {
+  color: var(--accent);
+}
+
+.duel-status.over {
+  color: var(--leader);
+}
+
+.duel-score {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.duel-score div {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+
+.duel-score small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duel-score b {
+  font: 600 22px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.duel-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font: 12px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.duel-table th,
+.duel-table td {
+  padding: 3px 4px;
+  text-align: center;
+}
+
+.duel-table tr:first-child th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: normal;
+}
+
+.duel-table tr + tr {
+  border-top: 1px solid var(--panel-edge);
+}
+
+.duel-table tr th:first-child {
+  max-width: 90px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 12px var(--sans);
+}
+
+.duel-table th i {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: normal;
+}
+
+.duel-table td {
+  color: var(--muted);
+}
+
+.duel-table td.done {
+  color: var(--text);
+}
+
+.duel-table td.now {
+  border-radius: 4px;
+  color: var(--accent);
+  background: rgba(127, 227, 255, 0.12);
+}
+
+.duel-table td.total {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.duel-table tr.win td.total,
+.duel-table tr.win th:first-child {
+  color: var(--leader);
+}
+
+.duel-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.duel-rules label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.duel-note {
+  min-height: 16px;
+  margin-top: 6px;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.duel-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.duel-buttons .duel-primary {
+  flex: 1;
+}
+
+/* the final score, over the map */
+#duel-final {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 30;
+}
+
+.duel-final-card {
+  width: min(440px, 100%);
+  padding: 20px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.duel-final-title {
+  color: var(--leader);
+  font: 700 24px var(--sans);
+}
+
+.duel-final-note {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.duel-final-card .duel-table {
+  margin: 14px 0;
+  font-size: 15px;
+}
+
+/* the duel's driver: the map is the drive page (dueldriver.js) */
+body.driving #fleet,
+body.driving #toolbar,
+body.driving #compass,
+body.driving #status,
+body.driving #fpv,
+body:not(.driving) .drive-only {
+  display: none;
+}
+
+.drive-panel {
+  position: absolute;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel);
+  font: 12px/1.5 var(--mono);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.drive-panel[hidden] {
+  display: none;
+}
+
+#drive-hud {
+  right: 12px;
+  bottom: 28px;
+  min-width: 190px;
+}
+
+#drive-hud .speed {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+#drive-hud .speed small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#drive-hud .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+}
+
+#drive-hud .row b {
+  color: var(--text);
+  font-weight: normal;
+}
+
+#drive-help {
+  left: 12px;
+  bottom: 28px;
+  color: var(--muted);
+}
+
+#drive-help b {
+  display: inline-block;
+  min-width: 74px;
+  color: var(--text);
+  font-weight: normal;
+}
+
+#drive-notice {
+  left: 50%;
+  top: 40%;
+  transform: translateX(-50%);
+  color: var(--accent);
+  font-size: 15px;
+}
+
+#hit-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 160px 40px rgba(255, 40, 40, 0.85);
+  z-index: 9;
+}
+
+#hit-flash.on {
+  animation: hit-flash 0.9s ease-out;
+}
+
+@keyframes hit-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 /* compass */
 #compass {
   position: absolute;
@@ -786,6 +1177,18 @@ body.camera-feed #compass {
   #toolbar {
     max-width: calc(100% - 24px);
     bottom: 60px;
+  }
+
+  #duel {
+    top: 56px;
+    left: 66px;
+    right: 12px;
+    width: auto;
+    max-height: calc(100% - 330px);
+  }
+
+  #drive-help {
+    display: none;
   }
 
   #status {

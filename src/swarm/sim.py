@@ -10,6 +10,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,6 +101,10 @@ class SimStack:
     wipe_params: bool = True
     """Delete each instance's eeprom.bin so every run starts from the parameter files."""
     _procs: list[subprocess.Popen[bytes]] = field(default_factory=list, init=False)
+    """mavlink-router and QGroundControl."""
+    _copters: dict[int, subprocess.Popen[bytes]] = field(default_factory=dict, init=False)
+    """Each copter's SITL, by instance index."""
+    _copters_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _home_alt_m: float = field(default=0.0, init=False)
 
     @property
@@ -166,10 +171,39 @@ class SimStack:
         self._procs.append(qgc)
         return qgc
 
-    def _start_copter(self, index: int) -> None:
+    def destroy(self, sysid: int) -> bool:
+        """Stop copter `sysid` dead, as if destroyed: its link goes quiet where it was. False
+        when there is no such copter, or it is down already."""
+        with self._copters_lock:
+            proc = self._copters.get(sysid - 1)
+            if proc is None or proc.poll() is not None:
+                return False
+            proc.kill()
+            proc.wait()
+        log.info("copter %d destroyed", sysid)
+        return True
+
+    def reset(self) -> None:
+        """Restart every copter on the ground where it started, destroyed ones too. Each keeps
+        the parameters and fence the stack gave it; mavlink-router reconnects to it."""
+        with self._copters_lock:
+            for proc in self._copters.values():
+                if proc.poll() is None:
+                    proc.terminate()
+            for index, proc in list(self._copters.items()):
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                self._start_copter(index, wipe=False)
+        log.info("copters reset to their starts")
+
+    def _start_copter(self, index: int, wipe: bool | None = None) -> None:
+        """Start copter `index`'s SITL; `wipe` its parameters, by default as `wipe_params`."""
         instance_dir = LOGS / "sitl" / str(index)
         instance_dir.mkdir(parents=True, exist_ok=True)
-        if self.wipe_params:
+        if self.wipe_params if wipe is None else wipe:
             (instance_dir / "eeprom.bin").unlink(missing_ok=True)
         shutil.copyfile(FRAME_MODEL, instance_dir / FRAME_MODEL.name)
         defaults = [DEFAULT_PARAMS, FRAME_PARAMS, SWARM_PARAMS]
@@ -207,7 +241,7 @@ class SimStack:
         else:
             link = f"tcp:127.0.0.1:{SITL_BASE_PORT + SITL_PORT_STRIDE * index}"
         out = (instance_dir / "arducopter.log").open("wb")
-        self._procs.append(subprocess.Popen(cmd, cwd=instance_dir, stdout=out, stderr=out))
+        self._copters[index] = subprocess.Popen(cmd, cwd=instance_dir, stdout=out, stderr=out)
         log.info("copter %d: %s", index + 1, link)
 
     def _wait_for_router(self, timeout_s: float = 60.0) -> None:
@@ -226,7 +260,7 @@ class SimStack:
         raise SimStackError(f"mavlink-router ({self.router}.conf) did not open every copter")
 
     def _check_alive(self) -> None:
-        for p in self._procs:
+        for p in [*self._copters.values(), *self._procs]:
             if p.poll() is not None and p.args and str(p.args[0]) != str(QGC):  # type: ignore[index]
                 raise SimStackError(f"{Path(str(p.args[0])).name} exited with {p.returncode}")  # type: ignore[index]
 
@@ -244,15 +278,18 @@ class SimStack:
             time.sleep(0.5)
 
     def stop(self) -> None:
-        for p in reversed(self._procs):
-            if p.poll() is None:
-                p.terminate()
-        for p in self._procs:
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                p.kill()
-        self._procs.clear()
+        with self._copters_lock:
+            procs = [*reversed(self._procs), *self._copters.values()]
+            for p in procs:
+                if p.poll() is None:
+                    p.terminate()
+            for p in procs:
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            self._procs.clear()
+            self._copters.clear()
 
 
 def ports_in_use(ports: list[int], kind: int = socket.SOCK_STREAM) -> list[int]:

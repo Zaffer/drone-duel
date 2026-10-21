@@ -1,9 +1,10 @@
 import socket
+import subprocess
 
 import pytest
 
 from swarm.settings import load_settings
-from swarm.sim import ports_in_use
+from swarm.sim import SimStack, ports_in_use
 
 FIELD = load_settings().field
 
@@ -28,3 +29,30 @@ def test_ports_in_use_finds_a_listener() -> None:
         port = sock.getsockname()[1]
         assert ports_in_use([port]) == [port]
     assert ports_in_use([port]) == []
+
+
+def test_a_destroyed_copter_stops_and_reset_restarts_every_copter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = SimStack(sim_field=FIELD, count=2)
+    started: list[tuple[int, bool | None]] = []
+
+    def start(index: int, wipe: bool | None = None) -> None:
+        started.append((index, wipe))
+        stack._copters[index] = subprocess.Popen(["sleep", "30"])  # pyright: ignore[reportPrivateUsage]
+
+    monkeypatch.setattr(stack, "_start_copter", start)
+    for i in range(2):
+        start(i)
+    first = stack._copters[1]  # pyright: ignore[reportPrivateUsage]
+    try:
+        assert stack.destroy(2)
+        assert first.poll() is not None
+        assert not stack.destroy(2)  # down already
+        assert not stack.destroy(9)  # no such copter
+        started.clear()
+        stack.reset()
+        assert started == [(0, False), (1, False)]  # parameters kept
+        assert all(p.poll() is None for p in stack._copters.values())  # pyright: ignore[reportPrivateUsage]
+    finally:
+        stack.stop()

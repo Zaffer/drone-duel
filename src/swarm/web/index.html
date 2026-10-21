@@ -16,6 +16,17 @@
     <script src="/vendor/mgrs/dist/mgrs.min.js"></script>
     <link rel="stylesheet" href="/vendor/cesium/Build/Cesium/Widgets/widgets.css" />
     <link rel="stylesheet" href="/style.css" />
+    <!-- Trystero for the duel (duel.js): its packages import each other by name. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "trystero": "/vendor/trystero/dist/index.mjs",
+          "@trystero-p2p/nostr": "/vendor/trystero-nostr/dist/index.mjs",
+          "@trystero-p2p/core": "/vendor/trystero-core/dist/index.mjs",
+          "@noble/secp256k1": "/vendor/noble-secp256k1/index.js"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="map"></div>
@@ -63,6 +74,9 @@
       <div class="group">
         <button data-action="camera" title="The selected drone's camera feed: in the sim, every drone where it really is (C)">Camera feed</button>
       </div>
+      <div class="group">
+        <button data-action="duel" id="duel-btn" title="Duel: another player drives the truck; strike it with the drones (D)">Duel</button>
+      </div>
     </nav>
 
     <button id="compass" title="North up">
@@ -84,6 +98,73 @@
       <div class="fpv-bottom"><span id="fpv-hdg"></span><span id="fpv-mode"></span><span id="fpv-cam"></span></div>
       <button class="fpv-exit" id="fpv-exit" data-action="exit">Exit FPV (Esc)</button>
     </div>
+
+    <section id="duel" hidden aria-label="Duel">
+      <div class="panel-title">DUEL
+        <button class="panel-action" data-action="duel" title="Hide (D)">HIDE</button></div>
+      <form id="duel-join">
+        <p class="duel-hint">Each player runs their own sim and COP. One opens a room and flies
+          first; the other joins with its code. Each turn one flies the drones at the other's
+          truck, then they swap.</p>
+        <label class="duel-field">Your name
+          <input id="duel-name" maxlength="24" spellcheck="false" autocomplete="off" placeholder="Player" /></label>
+        <div class="duel-code-row">
+          <input id="duel-code" maxlength="32" spellcheck="false" autocomplete="off" aria-label="Room code" />
+          <button type="button" id="duel-new-code" title="Another code">↻</button>
+        </div>
+        <div class="duel-buttons">
+          <button type="submit" class="duel-primary" data-as="host" title="Open this room: you fly first">Open room</button>
+          <button type="submit" data-as="guest" title="Join the room with this code">Join</button>
+        </div>
+      </form>
+      <div id="duel-room" hidden>
+        <div class="duel-code-row">ROOM <b id="duel-code-out"></b>
+          <button id="duel-copy" title="Copy the room code">Copy</button></div>
+        <div class="duel-peer" id="duel-peer"><i></i><span></span></div>
+        <div class="duel-status" id="duel-status"></div>
+        <div class="duel-score" id="duel-clock">
+          <div><small>TIME</small><b id="duel-time"></b></div>
+          <div><small>STRIKES · <span id="duel-flier"></span></small><b id="duel-strikes"></b></div>
+        </div>
+        <table class="duel-table" id="duel-table"></table>
+        <div class="duel-rules">
+          <label>Rounds <input type="number" id="duel-rounds" min="1" max="5" /></label>
+          <label>Minutes a turn <input type="number" id="duel-minutes" min="1" max="10" /></label>
+        </div>
+        <div class="duel-note" id="duel-note"></div>
+        <div class="duel-buttons">
+          <button id="duel-action" class="duel-primary"></button>
+          <button id="duel-leave">Leave</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="duel-final" hidden role="dialog" aria-label="Final score">
+      <div class="duel-final-card">
+        <div class="duel-final-title" id="duel-final-title"></div>
+        <div class="duel-final-note" id="duel-final-note"></div>
+        <table class="duel-table" id="duel-final-table"></table>
+        <button id="duel-final-close">Close</button>
+      </div>
+    </div>
+
+    <!-- The duel's driver (dueldriver.js): the map is the drive page. -->
+    <div class="drive-only drive-panel" id="drive-hud">
+      <div class="speed"><span id="drive-speed">0</span> <small>km/h</small></div>
+      <div class="row">wheels down <b id="drive-wheels">–</b></div>
+      <div class="row">nearest drone <b id="drive-near">–</b></div>
+      <div class="row">camera <b id="drive-cam">–</b></div>
+    </div>
+    <div class="drive-only drive-panel" id="drive-help">
+      <div><b>W A S D</b>drive, steer (or arrows)</div>
+      <div><b>S</b>brake, then reverse</div>
+      <div><b>Space</b>handbrake</div>
+      <div><b>R</b>reset upright</div>
+      <div><b>C</b>camera</div>
+      <div><b>H</b>hide this</div>
+    </div>
+    <div class="drive-panel" id="drive-notice" hidden></div>
+    <div id="hit-flash"></div>
 
     <footer id="status">
       <span id="cursor-mgrs" title="Cursor position (MGRS)">MGRS —</span>

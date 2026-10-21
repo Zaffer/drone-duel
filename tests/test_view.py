@@ -237,6 +237,73 @@ def test_config_and_page_are_served(server: str) -> None:
         assert b"drive.js" in r.read()
 
 
+def test_config_carries_the_duels_field() -> None:
+    fence = [(1.0, 2.0), (1.0, 2.1), (1.1, 2.1)]
+    config = ViewConfig(markers=[], point_b=(1.05, 2.05), fence=fence)
+    page = ViewServer(config, FALLBACK).page_config()
+    assert json.loads(json.dumps(page))["pointB"] == [1.05, 2.05]
+    assert json.loads(json.dumps(page))["fence"] == [[1.0, 2.0], [1.0, 2.1], [1.1, 2.1]]
+    assert ViewServer(ViewConfig(markers=[]), FALLBACK).page_config()["fence"] == []
+
+
+class FakeSim:
+    def __init__(self) -> None:
+        self.destroyed: list[int] = []
+        self.resets = 0
+
+    def destroy(self, sysid: int) -> bool:
+        self.destroyed.append(sysid)
+        return True
+
+    def reset(self) -> None:
+        self.resets += 1
+
+
+def _post(url: str, body: object, content_type: str = "application/json") -> int:
+    request = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers={"Content-Type": content_type}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as r:
+            return r.status
+    except urllib.error.HTTPError as err:
+        return err.code
+
+
+def test_the_duel_destroys_and_resets_the_sims_copters(tmp_path: Path) -> None:
+    log = tmp_path / "run.jsonl"
+    log.write_text(json.dumps(_snapshot()) + "\n")
+    s = ViewServer(ViewConfig(markers=[], http_port=0), FALLBACK, replay=log)
+    s.start()
+    assert s._httpd is not None  # pyright: ignore[reportPrivateUsage]
+    url = f"http://127.0.0.1:{s._httpd.server_address[1]}"  # pyright: ignore[reportPrivateUsage]
+    try:
+        assert s.page_config()["sim"] is False
+        assert _post(f"{url}/sim/destroy", {"sysid": 2}) == 404  # not a sim
+        sim = FakeSim()
+        s.sim = sim
+        assert s.page_config()["sim"] is True
+        assert _post(f"{url}/sim/destroy", {"sysid": 2}) == 200
+        assert _post(f"{url}/sim/destroy", {"sysid": "2"}) == 400
+        assert _post(f"{url}/sim/destroy", {"sysid": 3}, "text/plain") == 403  # a form post
+        assert _post(f"{url}/sim/reset", {}) == 200
+        deadline = time.monotonic() + 2
+        while sim.resets == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (sim.destroyed, sim.resets) == ([2], 1)
+    finally:
+        s.stop()
+
+
+def test_old_logs_have_every_link_up_and_navigating() -> None:
+    vehicle = to_view_frame(_snapshot(), FALLBACK)["vehicles"][0]
+    assert (vehicle["link"], vehicle["nav"]) == (True, True)
+    snap = _snapshot()
+    snap["vehicles"][0].update(link=False, nav=False)
+    vehicle = to_view_frame(snap, FALLBACK)["vehicles"][0]
+    assert (vehicle["link"], vehicle["nav"]) == (False, False)
+
+
 def test_files_outside_the_web_roots_are_not_served(server: str) -> None:
     for path in ("/../view.py", "/vendor/../../pyproject.toml", "/%2e%2e/view.py", "/nope.js"):
         with pytest.raises(urllib.error.HTTPError) as err:

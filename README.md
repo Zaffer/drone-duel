@@ -509,6 +509,45 @@ turns off Cesium's own camera collision (`enableCollision`): it reads triangles 
 camera every frame the camera moves, a tenth of the frame time. The chase camera stays out of
 walls with a ray cast on the colliders instead.
 
+### Duel
+
+A match between two players, each on their own machine with their own sim and COP. In each
+turn one player is the pilot: they fly the mission with their five drones and strike the other
+player's truck. The other drives the truck, in their COP, and keeps away. Then they swap. Both
+need `GOOGLE_MAPS_API_KEY`. The two COPs meet browser to browser over WebRTC
+([Trystero](https://github.com/dmotz/trystero), fetched by `scripts/setup.sh`). Public Nostr
+relays set the connection up; after that no server sits between them.
+
+1. Each player runs `uv run swarm fly` (or `swarm sim` and `swarm pilot`) and opens the COP.
+2. One presses **Duel** (`D`), types a name and opens a room. They are the host and fly first.
+   The other joins with the room's code.
+3. The host sets the rounds (up to 5) and the minutes a turn (2 by default), and starts the
+   match. In each round both players have a turn as the pilot, the host first.
+4. The driver's COP turns into the drive: the truck on the pilot's point B, the pilot's fence as
+   a red wall, the drones as they come, each with its range. The pilot sees the truck in place
+   of the one parked on B, and the range and bearing line points at it.
+5. The pilot starts the turn once their drones are ready, on the ground at home. They fly the
+   mission as they like: the swarm, or one drone at a time. The truck goes back to B.
+6. Each drone that strikes the truck scores a point. A turn ends when its time is up or the
+   pilot has no drone left. The panel keeps the tally, round by round; the match ends after the
+   last round, or sooner once the trailing player can no longer catch up, with the final score
+   over the map.
+
+A drone is out, its link gone as if destroyed, once it strikes the truck or crashes: at the
+ground after it has flown, inside the map's 3D tiles (a tree, a building, a hill, by 1 m or
+more), or into another drone. Only LAND puts one down safely; a stick landing, RTL's or AUTO's
+counts as a crash. The pilot's COP judges all of it on what its pilot sees, and has the sim
+stop that copter's SITL (`POST /sim/destroy`). When a player's turn ends their sim restarts
+every copter where it began, its parameters kept (`POST /sim/reset`); a restarted copter needs
+about 30 s for its GPS position, and Start turn waits for it. On real drones nothing is
+stopped: an out drone only leaves the map.
+
+A truck outside the fence for 5 s goes back to its last place inside. `?room=CODE&as=host` (or
+`as=guest`) on the COP's address opens the room on load; the host's page keeps the match
+through a reload, and a turn under way when a player leaves starts again. Peers behind strict
+NATs may not connect without a TURN server; the pages report it. Every message is in
+`src/swarm/web/duel.js`.
+
 ## Sim airframe: a 5 inch quad
 
 SITL flies `sitl/fpv5.json`, a typical 5 inch freestyle quad X, with the tune in

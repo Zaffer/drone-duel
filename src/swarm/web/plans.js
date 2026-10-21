@@ -151,8 +151,8 @@ class PlanView {
 
   update() {
     const opts = this.layer.options;
-    // A camera does not see plans (Fleet.feed).
-    const map = !this.fleet.feed;
+    // A camera does not see plans (Fleet.feed), nor does the duel's driver (Fleet.driving).
+    const map = !this.fleet.feed && !this.fleet.driving;
     this.mission.show = map && Boolean(opts.mission);
     // Every drone carries its own fence around its own home; with drones metres apart they
     // overlap, so the fence is drawn for the selected drone only.
