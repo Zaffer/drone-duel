@@ -13,6 +13,7 @@
 import { packPose, PoseTrack } from "./duel.js";
 import { callsign, TRUCK_MODEL } from "./fleet.js";
 import { poof } from "./smoke.js";
+import { sfx } from "./sounds.js";
 
 const C = Cesium;
 
@@ -33,6 +34,8 @@ const OBSTACLE_M = 1;
 /** Two 5 inch quads this close, centre to centre, have collided. */
 const COLLIDE_M = 0.6;
 const TRUCK_CSS = "#ff5a5a";
+/** The score's sound comes this long after the strike's. */
+const SCORE_AFTER_MS = 180;
 
 /** POST to the viewer's sim controls (swarm.view); a failure is only logged. */
 export function simPost(path, body = {}) {
@@ -201,7 +204,10 @@ export class PilotRole {
     this._onTruck.delete(sysid);
     poof(this.viewer.scene, at);
     if (tellDriver) this.link.send("lost", { sysid, at: [at.x, at.y, at.z], why });
-    if (why) this.toast(`${callsign(sysid)} ${why}: out`, "bad");
+    if (why) {
+      this.toast(`${callsign(sysid)} ${why}: out`, "bad");
+      sfx.play("crash");
+    }
     if (this.config.sim) simPost("/sim/destroy", { sysid });
     const all = [...this.fleet.vehicles.keys()];
     if (all.length && all.every((s) => this.fleet.lost.has(s))) this.match.pilotOut();
@@ -243,12 +249,14 @@ export class PilotRole {
   _strike(sysid, at) {
     const counted = this.match.state.phase === "live";
     this.link.send("hit", { sysid, at: [at.x, at.y, at.z], counted });
+    sfx.play("strike");
     if (!counted) {
       poof(this.viewer.scene, at);
       this.toast(`${callsign(sysid)} struck the truck (before the turn: no score)`);
       return;
     }
     this.toast(`${callsign(sysid)} struck the truck: +1`, "leader");
+    setTimeout(() => sfx.play("score"), SCORE_AFTER_MS);
     this.match.hitBy(sysid);
     this._out(sysid, at, "", false); // spent
   }

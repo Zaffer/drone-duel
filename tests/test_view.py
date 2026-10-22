@@ -235,6 +235,8 @@ def test_config_and_page_are_served(server: str) -> None:
         assert b"app.js" in r.read()
     with urllib.request.urlopen(f"{server}/drive.html") as r:
         assert b"drive.js" in r.read()
+    with urllib.request.urlopen(f"{server}/sounds.html") as r:
+        assert b"soundlab.js" in r.read()
 
 
 def test_config_carries_the_duels_field() -> None:
@@ -293,6 +295,41 @@ def test_the_duel_destroys_and_resets_the_sims_copters(tmp_path: Path) -> None:
         assert (sim.destroyed, sim.resets) == ([2], 1)
     finally:
         s.stop()
+
+
+class FakeRadio:
+    def __init__(self) -> None:
+        self.now: list[float] | None = None
+        self.stopped = False
+
+    def channels(self) -> list[float] | None:
+        return self.now
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def test_radio_streams_each_change_of_its_channels(tmp_path: Path) -> None:
+    log = tmp_path / "run.jsonl"
+    log.write_text(json.dumps(_snapshot()) + "\n")
+    s = ViewServer(ViewConfig(markers=[], http_port=0), FALLBACK, replay=log)
+    radio = FakeRadio()
+    s.radio = radio
+    s.start()
+    assert s._httpd is not None  # pyright: ignore[reportPrivateUsage]
+    url = f"http://127.0.0.1:{s._httpd.server_address[1]}"  # pyright: ignore[reportPrivateUsage]
+    try:
+        with urllib.request.urlopen(f"{url}/radio", timeout=5) as r:
+            seen: list[object] = []
+            while len(seen) < 2:
+                line = r.readline().decode()
+                if line.startswith("data: "):
+                    seen.append(json.loads(line.removeprefix("data: ")))
+                    radio.now = [0.0, 0.5, -1.0, 0.0, 1.0, 0.0, -1.0, -1.0]
+        assert seen == [None, [0.0, 0.5, -1.0, 0.0, 1.0, 0.0, -1.0, -1.0]]
+    finally:
+        s.stop()
+    assert radio.stopped
 
 
 def test_old_logs_have_every_link_up_and_navigating() -> None:

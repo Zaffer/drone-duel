@@ -6,6 +6,8 @@
 // the tiles drawn near the car become its colliders (tilecolliders.js).
 
 import { Car } from "./car.js";
+import { DriveRadio, isRadio } from "./driveradio.js";
+import { sfx } from "./sounds.js";
 import { TileColliders } from "./tilecolliders.js";
 
 const C = Cesium;
@@ -19,6 +21,10 @@ const GROUND_PROBE = { up: 60, down: 200 };
 const AUTO_RIGHT_MS = 2500;
 /** Outside the fence (`outside`), the car goes back inside after this long. */
 const OUTSIDE_FENCE_S = 5;
+/** The truck's sideways or forward speed changing this much in a frame, m/s, is a bump. */
+const BUMP_DV_MS = 2.5;
+/** No bump this long after the truck is put down: its speed jumps to nothing. */
+const BUMP_QUIET_MS = 500;
 const CAMERAS = {
   chase: { back: 9, up: 3.4, look: 1.4 },
   far: { back: 22, up: 9, look: 1 },
@@ -44,7 +50,8 @@ export class DriveSession {
    * @param {import("./basemap.js").BaseMap} map a map on Google 3D tiles
    * @param {{lat: number, lon: number, headingDeg?: number, ui?: object}} start `ui`: the
    *   page's `notice(text)` and its HUD elements, each optional: speed, wheels, tiles, tris,
-   *   pending, buildMs, physMs, fps, camMode, help (shown and hidden with H)
+   *   pending, buildMs, physMs, fps, camMode, help (shown and hidden with H), radio (the
+   *   radio's panel, driveradio.js)
    */
   static async start(map, { lat, lon, headingDeg = 0, ui = {} }) {
     const R = await loadRapier();
@@ -79,12 +86,18 @@ export class DriveSession {
     this.onFarMove = null;
     this.dblClickMoves = false;
     this.keys = new Set();
+    this.radio = new DriveRadio({ panel: ui.radio, notice: (text) => this._notice(text) });
     this.cameraMode = "chase";
     this.cameraHeading = this.placing.heading;
     this._lastGoodT = 0;
     this._stuckSince = null;
     this._outsideSince = null;
     this._lastInside = null;
+    this._fenceSecond = null;
+    this.engine = sfx.engine();
+    /** The truck's level velocity last frame, for bumps, and no bumps till then. */
+    this._vel = null;
+    this._quietUntil = 0;
     this._last = performance.now();
     this._acc = 0;
     this._hud = { physMs: 0, frames: 0, fpsT: this._last, fps: 0, worstMs: 0, shownWorstMs: 0 };
@@ -97,6 +110,8 @@ export class DriveSession {
   /** Stop driving: the truck, its colliders, keys and camera go; the map's camera is back. */
   destroy() {
     for (const off of this._unlisten) off();
+    this.engine.stop();
+    this.radio.destroy();
     this._handler.destroy();
     this.ground.destroy();
     this.car.destroy();
@@ -118,6 +133,7 @@ export class DriveSession {
   /** Put the car at local (x, y), heading radians from east, CCW, once there is ground. */
   placeAt(x, y, heading, z = 0) {
     this.placing = { x, y, heading, z };
+    this.radio.rearm();
     this.car.body.setEnabled(false);
     this._notice("Loading the ground…");
   }
@@ -146,6 +162,7 @@ export class DriveSession {
         this.setCamera(CAMERA_NAMES[(i + 1) % CAMERA_NAMES.length]);
       }
       if (e.code === "KeyG") this.ground.setDebug(!this.ground.debug);
+      if (e.code === "KeyM") sfx.toggle();
       if (e.code === "KeyH" && this.ui.help) this.ui.help.hidden = !this.ui.help.hidden;
     };
     const onKeyUp = (e) => this.keys.delete(e.code);
@@ -188,11 +205,19 @@ export class DriveSession {
     this.car.body.setEnabled(true);
     this.placing = null;
     this._notice(null);
+    this._quiet();
   }
 
   _resetUpright() {
     const t = this.car.body.translation();
     this.car.place({ x: t.x, y: t.y, z: t.z + 1.5 }, this.car.heading);
+    this._quiet();
+  }
+
+  /** The truck has just been put down: its jump in speed is no bump. */
+  _quiet() {
+    this._vel = null;
+    this._quietUntil = performance.now() + BUMP_QUIET_MS;
   }
 
   _controls() {
@@ -200,8 +225,15 @@ export class DriveSession {
     let throttle = (down("KeyW", "ArrowUp") ? 1 : 0) - (down("KeyS", "ArrowDown") ? 1 : 0);
     let steer = (down("KeyA", "ArrowLeft") ? 1 : 0) - (down("KeyD", "ArrowRight") ? 1 : 0);
     let handbrake = down("Space");
+    const radio = this.radio.read(this.placed);
+    if (radio) {
+      if (radio.steer !== 0) steer = radio.steer;
+      if (radio.throttle !== 0) throttle = radio.throttle;
+      handbrake ||= radio.handbrake;
+      if (radio.reset && this.placed) this._resetUpright();
+    }
     for (const pad of navigator.getGamepads?.() ?? []) {
-      if (!pad) continue;
+      if (!pad || isRadio(pad)) continue;
       const stick = pad.axes[0] ?? 0;
       if (Math.abs(stick) > 0.08) steer = -stick;
       const gas = pad.buttons[7]?.value ?? 0;
@@ -237,6 +269,9 @@ export class DriveSession {
       this.ground.focus = new C.Cartesian3(t.x, t.y, t.z);
       this._guardFall(t);
       this._guardFence(t);
+      this._sound(input);
+    } else {
+      this.engine.update(0, 0, false);
     }
     car.draw();
     if (car.model) car.model.show = !this.placing;
@@ -276,6 +311,17 @@ export class DriveSession {
     }
   }
 
+  /** The engine at the truck's speed and throttle; a bump when it stops short on something. */
+  _sound(input) {
+    this.engine.update(this.car.speed, input.throttle);
+    const v = this.car.body.linvel();
+    const prev = this._vel;
+    this._vel = { x: v.x, y: v.y };
+    if (!prev || performance.now() < this._quietUntil) return;
+    const dv = Math.hypot(v.x - prev.x, v.y - prev.y);
+    if (dv > BUMP_DV_MS) sfx.play("bump", { intensity: (dv - BUMP_DV_MS) / 8 });
+  }
+
   /** The car outside the fence goes back in after OUTSIDE_FENCE_S, turned round. */
   _guardFence(t) {
     if (!this.outside) return;
@@ -283,6 +329,7 @@ export class DriveSession {
     if (!this.outside(t.x, t.y)) {
       if (this._outsideSince !== null) this._notice(null);
       this._outsideSince = null;
+      this._fenceSecond = null;
       if (this.car.wheelsOnGround >= 3) this._lastInside = { x: t.x, y: t.y, z: t.z, heading: this.car.heading };
       return;
     }
@@ -290,18 +337,21 @@ export class DriveSession {
     const left = OUTSIDE_FENCE_S - (now - this._outsideSince) / 1000;
     if (left > 0) {
       this._notice(`Outside the fence: back inside in ${Math.ceil(left)} s`);
+      if (Math.ceil(left) !== this._fenceSecond) sfx.play("fence");
+      this._fenceSecond = Math.ceil(left);
       return;
     }
     this._outsideSince = null;
+    this._fenceSecond = null;
     const back = this._lastInside ?? { x: 0, y: 0, z: 0, heading: this.car.heading };
     this.placeAt(back.x, back.y, back.heading + Math.PI, back.z);
   }
 
-  /** Point the camera from local `eye` at local `target`. */
-  _look(eye, target) {
+  /** Point the camera from local `eye` at local `target`, its top towards local `skyward`. */
+  _look(eye, target, skyward = C.Cartesian3.UNIT_Z) {
     const V = C.Cartesian3;
     const direction = V.normalize(V.subtract(target, eye, new V()), new V());
-    const right = V.normalize(V.cross(direction, V.UNIT_Z, new V()), new V());
+    const right = V.normalize(V.cross(direction, skyward, new V()), new V());
     const up = V.cross(right, direction, new V());
     const rot = C.Matrix4.getMatrix3(this.localToFixed, new C.Matrix3());
     this.viewer.camera.setView({
@@ -329,7 +379,9 @@ export class DriveSession {
       const m = C.Matrix3.fromQuaternion(new C.Quaternion(q.x, q.y, q.z, q.w));
       const eye = C.Matrix3.multiplyByVector(m, new C.Cartesian3(0.9, 0, 2.05), new C.Cartesian3());
       const ahead = C.Matrix3.multiplyByVector(m, new C.Cartesian3(20, 0, 1.6), new C.Cartesian3());
-      this._look(C.Cartesian3.add(eye, t, eye), C.Cartesian3.add(ahead, t, ahead));
+      // The truck's own up: the view rolls with it, upside down on its roof.
+      const roof = C.Matrix3.multiplyByVector(m, C.Cartesian3.UNIT_Z, new C.Cartesian3());
+      this._look(C.Cartesian3.add(eye, t, eye), C.Cartesian3.add(ahead, t, ahead), roof);
       return;
     }
     const rig = CAMERAS[this.cameraMode];

@@ -495,8 +495,17 @@ Or open http://localhost:8600/drive.html on a viewer that is already running (`s
 
 Keys: `W` `A` `S` `D` or the arrows drive and steer (`S` brakes, then reverses), `Space`
 handbrake, `R` puts the truck back on its wheels, `C` cameras (chase, far, hood, free), `G` shows
-the colliders, `H` hides the help. A gamepad works: left stick steers, the right trigger
-accelerates, the left brakes. Double-click the map to move the truck there.
+the colliders, `M` turns the sound on and off, `H` hides the help. A gamepad works: left stick steers, the right trigger
+accelerates, the left brakes. So does the drone radio in joystick mode, with a panel of its own
+(`driveradio.js`): the throttle, its full travel, drives in the gear a switch picks (forward,
+neutral, reverse, which brakes first), a stick steers, a switch is the handbrake and a flick of
+another resets the truck. The panel shows each live, and every channel; **Set** on a row, then
+moving that stick or switch where the panel asks, picks its channel and which way round it is,
+kept in the browser. Out of the box: throttle CH3, steer CH4 (yaw), gear CH6, handbrake CH5,
+reset CH7. The page gets the radio from the viewer (`/radio`), which reads it from Linux like
+`swarm pilot` does (`swarm.radio.RadioReader`): Chrome's Gamepad API on Linux misses most of
+a drone radio's axes. The throttle stick stays where it is left, so it drives nothing until it has been at
+the bottom once each time the truck is placed. Double-click the map to move the truck there.
 
 [Rapier](https://rapier.rs) (WebAssembly) runs the truck as a ray-cast vehicle: a 2.2 t box
 chassis on four sprung wheel rays, in an east-north-up frame round the start. The ground is the
@@ -547,6 +556,21 @@ A truck outside the fence for 5 s goes back to its last place inside. `?room=COD
 through a reload, and a turn under way when a player leaves starts again. Peers behind strict
 NATs may not connect without a TURN server; the pages report it. Every message is in
 `src/swarm/web/duel.js`.
+
+### Sound
+
+The pages make their sounds in the browser with Web Audio (`src/swarm/web/sounds.js`), with no
+files to fetch. In the duel: a strike (and the score, for the pilot), a drone down, a turn
+starting and ending, the last 10 seconds, the match won or lost, the opponent coming and
+going. While driving: the truck's engine, following its speed and throttle through four gears,
+a bump when it hits something, a warning each second outside the fence, and, in a turn, a ping
+that quickens as the nearest drone closes on the truck.
+
+Each sound has three or four variants. http://localhost:8600/sounds.html (**Choose…** in the
+COP's toolbar) plays each one as the game would and keeps the choice, with the volume, in the
+browser's local storage. The COP and the drive page pick a change up straight away. Any sound
+can be off. **Sound** in the toolbar, or `M` while driving, turns all of it off. Browsers start
+audio only after a click or a key on the page, and a hidden page is silent.
 
 ## Sim airframe: a 5 inch quad
 

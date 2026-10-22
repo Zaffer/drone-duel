@@ -49,6 +49,8 @@ KEEPALIVE_S = 15.0
 FEED_POLL_S = 0.002
 """How often a feed stream (/physics, /osd) looks for new states: at most this much added
 delay."""
+RADIO_POLL_S = 0.01
+"""How often /radio looks at the radio: the truck's controls, 100 times a second at most."""
 MAP_KEYS = ("CESIUM_ION_TOKEN", "GOOGLE_MAPS_API_KEY")
 """Optional map provider keys, read from the environment or .env.local."""
 CONTENT_TYPES = {
@@ -75,6 +77,14 @@ class SimControl(Protocol):
     def destroy(self, sysid: int) -> bool: ...
 
     def reset(self) -> None: ...
+
+
+class RadioSource(Protocol):
+    """The radio's channels for the drive page's truck (swarm.radio.RadioReader)."""
+
+    def channels(self) -> list[float] | None: ...
+
+    def stop(self) -> None: ...
 
 
 class Feed(Protocol):
@@ -314,6 +324,9 @@ class ViewServer:
         """Every copter's OSD in the sim, for /osd; None elsewhere."""
         self.sim: SimControl | None = None
         """The sim's copters, for the duel's /sim/destroy and /sim/reset; None elsewhere."""
+        self.radio: RadioSource | None = None
+        """The radio, for /radio: read from the first page that asks (radio_source)."""
+        self._radio_lock = threading.Lock()
 
     @property
     def url(self) -> str:
@@ -365,8 +378,21 @@ class ViewServer:
             log.warning("viewer libraries missing (%s); run scripts/setup.sh", ", ".join(missing))
         log.info("3D viewer: %s", self.url)
 
+    def radio_source(self) -> RadioSource:
+        """The radio, read from now on if it is not yet."""
+        with self._radio_lock:
+            if self.radio is None:
+                from swarm.radio import RadioReader
+
+                reader = RadioReader()
+                reader.start()
+                self.radio = reader
+            return self.radio
+
     def stop(self) -> None:
         self._stop.set()
+        if self.radio is not None:
+            self.radio.stop()
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd.server_close()
@@ -430,6 +456,8 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 self._feed(server.physics)
             elif path == "/osd":
                 self._feed(server.osd)
+            elif path == "/radio":
+                self._radio()
             elif path == "/osd/font.png":
                 if OSD_FONT.is_file():
                     self._send(OSD_FONT.read_bytes(), ".png")
@@ -511,6 +539,33 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 pass
             finally:
                 server.hub.unsubscribe(q)
+
+        def _radio(self) -> None:
+            """The radio's channels, each change as it comes: [-1..1, ...] from channel 1, or
+            null with no radio."""
+            radio = server.radio_source()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            sent: object = ()
+            idle_s = 0.0
+            try:
+                while server.running:
+                    channels = radio.channels()
+                    if channels != sent:
+                        sent = channels
+                        idle_s = 0.0
+                        self.wfile.write(f"data: {json.dumps(channels)}\n\n".encode())
+                        self.wfile.flush()
+                    elif idle_s >= KEEPALIVE_S:
+                        idle_s = 0.0
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                    time.sleep(RADIO_POLL_S)
+                    idle_s += RADIO_POLL_S
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def _feed(self, feed: Feed | None) -> None:
             """Every copter's state from `feed`, each new one as soon as it arrives: one event

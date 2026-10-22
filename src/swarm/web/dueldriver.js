@@ -7,6 +7,7 @@ import { packModelMatrix, PoseTrack } from "./duel.js";
 import { DriveSession } from "./drivesession.js";
 import { callsign, DRONE_MODEL } from "./fleet.js";
 import { poof } from "./smoke.js";
+import { PROXIMITY_M, proximityGap, sfx } from "./sounds.js";
 
 const C = Cesium;
 const $ = (id) => document.getElementById(id);
@@ -41,6 +42,7 @@ export class DriverRole {
     this._field = null;
     this._destroyed = false;
     this._sentAt = 0;
+    this._pingAt = 0;
     /** sysid -> {track, armed, out} */
     this.drones = new Map();
     this.source = new C.CustomDataSource("duel");
@@ -88,6 +90,7 @@ export class DriverRole {
         notice: (text) => this._notice(text),
         hud: { speed: $("drive-speed"), wheels: $("drive-wheels") },
         camMode: $("drive-cam"),
+        radio: $("drive-radio"),
         help: $("drive-help"),
       },
     });
@@ -97,7 +100,10 @@ export class DriverRole {
     }
     this.session = session;
     session.outside = (x, y) => this._outside(x, y);
-    session.onStep = (s) => this._sendTruck(s);
+    session.onStep = (s) => {
+      this._sendTruck(s);
+      this._closing();
+    };
     this._placeFence();
   }
 
@@ -117,6 +123,16 @@ export class DriverRole {
     if (now - this._sentAt < 1000 / TRUCK_HZ) return;
     this._sentAt = now;
     this.link.send("car", [...packModelMatrix(session.car.modelMatrix), Math.round(session.car.speed * 10) / 10]);
+  }
+
+  /** In a turn, a ping as the nearest drone closes on the truck: quicker the nearer. */
+  _closing() {
+    const nearest = this.match.state.phase === "live" ? this._nearest() : undefined;
+    const gap = nearest && proximityGap(nearest.range);
+    const now = performance.now();
+    if (!gap || now - this._pingAt < gap * 1000) return;
+    this._pingAt = now;
+    sfx.play("proximity", { near: 1 - nearest.range / PROXIMITY_M });
   }
 
   /** Whether local (x, y) is outside the fence. Never, without a fence. */
@@ -219,6 +235,7 @@ export class DriverRole {
 
   _hit({ sysid, at, counted }) {
     this._poof(at);
+    sfx.play("strike");
     const flash = $("hit-flash");
     flash.classList.remove("on");
     void flash.offsetWidth; // restart the animation
@@ -236,18 +253,25 @@ export class DriverRole {
 
   _lost({ sysid, at, why }) {
     this._poof(at);
+    sfx.play("crash");
     const d = this.drones.get(sysid);
     if (d) d.out = true;
     this.banner(`${callsign(sysid)} ${String(why ?? "crashed").slice(0, 60)}: out`, "win");
   }
 
-  _render() {
+  /** The nearest armed drone in play, {d, range}; undefined for none. */
+  _nearest() {
     let nearest;
     for (const d of this.drones.values()) {
       if (d.out || !d.armed || d.track.age >= DRONE_STALE_MS) continue;
       const range = this._range(d);
       if (range !== undefined && (nearest === undefined || range < nearest.range)) nearest = { d, range };
     }
+    return nearest;
+  }
+
+  _render() {
+    const nearest = this._nearest();
     $("drive-near").textContent = nearest ? `${callsign(nearest.d.sysid)} ${Math.round(nearest.range)} m` : "–";
   }
 }

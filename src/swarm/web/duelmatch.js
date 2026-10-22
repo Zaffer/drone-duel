@@ -14,6 +14,7 @@
 import { clock, cleanRoomCode, DuelLink, newRoomCode } from "./duel.js";
 import { DriverRole } from "./dueldriver.js";
 import { PilotRole, simPost } from "./duelpilot.js";
+import { sfx } from "./sounds.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -25,6 +26,8 @@ const DRONES_PER_TURN = 5;
 const MATCH_SEND_MS = 1000;
 /** After a sim reset, the drones' reports are stale this long before they go quiet. */
 const RESET_SETTLE_MS = 5000;
+/** A turn's last seconds tick. */
+const COUNTDOWN_S = 10;
 const RULES_KEY = "drone-duel-match-rules";
 const NAME_KEY = "drone-duel-name";
 const savedMatchKey = (room) => `drone-duel-match-${room}`;
@@ -93,6 +96,8 @@ export class DuelMatch {
     /** Lost drones seen with their link down since: back once it is up again. */
     this._down = new Set();
     this._resetAt = -Infinity;
+    /** The turn's whole seconds left at the last tick: never ticks twice for one. */
+    this._tickLeft = Infinity;
     this._wirePanel();
     setInterval(() => this._tick(), 250);
     const params = new URLSearchParams(location.search);
@@ -224,6 +229,7 @@ export class DuelMatch {
   _peer(connected) {
     const peer = this.link.peerName ?? "Your opponent";
     this.toast(connected ? `${peer} is in the room` : "Your opponent left the room", connected ? "" : "bad");
+    sfx.play(connected ? "join" : "leave");
     if (this.side === "host") {
       if (connected) this._set({ ...this.state, names: { ...this.state.names, guest: peer } });
       else this._callOff("called off: the guest left");
@@ -273,7 +279,20 @@ export class DuelMatch {
       if (performance.now() >= this._endsAt) this._endTurn("time up");
       else if (performance.now() - this._sentAt >= MATCH_SEND_MS) this._send();
     }
+    this._countdown();
     this._render();
+  }
+
+  /** A tick for each of a live turn's last COUNTDOWN_S seconds. The guest's clock jitters with
+   * the host's updates, so a second ticks once. */
+  _countdown() {
+    if (this.state.phase !== "live") {
+      this._tickLeft = Infinity;
+      return;
+    }
+    const left = Math.ceil((this._endsAt - performance.now()) / 1000);
+    if (left < this._tickLeft && left > 0 && left <= COUNTDOWN_S) sfx.play("tick", { urgent: left <= 3 });
+    this._tickLeft = Math.min(this._tickLeft, left);
   }
 
   // -- both pages: roles, resets, news ----------------------------------------------
@@ -314,10 +333,13 @@ export class DuelMatch {
     if (prev.phase === "live" && s.turns.length > prev.turns.length) {
       const t = s.turns.at(-1);
       this.toast(`${this._name(t.pilot)} struck the truck ${t.hits} time${t.hits === 1 ? "" : "s"} (${s.note})`, "leader");
+      if (s.phase !== "over") sfx.play("turnEnd"); // over: the match's own sound
     } else if (prev.phase === "live" && s.phase === "ready") {
       this.toast(`Turn ${s.note || "called off"}: it starts again`, "bad");
+      sfx.play("turnEnd");
     }
     if (s.phase === "live") {
+      sfx.play("turnStart");
       const mine = pilotOf(s.turn) === this.side;
       this.toast(mine ? `Your turn: strike the truck, ${clock(s.minutes * 60)} on the clock` : `Drive! ${this._name(pilotOf(s.turn))}'s drones are coming`, "leader");
     }
@@ -514,6 +536,7 @@ export class DuelMatch {
         ? `Draw, ${sum.host}–${sum.guest}`
         : `${this._name(s.winner)} wins ${sum[s.winner]}–${sum[other(s.winner)]}`;
     $("duel-final-title").textContent = s.winner === this.side ? `You win! ${title}` : title;
+    sfx.play(s.winner === "draw" ? "turnEnd" : s.winner === this.side ? "win" : "lose");
     $("duel-final-note").textContent = s.note ? `Match over: ${s.note}` : "Match over";
     this._table($("duel-final-table"));
     $("duel-final").hidden = false;

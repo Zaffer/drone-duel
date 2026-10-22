@@ -264,14 +264,7 @@ class RadioBridge:
         except OSError as exc:
             log.warning("cannot open %s (%s); retrying", self.device, exc)
             return None
-        axes: dict[int, Axis] = {}
-        for code in range(CHANNELS):
-            try:
-                raw = fcntl.ioctl(fd, EVIOCGABS + code, bytes(24))
-            except OSError:
-                continue
-            value, lo, hi = struct.unpack_from("3i", raw)
-            axes[code] = Axis(lo, hi, value)
+        axes = read_axes(fd)
         with self._lock:
             self._axes = axes
             self._connected = True
@@ -281,8 +274,92 @@ class RadioBridge:
     def _read(self, fd: int) -> None:
         data = os.read(fd, INPUT_EVENT.size * 64)
         with self._lock:
-            for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
-                _, _, kind, code, value = INPUT_EVENT.unpack_from(data, offset)
-                axis = self._axes.get(code)
-                if kind == EV_ABS and axis is not None:
-                    axis.value = value
+            apply_events(data, self._axes)
+
+
+class RadioReader:
+    """The radio's channels for a web page, the viewer's truck (`swarm.view`'s /radio): each
+    -1..1 as the radio reports it, nothing reversed. Chrome's Gamepad API on Linux misses
+    most of this radio's axes; evdev has them all. Reads in a thread of its own, sharing the
+    device with `RadioBridge` (evdev hands every reader every event), and finds the radio again
+    once it is plugged back in."""
+
+    def __init__(self, find: Callable[[], Path | None] = find_radio) -> None:
+        self._find = find
+        self._axes: dict[int, Axis] = {}
+        self._connected = False
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="radio-reader", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
+
+    def channels(self) -> list[float] | None:
+        """Channel 1 first, each -1..1; None with no radio."""
+        with self._lock:
+            if not self._connected:
+                return None
+            axes = self._axes
+            return [unit(axes[code]) if code in axes else -1.0 for code in range(CHANNELS)]
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            device = self._find()
+            try:
+                fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK) if device else None
+            except OSError as exc:
+                log.debug("cannot open %s (%s)", device, exc)
+                fd = None
+            if fd is None:
+                self._stop.wait(1.0)
+                continue
+            with self._lock:
+                self._axes = read_axes(fd)
+                self._connected = True
+            try:
+                while not self._stop.is_set():
+                    if select.select([fd], [], [], 0.5)[0]:
+                        data = os.read(fd, INPUT_EVENT.size * 64)
+                        with self._lock:
+                            apply_events(data, self._axes)
+            except OSError as exc:
+                log.info("radio unplugged (%s)", exc)
+            finally:
+                os.close(fd)
+                with self._lock:
+                    self._connected = False
+
+
+def read_axes(fd: int) -> dict[int, Axis]:
+    """Each channel's range and value now, from the open input device `fd`."""
+    axes: dict[int, Axis] = {}
+    for code in range(CHANNELS):
+        try:
+            raw = fcntl.ioctl(fd, EVIOCGABS + code, bytes(24))
+        except OSError:
+            continue
+        value, lo, hi = struct.unpack_from("3i", raw)
+        axes[code] = Axis(lo, hi, value)
+    return axes
+
+
+def apply_events(data: bytes, axes: dict[int, Axis]) -> None:
+    """Move `axes` by the input events in `data`; any other event is skipped."""
+    for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+        _, _, kind, code, value = INPUT_EVENT.unpack_from(data, offset)
+        axis = axes.get(code)
+        if kind == EV_ABS and axis is not None:
+            axis.value = value
+
+
+def unit(axis: Axis) -> float:
+    """`axis` from -1 at its low end to 1 at its high end, to 3 places."""
+    if axis.hi <= axis.lo:
+        return 0.0
+    fraction = min(max((axis.value - axis.lo) / (axis.hi - axis.lo), 0.0), 1.0)
+    return round(fraction * 2 - 1, 3)

@@ -77,6 +77,10 @@
       <div class="group">
         <button data-action="duel" id="duel-btn" title="Duel: another player drives the truck; strike it with the drones (D)">Duel</button>
       </div>
+      <div class="group">
+        <button data-action="sound" id="sound-btn" title="Game sound on or off (M while driving)">Sound</button>
+        <button data-action="soundLab" title="Hear the sounds and choose them, in a new tab">Choose…</button>
+      </div>
     </nav>
 
     <button id="compass" title="North up">
@@ -159,10 +163,13 @@
       <div><b>W A S D</b>drive, steer (or arrows)</div>
       <div><b>S</b>brake, then reverse</div>
       <div><b>Space</b>handbrake</div>
+      <div><b>Radio</b>see its panel; Set picks each switch</div>
       <div><b>R</b>reset upright</div>
       <div><b>C</b>camera</div>
+      <div><b>M</b>sound on, off</div>
       <div><b>H</b>hide this</div>
     </div>
+    <div class="drive-only drive-panel radio-panel" id="drive-radio" hidden></div>
     <div class="drive-panel" id="drive-notice" hidden></div>
     <div id="hit-flash"></div>
 

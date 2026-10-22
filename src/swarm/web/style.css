@@ -846,6 +846,135 @@ body:not(.driving) .drive-only {
   font-weight: normal;
 }
 
+/* Two classes: over .drive-panel's pointer-events, wherever that is defined. */
+.drive-panel.radio-panel {
+  top: 12px;
+  right: 12px;
+  width: 268px;
+  color: var(--muted);
+  pointer-events: auto;
+}
+
+.drive-panel.radio-panel[hidden] {
+  display: none;
+}
+
+.radio-title {
+  margin-bottom: 4px;
+  color: var(--text);
+  letter-spacing: 0.08em;
+}
+
+.radio-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 38px 52px;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.radio-value {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.radio-row.on .radio-value {
+  color: var(--bad);
+}
+
+.radio-row.picking {
+  color: var(--accent);
+}
+
+.radio-bar {
+  position: relative;
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.radio-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: var(--accent);
+}
+
+.radio-bar.steer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--muted);
+}
+
+.radio-row.waiting .radio-bar i {
+  background: var(--warn);
+}
+
+.radio-ch {
+  color: var(--text);
+  text-align: right;
+}
+
+.radio-set {
+  padding: 1px 0;
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.radio-set:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.radio-ask {
+  min-height: 18px;
+  margin-top: 4px;
+  color: var(--warn);
+}
+
+.radio-channels {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.radio-chan {
+  position: relative;
+  flex: 1;
+  height: 34px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.radio-chan i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(127, 227, 255, 0.45);
+}
+
+.radio-chan b {
+  position: absolute;
+  inset: auto 0 2px;
+  color: var(--text);
+  font-weight: normal;
+  font-size: 10px;
+  text-align: center;
+}
+
 #drive-notice {
   left: 50%;
   top: 40%;

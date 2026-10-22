@@ -40,7 +40,7 @@ const session = await DriveSession.start(map, {
   lat,
   lon,
   headingDeg: headingDeg || 0,
-  ui: { notice, hud, camMode: $("cam-mode"), help: $("help") },
+  ui: { notice, hud, camMode: $("cam-mode"), radio: $("radio"), help: $("help") },
 });
 session.dblClickMoves = true;
 session.onFarMove = (toLat, toLon) => {

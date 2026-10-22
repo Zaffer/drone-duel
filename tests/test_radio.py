@@ -9,11 +9,13 @@ from swarm.radio import (
     LOST_THROTTLE_PWM,
     PWM_MIN,
     RC_FS_TIMEOUT_S,
+    Axis,
     RcLink,
     rc_packet,
     sitl_rc_port,
     switch_mode,
     to_pwm,
+    unit,
 )
 
 
@@ -82,3 +84,9 @@ def test_the_pilots_own_controller_can_fail_too() -> None:
     link.power(1, on=False)
     link.now = RC_FS_TIMEOUT_S
     assert _throttles(link, STICKS) == {1: LOST_THROTTLE_PWM, 2: PWM_MIN}
+
+
+def test_unit_puts_an_axis_on_minus_one_to_one() -> None:
+    assert [unit(Axis(0, 2047, v)) for v in (0, 2047, -5, 9999)] == [-1.0, 1.0, -1.0, 1.0]
+    assert abs(unit(Axis(0, 2047, 1023))) < 0.001
+    assert unit(Axis(5, 5, 5)) == 0.0

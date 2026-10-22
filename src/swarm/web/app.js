@@ -17,6 +17,7 @@ import { callsign, controlMode, DEFAULT_COLOR, DRONE_COLORS, Fleet } from "./fle
 import { Instruments } from "./instruments.js";
 import { OsdView } from "./osd.js";
 import { PlanLayer } from "./plans.js";
+import { sfx } from "./sounds.js";
 
 const C = Cesium;
 const $ = (id) => document.getElementById(id);
@@ -675,6 +676,8 @@ const actions = {
   auto: () => (state.mode === "auto" ? freeCamera() : autoCamera()),
   exit: freeCamera,
   duel: () => duel.togglePanel(),
+  sound: () => sfx.toggle(),
+  soundLab: () => open("/sounds.html", "drone-duel-sounds"),
   selectAll: () => {
     fleet.selectAll = !fleet.selectAll;
     refreshButtons();
@@ -759,12 +762,14 @@ function refreshButtons() {
   document.querySelector('[data-action="fpv"]').classList.toggle("on", state.mode === "fpv");
   document.querySelector('[data-action="camera"]').classList.toggle("on", state.mode === "camera");
   document.querySelector('[data-action="auto"]').classList.toggle("on", state.mode === "auto");
+  $("sound-btn").classList.toggle("on", sfx.enabled);
   $("imagery-btn").textContent = options.imagery === "satellite" ? "Satellite" : "Streets";
   $("imagery-btn").disabled = map.groundIsTiles;
   $("sensor-controls").style.display =
     options.sensors !== "off" || throughCamera() ? "" : "none";
 }
 refreshButtons();
+sfx.onChange(refreshButtons);
 
 function loadOptions() {
   try {
