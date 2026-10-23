@@ -85,10 +85,11 @@ INS_HNTC2_MODE   3
 INS_HNTC2_OPTS   22
 INS_HNTC2_REF    1
 
-# A digital video transmitter (HDZero, Walksnail, DJI) on SERIAL5 draws ArduPilot's OSD from
-# MSP DisplayPort, in SD 30x16 text (OSD1_TXT_RES 0), ArduPilot's symbols (MSP_OPTIONS 0).
-# `swarm sim` sends SERIAL5 to the 3D viewer's camera feed (swarm.osd). Wire and set the real
-# drone's own port.
+# The real drone is analog NTSC: its flight controller's OSD chip (OSD_TYPE 1, MAX7456) lays
+# ArduPilot's OSD into the video, 30x16 text of which NTSC shows the top 13 rows. SITL has no
+# OSD chip, so it sends the same screen over MSP DisplayPort on SERIAL5 (SD 30x16, OSD1_TXT_RES
+# 0, ArduPilot's symbols, MSP_OPTIONS 0) and `swarm sim` takes it to the 3D viewer's camera
+# feed (swarm.osd). Not for the real drone: set OSD_TYPE 1 there.
 OSD_TYPE         5
 SERIAL5_PROTOCOL 42
 OSD1_TXT_RES     0

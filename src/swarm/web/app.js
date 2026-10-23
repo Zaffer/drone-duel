@@ -3,8 +3,8 @@
 // Two views look through the selected drone's camera. FPV is the COP's own: the map seen from
 // the drone, on its telemetry. The camera feed is what the drone's camera itself sends: in
 // the field its video; in the sim, every drone where its physics puts it (swarm.physics), with
-// none of the map's symbols. Over the camera feed, ArduPilot's own OSD as the goggles draw it
-// from MSP DisplayPort (swarm.osd); without it (a replay), a HUD from the telemetry instead.
+// none of the map's symbols. Over the camera feed, ArduPilot's own OSD as the analog video
+// carries it (swarm.osd); without it (a replay), a HUD from the telemetry instead.
 //
 // The Duel panel plays a match against another player's COP (duelmatch.js): in their turns
 // they fly the drones at this player's truck, and the map here turns into the truck's drive.
@@ -230,9 +230,8 @@ function follow() {
   refreshButtons();
 }
 
-/** The camera feed's picture shape. Digital FPV cameras (Walksnail, HDZero, DJI) send 16:9;
- * an analog one 4:3. */
-const CAMERA_ASPECT = 16 / 9;
+/** The camera feed's picture shape: analog NTSC, 4:3 (digital FPV cameras send 16:9). */
+const CAMERA_ASPECT = 4 / 3;
 /** Black between the camera's frame and the panels round it, px. */
 const FRAME_MARGIN = 12;
 
@@ -677,7 +676,6 @@ const actions = {
   exit: freeCamera,
   duel: () => duel.togglePanel(),
   sound: () => sfx.toggle(),
-  soundLab: () => open("/sounds.html", "drone-duel-sounds"),
   selectAll: () => {
     fleet.selectAll = !fleet.selectAll;
     refreshButtons();

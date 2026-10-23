@@ -230,7 +230,7 @@ class SimStack:
             ",".join(str(d) for d in defaults),
             # The true state, every physics step, for the camera feed (swarm.physics).
             "--enable-fgview",
-            # The OSD over MSP DisplayPort, as to the video transmitter (swarm.osd).
+            # The OSD over MSP DisplayPort, standing in for the OSD chip (swarm.osd).
             "--serial5",
             f"udpclient:127.0.0.1:{osd_port(index + 1)}",
         ]

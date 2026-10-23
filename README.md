@@ -409,13 +409,16 @@ uv run swarm view --replay logs/watch-<timestamp>.jsonl --speed 2 --loop
   field its video; in the sim (`swarm sim`, `fly`, `rehearse`), SITL's physics
   (`swarm.physics`), streamed as each state arrives with no buffer. It shows only real things,
   every drone at its real size where its physics puts it and the truck at B: no symbols, labels,
-  trails, slots or plans, cropped to the camera's 16:9 frame (`CAMERA_ASPECT` in `app.js`; 4:3
-  for analog) with black round it, as goggles show it. Over it, ArduPilot's own OSD as digital
-  goggles (HDZero, Walksnail, DJI) draw it: SITL runs the drone's OSD over MSP DisplayPort
-  (`OSD_TYPE 5`, `SERIAL5_PROTOCOL 42` in `sitl/fpv5.parm`), 10 screens a second, to UDP 14700 +
-  sysid (`swarm.osd`), and the page draws each screen in ArduPilot's Walksnail font from
-  `external/ardupilot`. Its layout is the drone's `OSD1_*` parameters, so set it up in the sim
-  as on the drone. Without physics or the OSD (a replay) it falls back to telemetry and a HUD,
+  trails, slots or plans, cropped to an analog NTSC camera's 4:3 frame (`CAMERA_ASPECT` in
+  `app.js`) with black round it, as goggles show it. Over it, ArduPilot's own OSD as the
+  drone's analog video carries it, laid in by the flight controller's OSD chip (MAX7456,
+  `OSD_TYPE 1`): 30 characters by 16 rows, of which NTSC shows the top 13. SITL has no OSD
+  chip, so it sends the same screen over MSP DisplayPort (`OSD_TYPE 5`, `SERIAL5_PROTOCOL 42`
+  in `sitl/fpv5.parm`), 10 screens a second, to UDP 14700 + sysid (`swarm.osd`), and the page
+  draws its top 13 rows across the frame in the chip's font (`OSD_FONT`, from
+  `external/ardupilot`). Its layout is the drone's `OSD1_*` parameters, so set it up in the sim
+  as on the drone: an item on rows 13 to 15 (ArduPilot puts ground speed and the GPS position
+  there) does not show on NTSC. Without physics or the OSD (a replay) it falls back to telemetry and a HUD,
   and says `NO FEED`.
 - **Readouts**: a fleet card per drone: its callsign with the mode as a light beside it
   (amber: a pilot flies it with no position hold, STABILIZE, ACRO, ALT_HOLD; green: a pilot
@@ -566,11 +569,10 @@ going. While driving: the truck's engine, following its speed and throttle throu
 a bump when it hits something, a warning each second outside the fence, and, in a turn, a ping
 that quickens as the nearest drone closes on the truck.
 
-Each sound has three or four variants. http://localhost:8600/sounds.html (**Choose…** in the
-COP's toolbar) plays each one as the game would and keeps the choice, with the volume, in the
-browser's local storage. The COP and the drive page pick a change up straight away. Any sound
-can be off. **Sound** in the toolbar, or `M` while driving, turns all of it off. Browsers start
-audio only after a click or a key on the page, and a hidden page is silent.
+Each sound is fixed in `sounds.js`, the same for both players. **Sound** in the toolbar, or `M`
+while driving, turns all of it on or off; the browser remembers which, and the COP and the
+drive page follow a change straight away. Browsers start audio only after a click or a key on
+the page, and a hidden page is silent.
 
 ## Sim airframe: a 5 inch quad
 

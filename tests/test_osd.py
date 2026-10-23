@@ -4,20 +4,26 @@ import json
 import socket
 import time
 import urllib.request
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from swarm.geo import LocalFrame
 from swarm.osd import (
     CLEAR,
     DRAW,
+    FONT_DIR,
+    GLYPH_H,
+    GLYPH_W,
     MSP_DISPLAYPORT,
     OPTIONS,
     WRITE,
     DisplayPort,
     MspReader,
     OsdFeed,
+    font_png,
     osd_port,
 )
 from swarm.view import ViewConfig, ViewServer
@@ -64,9 +70,32 @@ def test_screen_is_drawn_only_on_draw() -> None:
     drawn = [port.handle(p) for _, p in reader.feed(osd_frame(write(2, 3, b"STAB\x8a")))]
     assert drawn[-1] and not any(drawn[:-1])
     assert port.screen is not None
-    assert (port.screen.cols, port.screen.rows) == (30, 16)
+    assert (port.screen.cols, port.screen.rows) == (30, 13)
     assert port.screen.text[2][3:8] == "STAB\x8a"
     assert port.screen.text[0] == " " * 30
+
+
+def test_ntsc_shows_the_top_13_rows() -> None:
+    port = DisplayPort()
+    port.handle(bytes([WRITE, 12, 0, 0]) + b"SHOWN")
+    port.handle(bytes([WRITE, 13, 0, 0]) + b"CUT")
+    port.handle(bytes([DRAW]))
+    assert port.screen is not None
+    assert len(port.screen.text) == 13
+    assert port.screen.text[12].startswith("SHOWN")
+
+
+@pytest.mark.skipif(not (FONT_DIR / "clarity.mcm").is_file(), reason="no ArduPilot checkout")
+def test_font_is_the_chips_glyphs_in_one_column() -> None:
+    png = font_png(0)
+    assert png is not None
+    img = Image.open(BytesIO(png))
+    assert img.size == (GLYPH_W, GLYPH_H * 256)
+    a = img.crop((0, ord("A") * GLYPH_H, GLYPH_W, (ord("A") + 1) * GLYPH_H))
+    colours = {c for _, c in a.getcolors() or []}
+    # White, edged in black, on clear.
+    assert {(255, 255, 255, 255), (0, 0, 0, 255), (0, 0, 0, 0)} <= colours
+    assert font_png(99) is None
 
 
 def test_writes_past_the_edge_are_cut_and_options_set_the_grid() -> None:

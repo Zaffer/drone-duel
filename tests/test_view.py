@@ -235,8 +235,6 @@ def test_config_and_page_are_served(server: str) -> None:
         assert b"app.js" in r.read()
     with urllib.request.urlopen(f"{server}/drive.html") as r:
         assert b"drive.js" in r.read()
-    with urllib.request.urlopen(f"{server}/sounds.html") as r:
-        assert b"soundlab.js" in r.read()
 
 
 def test_config_carries_the_duels_field() -> None:
