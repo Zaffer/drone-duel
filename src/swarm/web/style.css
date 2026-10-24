@@ -1216,12 +1216,23 @@ body.camera-feed #compass {
   display: none;
 }
 
+/* The camera feed as analog goggles show it (analog.js), over the map in the camera's frame;
+   without WebGL2, the map itself. */
+#feed {
+  position: fixed;
+  display: none;
+}
+
+body.camera-feed.analog #feed {
+  display: block;
+}
+
 /* ArduPilot's OSD (osd.js) over the camera's frame, in the HUD's place. */
 #osd {
   position: fixed;
 }
 
-#fpv.osd > :not(#osd, .fpv-exit) {
+#fpv.osd > :not(#osd, #feed, .fpv-exit) {
   display: none;
 }
 

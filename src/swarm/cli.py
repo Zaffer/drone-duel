@@ -225,6 +225,7 @@ def _view_server(
         leader_radius_m=settings.swarm.liftoff_max_leader_distance_m,
         point_b=settings.field.point_b,
         fence=list(fence.corners) if fence.enabled else [],
+        vtx_mw=settings.sim.vtx_mw,
         host=args.view_host,
         http_port=args.view_port,
     )

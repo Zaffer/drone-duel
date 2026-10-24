@@ -111,8 +111,9 @@ each reads it once, as it starts.
   looks it up online when the sim starts and remembers it in `logs/elevation.json`), the
   `spawn_spacing_m` between the copters in their line to the east, the `router` (`"sitl"`,
   or `"field"` to run through `router/field.conf` with each copter sending over UDP like a
-  drone's Wi-Fi bridge, see Run on hardware), and the wind (`wind_speed_ms`,
-  `wind_from_deg`, `wind_turbulence_ms`). Real drones start wherever they stand.
+  drone's Wi-Fi bridge, see Run on hardware), the wind (`wind_speed_ms`,
+  `wind_from_deg`, `wind_turbulence_ms`), and the camera feed's video transmitter power
+  (`vtx_mw`, below). Real drones start wherever they stand.
 
 Every key must be there, and a misspelt one stops the command with its name. Keep a file per
 flying field and pick it with `--settings PATH`. Flags override the file for one run:
@@ -410,13 +411,23 @@ uv run swarm view --replay logs/watch-<timestamp>.jsonl --speed 2 --loop
   (`swarm.physics`), streamed as each state arrives with no buffer. It shows only real things,
   every drone at its real size where its physics puts it and the truck at B: no symbols, labels,
   trails, slots or plans, cropped to an analog NTSC camera's 4:3 frame (`CAMERA_ASPECT` in
-  `app.js`) with black round it, as goggles show it. Over it, ArduPilot's own OSD as the
-  drone's analog video carries it, laid in by the flight controller's OSD chip (MAX7456,
+  `app.js`) with black round it, as goggles show it. In the sim it comes over a simulated
+  analog video link (`analog.js`, a GPU port of
+  [analog-vision](https://github.com/Synetic-Labs/Analog-Vision)): the picture is encoded as
+  NTSC composite, frequency-modulated as a 5.8 GHz video transmitter does it, given the
+  receiver's noise, and decoded as goggles do, sync, AGC, colour killer and all. The noise
+  comes from a link budget: `[sim] vtx_mw` over free space from the drone to the takeoff point,
+  where the pilot stands, a dipole upright on each, with slow fading on top. So as the drone
+  flies away the picture gets grainy, then the colour speckles, sparklies come, the colour
+  drops out, lines tear and it snows; flying overhead, or banked hard toward the pilot, puts it
+  in the antennas' null. Without WebGL2 the picture is shown clean. In it, ArduPilot's own OSD
+  as the drone's analog video carries it, laid in by the flight controller's OSD chip (MAX7456,
   `OSD_TYPE 1`): 30 characters by 16 rows, of which NTSC shows the top 13. SITL has no OSD
   chip, so it sends the same screen over MSP DisplayPort (`OSD_TYPE 5`, `SERIAL5_PROTOCOL 42`
   in `sitl/fpv5.parm`), 10 screens a second, to UDP 14700 + sysid (`swarm.osd`), and the page
-  draws its top 13 rows across the frame in the chip's font (`OSD_FONT`, from
-  `external/ardupilot`). Its layout is the drone's `OSD1_*` parameters, so set it up in the sim
+  puts its top 13 rows into the video across the frame in the chip's font (`OSD_FONT`, from
+  `external/ardupilot`), white and black in place of the picture as the chip does, so the
+  link spoils it too. Its layout is the drone's `OSD1_*` parameters, so set it up in the sim
   as on the drone: an item on rows 13 to 15 (ArduPilot puts ground speed and the GPS position
   there) does not show on NTSC. Without physics or the OSD (a replay) it falls back to telemetry and a HUD,
   and says `NO FEED`.

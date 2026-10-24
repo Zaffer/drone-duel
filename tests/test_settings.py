@@ -41,6 +41,7 @@ router = "sitl"
 wind_speed_ms = 0.0
 wind_from_deg = 180.0
 wind_turbulence_ms = 0.0
+vtx_mw = 25.0
 """
 """A settings file to edit: the tests do not depend on what mission.toml holds today."""
 
@@ -94,6 +95,7 @@ def test_points_and_home_come_from_the_file(tmp_path: Path) -> None:
         ('router = "sitl"', 'router = "wifi"', "router is 'wifi'"),
         ("point_a = [", "point_a = [1.0]\n# [", "point_a must be"),
         ('ground_alt_m = "auto"', 'ground_alt_m = "high"', "ground_alt_m must be a number"),
+        ("vtx_mw = 25.0", "vtx_mw = 0", "vtx_mw must be more than 0"),
     ],
 )
 def test_mistakes_are_reported(tmp_path: Path, old: str, new: str, error: str) -> None:

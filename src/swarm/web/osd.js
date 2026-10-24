@@ -7,11 +7,30 @@
 // glyphs stretch with the frame rather than keep their shape. They stay sharp: the font is
 // first blown up pixel for pixel to a whole multiple of its size (sharpFont), and only that
 // is smoothed down to the cell, so an edge blurs over a pixel at most.
+//
+// Over the analog feed (analog.js) the OSD is not laid over the picture but put into its
+// video, as the chip does: OsdRaster draws the chip's pixels for that, one a field line.
 
 const GLYPHS = 256;
 /** A character row's height, in NTSC's lines. */
 const ROW_LINES = 18;
 const NTSC_LINES = 240;
+const GLYPH_W = 12;
+
+/** @type {Map<number, HTMLImageElement>} each OSD_FONT as it is asked for. */
+const fonts = new Map();
+
+/** OSD_FONT `index`, loading the first time; `onload` when it has. */
+function fontImage(index, onload) {
+  let font = fonts.get(index);
+  if (!font) {
+    font = new Image();
+    font.src = `/osd/font/${index}.png`;
+    fonts.set(index, font);
+  }
+  if (!font.complete) font.decode().then(onload, () => {});
+  return font;
+}
 
 /** `font` blown up `kx` x `ky` times, each pixel a block: no smoothing. */
 function sharpFont(font, kx, ky) {
@@ -29,8 +48,6 @@ export class OsdView {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
-    /** @type {Map<number, HTMLImageElement>} each OSD_FONT as it is asked for. */
-    this.fonts = new Map();
     this._drawn = null;
     this._size = "";
     /** The font as drawn (sharpFont), and which font at what multiple. */
@@ -38,27 +55,12 @@ export class OsdView {
     this._sharpKey = "";
   }
 
-  /** OSD_FONT `index`, loading the first time. */
-  _font(index) {
-    let font = this.fonts.get(index);
-    if (!font) {
-      font = new Image();
-      font.src = `/osd/font/${index}.png`;
-      font.decode().then(
-        () => {
-          this._drawn = null; // drawn with the next screen
-        },
-        () => {},
-      );
-      this.fonts.set(index, font);
-    }
-    return font;
-  }
-
   /** Draw `screen` ({cols, rows, font, text: one Latin-1 string per row}); only when it, or
    * the canvas's size, changed. */
   draw(screen) {
-    const font = this._font(screen.font ?? 0);
+    const font = fontImage(screen.font ?? 0, () => {
+      this._drawn = null; // drawn with the next screen
+    });
     if (!font.complete || !font.naturalWidth) return;
     const box = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -100,5 +102,48 @@ export class OsdView {
   clear() {
     this._drawn = null;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+}
+
+/** The OSD as the chip puts it into the analog video: a pixel for each of the chip's, white,
+ * black or clear, 12 x 18 a character, a pixel line a field line. Its rows are `top` field
+ * lines down: NTSC's 13 rows take 234 of a field's 240, centred. `changed` until the feed
+ * has taken it (analog.js). */
+export class OsdRaster {
+  constructor() {
+    this.canvas = document.createElement("canvas");
+    this.ctx = this.canvas.getContext("2d");
+    this.top = 0;
+    this.changed = false;
+    this._drawn = null;
+  }
+
+  /** Draw `screen` (as OsdView.draw), when it is a new one. */
+  draw(screen) {
+    const font = fontImage(screen.font ?? 0, () => {
+      this._drawn = null;
+    });
+    if (!font.complete || !font.naturalWidth || screen === this._drawn) return;
+    this._drawn = screen;
+    const gh = font.naturalHeight / GLYPHS;
+    const w = screen.cols * GLYPH_W;
+    const h = screen.rows * ROW_LINES;
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    this.top = Math.max(Math.floor((NTSC_LINES - h) / 2), 0);
+    const ctx = this.ctx;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, w, h);
+    for (let row = 0; row < screen.rows; row++) {
+      const line = screen.text[row] ?? "";
+      for (let col = 0; col < line.length; col++) {
+        const code = line.charCodeAt(col);
+        if (code === 0x20 || code === 0) continue;
+        ctx.drawImage(font, 0, code * gh, font.naturalWidth, gh, col * GLYPH_W, row * ROW_LINES, GLYPH_W, ROW_LINES);
+      }
+    }
+    this.changed = true;
   }
 }

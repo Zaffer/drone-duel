@@ -293,6 +293,8 @@ class ViewConfig:
     fence: list[tuple[float, float]] = field(default_factory=list[tuple[float, float]])
     """The fence's corners, [lat, lon] in order round; empty with the fence off. The duel's
     truck must keep inside it."""
+    vtx_mw: float = 25.0
+    """The camera feed's video transmitter power (web/analog.js)."""
     host: str = "127.0.0.1"
     http_port: int = DEFAULT_HTTP_PORT
     telemetry_port: int = DEFAULT_PORT
@@ -348,6 +350,7 @@ class ViewServer:
             "leaderRadiusM": self.config.leader_radius_m,
             "pointB": self.config.point_b,
             "fence": self.config.fence,
+            "vtxMw": self.config.vtx_mw,
             "replay": self.replay.name if self.replay else None,
             "sim": self.sim is not None,
         }

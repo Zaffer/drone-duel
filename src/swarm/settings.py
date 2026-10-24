@@ -37,6 +37,7 @@ SIM_KEYS = {
     "wind_speed_ms",
     "wind_from_deg",
     "wind_turbulence_ms",
+    "vtx_mw",
 }
 
 
@@ -53,6 +54,8 @@ class SimSettings:
     wind_speed_ms: float
     wind_from_deg: float
     wind_turbulence_ms: float
+    vtx_mw: float
+    """The camera feed's video transmitter power: how far its analog picture stays clean."""
 
     def sitl_params(self) -> dict[str, float]:
         """The SITL parameters these settings give every copter."""
@@ -112,6 +115,8 @@ def load_settings(path: Path = SETTINGS_PATH) -> Settings:
     if not isinstance(copters, int) or isinstance(copters, bool) or copters < 1:
         raise SettingsError(f"{path}: [mission] copters must be a whole number, 1 or more")
     ground_alt_m = None if sim["ground_alt_m"] == "auto" else _number(sim, "ground_alt_m", path)
+    if _number(sim, "vtx_mw", path) <= 0:
+        raise SettingsError(f"{path}: [sim] vtx_mw must be more than 0")
     settings = Settings(
         field=SimField(
             home=LocalFrame(*home),
@@ -127,6 +132,7 @@ def load_settings(path: Path = SETTINGS_PATH) -> Settings:
             wind_speed_ms=_number(sim, "wind_speed_ms", path),
             wind_from_deg=_number(sim, "wind_from_deg", path),
             wind_turbulence_ms=_number(sim, "wind_turbulence_ms", path),
+            vtx_mw=_number(sim, "vtx_mw", path),
         ),
         fence=_fence(fence, path),
     )

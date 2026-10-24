@@ -34,3 +34,4 @@ router = "sitl"                        # "sitl": simulated drones. "field": UDP,
 wind_speed_ms = 0.0                    # Wind speed, m/s.
 wind_from_deg = 180.0                  # Wind direction, degrees true: where the wind comes from.
 wind_turbulence_ms = 0.0               # Gusts, m/s.
+vtx_mw = 25.0                          # Camera feed: the video transmitter's power, mW (25 to 800). Farther from takeoff, the analog picture gets noisier.

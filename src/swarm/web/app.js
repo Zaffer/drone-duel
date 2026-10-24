@@ -3,8 +3,10 @@
 // Two views look through the selected drone's camera. FPV is the COP's own: the map seen from
 // the drone, on its telemetry. The camera feed is what the drone's camera itself sends: in
 // the field its video; in the sim, every drone where its physics puts it (swarm.physics), with
-// none of the map's symbols. Over the camera feed, ArduPilot's own OSD as the analog video
-// carries it (swarm.osd); without it (a replay), a HUD from the telemetry instead.
+// none of the map's symbols, sent as analog video over the drone's video link (analog.js) and
+// as noisy as that link: the farther from takeoff, the worse. In the feed, ArduPilot's own OSD
+// as the analog video carries it (swarm.osd); without it (a replay), a HUD from the telemetry
+// over the picture instead.
 //
 // The Duel panel plays a match against another player's COP (duelmatch.js): in their turns
 // they fly the drones at this player's truck, and the map here turns into the truck's drive.
@@ -14,9 +16,11 @@ import { BaseMap } from "./basemap.js";
 import { Director } from "./director.js";
 import { DuelMatch } from "./duelmatch.js";
 import { callsign, controlMode, DEFAULT_COLOR, DRONE_COLORS, Fleet } from "./fleet.js";
+import { AnalogFeed, dipoleGainDbi, linkCnrDb } from "./analog.js";
 import { Instruments } from "./instruments.js";
-import { OsdView } from "./osd.js";
+import { OsdRaster, OsdView } from "./osd.js";
 import { PlanLayer } from "./plans.js";
+import { cameraAxes } from "./sensor.js";
 import { sfx } from "./sounds.js";
 
 const C = Cesium;
@@ -234,6 +238,8 @@ function follow() {
 const CAMERA_ASPECT = 4 / 3;
 /** Black between the camera's frame and the panels round it, px. */
 const FRAME_MARGIN = 12;
+/** The camera feed's analog chain takes the map at about this width, px: more is wasted. */
+const FEED_RENDER_WIDTH = 1100;
 
 /** The camera feed's frame: the largest CAMERA_ASPECT box that fits between the top bar, the
  * fleet panel and the toolbar, centred there. */
@@ -257,12 +263,15 @@ function cameraFrame() {
  * vertical field of view (options.vfovDeg). */
 function cropToCamera(on) {
   document.body.classList.toggle("camera-feed", on);
-  for (const el of [$("map"), $("osd")]) {
+  document.body.classList.toggle("analog", on && analog.ok);
+  const f = cameraFrame();
+  viewer.resolutionScale =
+    on && analog.ok ? Math.min(1, FEED_RENDER_WIDTH / (f.width * (window.devicePixelRatio || 1))) : 1;
+  for (const el of [$("map"), $("osd"), $("feed")]) {
     if (!on) {
       el.removeAttribute("style");
       continue;
     }
-    const f = cameraFrame();
     Object.assign(el.style, {
       left: `${f.left}px`,
       top: `${f.top}px`,
@@ -287,6 +296,7 @@ function enterCamera(mode) {
   const feed = mode === "camera";
   fleet.setFeed(feed);
   watchFeeds(feed);
+  if (feed) analog.reset();
   plans.update();
   viewer.scene.screenSpaceCameraController.enableInputs = false;
   document.body.classList.add("fpv-mode");
@@ -316,6 +326,11 @@ function exitCamera() {
 // replay, the field), the streams fail once: the feed shows NO FEED over the telemetry.
 const OSD_STALE_MS = 1000;
 const osdView = new OsdView($("osd"));
+const analog = new AnalogFeed($("feed"));
+/** The OSD as it goes into the analog feed's video. */
+const osdRaster = new OsdRaster();
+/** Whether ArduPilot's OSD is in the analog feed's video this frame. */
+let osdInFeed = false;
 /** sysid -> {screen, at}: each drone's last OSD screen and when it came. */
 const osdScreens = new Map();
 let feedStreams = [];
@@ -357,7 +372,46 @@ viewer.scene.preRender.addEventListener(() => {
 viewer.scene.postRender.addEventListener(() => {
   $("compass").querySelector("svg").style.transform = `rotate(${-C.Math.toDegrees(camera.heading)}deg)`;
   if (throughCamera()) drawFpvHud();
+  if (state.mode === "camera" && analog.ok) {
+    const now = performance.now();
+    analog.cnrDb = videoCnrDb(now) ?? analog.cnrDb;
+    // Read in the frame Cesium drew it: its drawing buffer is not kept after.
+    analog.frame(viewer.scene.canvas, osdInFeed ? osdRaster : null, now);
+  }
 });
+
+// -- the camera feed's video link -----------------------------------------------------------
+
+/** The receiver's antenna above the ground at the takeoff point, m: the pilot's goggles. */
+const RECEIVER_HEIGHT_M = 1.5;
+/** Slow fading on top of the link budget (bodies, the ground, the antennas' angles): its
+ * spread, dB, and how fast it wanders, s. */
+const FADE_DB = 2;
+const FADE_S = 0.6;
+let fade = { db: 0, at: 0 };
+
+/** The video link's carrier to noise for the camera feed's drone, dB: free space from the
+ * takeoff point (the frame's origin) at the VTX power, each end a dipole standing up from its
+ * frame, so flying overhead or banked hard toward the pilot puts the picture in a null; then
+ * fading. Null when the drone is not placed. */
+function videoCnrDb(now) {
+  const v = fleet.vehicles.get(fleet.fpv);
+  const pose = v?.cameraPose(true);
+  const origin = fleet.frame?.origin;
+  if (!pose || !origin || v.base === null) return null;
+  const rx = C.Cartesian3.fromDegrees(origin[1], origin[0], v.base + RECEIVER_HEIGHT_M);
+  const toEnu = C.Matrix4.inverseTransformation(C.Transforms.eastNorthUpToFixedFrame(rx), new C.Matrix4());
+  const d = C.Matrix4.multiplyByPoint(toEnu, pose.pos, new C.Cartesian3());
+  const range = Math.max(C.Cartesian3.magnitude(d), 1);
+  const p = pose.physical ? v.physics : { yaw: v.data.heading, pitch: v.data.pitch, roll: v.data.roll };
+  const up = cameraAxes(p.yaw, p.pitch, p.roll, 0).u;
+  const txCos = -(up[0] * d.x + up[1] * d.y + up[2] * d.z) / range;
+  const dt = Math.min((now - fade.at) / 1000, 0.5);
+  const gauss = Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+  fade = { db: fade.db * (1 - dt / FADE_S) + FADE_DB * Math.sqrt((2 * dt) / FADE_S) * gauss, at: now };
+  const mw = config.vtxMw ?? 25;
+  return linkCnrDb(range, mw, dipoleGainDbi(txCos), dipoleGainDbi(d.z / range)) + fade.db;
+}
 
 $("compass").addEventListener("click", () => {
   if (state.mode !== "free") return;
@@ -376,6 +430,12 @@ function drawFpvHud() {
   // Over the camera feed, ArduPilot's own OSD when it is coming, in place of the HUD.
   const screen = state.mode === "camera" ? liveOsd() : null;
   $("fpv").classList.toggle("osd", screen !== null);
+  osdInFeed = screen !== null && analog.ok;
+  if (osdInFeed) {
+    osdView.clear();
+    osdRaster.draw(screen);
+    return;
+  }
   if (screen) {
     osdView.draw(screen);
     return;
