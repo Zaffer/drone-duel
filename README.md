@@ -412,8 +412,9 @@ uv run swarm view --replay logs/watch-<timestamp>.jsonl --speed 2 --loop
   every drone at its real size where its physics puts it and the truck at B: no symbols, labels,
   trails, slots or plans, cropped to an analog NTSC camera's 4:3 frame (`CAMERA_ASPECT` in
   `app.js`) with black round it, as goggles show it. In the sim it comes over a simulated
-  analog video link (`analog.js`, a GPU port of
-  [analog-vision](https://github.com/Synetic-Labs/Analog-Vision)): the picture is encoded as
+  analog video link (`analog.js` from
+  [analog-vision](https://github.com/Synetic-Labs/Analog-Vision), its chain on the GPU,
+  vendored by `scripts/setup.sh`): the picture is encoded as
   NTSC composite, frequency-modulated as a 5.8 GHz video transmitter does it, given the
   receiver's noise, and decoded as goggles do, sync, AGC, colour killer and all. The noise
   comes from a link budget: `[sim] vtx_mw` over free space from the drone to the takeoff point,
@@ -532,6 +533,104 @@ turns off Cesium's own camera collision (`enableCollision`): it reads triangles 
 camera every frame the camera moves, a tenth of the frame time. The chase camera stays out of
 walls with a ray cast on the colliders instead.
 
+### Wing (demo)
+
+Fly the TBS Chupito, an 800 mm pusher flying wing, on the map. A first, basic demo: its only
+obstacle is the ground (the 3D tiles' roofs included).
+
+```bash
+uv run swarm wing                              # starts at point A; open the URL it prints
+uv run swarm wing --at 45.319749,-75.758425    # starts here
+```
+
+Or open http://localhost:8600/wing.html on a viewer that is already running.
+
+Keys: `Space` throws it (and again once it is down), the arrows pitch and roll (`↓` pulls the nose
+up), `W` `S` throttle, `R` back to the start, `C` cameras (chase, FPV, free), `H` hides the help.
+A gamepad flies it on the right stick, the right trigger the throttle, A throws it. So does the
+drone radio in joystick mode, as mode 2: raising its throttle from the bottom throws it.
+
+The flight model (`wingflight.js`) is Nanawing's, narenana's browser sim
+(https://sim.narenana.com/), ported as it is from its deployed bundle. Its source is not public.
+It is an arcade model, not a rigid body: the sticks set the body's rates directly, and lift,
+drag, thrust and gravity move it. The model is narenana's recreation of the Chupito.
+`scripts/setup.sh` fetches it into `external/web/chupito/` rather than committing it, because it
+has no licence and carries Team BlackSheep's logos.
+
+### Wing on INAV SITL
+
+The real Chupito flies INAV (TBS's Lucid H7 Wing AIO, target `TBS_LUCID_H7_WING_MINI`), so the
+simulated one does too. INAV SITL has no physics of its own; it flies whatever answers it over
+X-Plane's UDP protocol. `swarm.wingsim` answers it with a flight model of our own.
+
+```bash
+uv run swarm wingsim --demo     # no radio: arms, throws it, circles
+uv run swarm wingsim            # the drone radio on INAV's sticks
+```
+
+Watch it at http://localhost:8600/wing.html, on the map's 3D tiles. The page only draws it: the
+flight runs in Python. The page reports the map's ground under the wing, roofs and trees
+included, and the flight model flies over that ground. On the page, Space throws it, R puts it
+back in the hand, C changes the camera. `--no-view` leaves the viewer out, and `--view-port`
+moves it (the Google tiles' key only works on 8600).
+
+Keys in the terminal, then Enter: `t` throws it, `r` puts it back in the hand, `q` quits.
+Each run is recorded to `logs/wingsim/` (CSV, 50 Hz): the wing's true state, the sticks, INAV's
+outputs, its own estimate of the attitude, and the wind.
+
+The wind is mission.toml's (`wind_speed_ms`, `wind_from_deg`, and `wind_turbulence_ms` for
+gusts), or `--wind`, `--wind-from` and `--gusts` for one run:
+
+```bash
+uv run swarm wingsim --wind 8 --wind-from 270 --gusts 5
+```
+
+INAV's modes:
+- **CH5 high** arms.
+- **CH6** low is ANGLE, middle ACRO, high MANUAL.
+- **CH7 high** is RTH.
+- **CH8 flicked high** throws it. This one is the sim's, not INAV's.
+
+INAV's launch mode is on, as TBS sets it: arm, raise the throttle, throw, and INAV runs the
+motor and climbs out. INAV's settings are TBS's Chupito CLI suggestions, plus the simulator's
+sensors and receiver (`swarm.wingsim.inav`). Its eeprom and log are in `external/inav/chupito/`.
+`scripts/setup.sh` puts the SITL binary in `external/inav/`. It is the one INAV's Configurator
+ships, because building INAV needs Ruby.
+
+The flight model is a 6-DOF rigid body:
+- **Aerodynamics over the full envelope:** Selig's method for aerobatic model aircraft, the
+  way X-Plane does it too. The wing is cut into strips. Each strip sees the air at its own
+  place, including the aircraft's rotation, less the downwash a vortex lattice of the measured
+  planform puts there. Each strip stalls on its own, with section data over ±180°. So stalls,
+  wing drop, spins, tail slides, reversed flow and elevons fading in separated flow come out of
+  the geometry; nothing is scripted. The fin is a strip, and the pod adds its drag and Munk
+  moment.
+- **Stall memory:** each strip's flow takes time to separate and to reattach (Goman and
+  Khrabrov). A quick pull outruns the stall for a moment (dynamic stall). Once stalled, the flow
+  comes back only a couple of degrees below the stall angle (hysteresis).
+- **Ground effect:** near the ground, the downwash weakens strip by strip at each strip's own
+  height (McCormick). The wing floats in the flare, and a low wing tip is pushed back up.
+- **Wind:** MIL-F-8785C's low-altitude model, as JSBSim has it. The wind falls off toward the
+  ground (the log profile). Dryden turbulence matches it in strength, including how it varies
+  across the wing, which rolls, pitches and yaws the wing. Gusts come on top, now and then.
+- **Power train:** the motor, the battery, and a prop with UIUC's measured 5x3 shape. It
+  windmills, loads up in reverse flow, kicks the airframe when the throttle is punched, and acts
+  as a fin behind the centre of mass. The spinning rotor adds its gyroscopic moment.
+- **Ground:** a hand launch and ground contact.
+
+It is calibrated to TBS's specification and to one pilot's INAV blackbox log of a 6S Chupito:
+- **Speed:** full throttle gives 42 m/s level on 540 W, and 35 % throttle cruises at 58 km/h.
+- **Stall:** 35 km/h with the elevons holding it.
+- **Roll:** full elevons roll at 600-700°/s.
+
+Checked against the log without fitting to it: full pitch command pulls about 7 g at 29 m/s,
+and a pitch release at the pilot's speed overshoots the way the real wing's did.
+`swarm/wingsim/airframe.py` gives the source of every number, and `tests/test_wingsim.py` holds
+the model to them.
+
+The package imports nothing else from `swarm`, so it can move to a package of its own. The glue
+lives outside it, in `swarm/wingrun.py`: the radio, the demo pilot and the status line.
+
 ### Duel
 
 A match between two players, each on their own machine with their own sim and COP. In each
@@ -579,6 +678,16 @@ starting and ending, the last 10 seconds, the match won or lost, the opponent co
 going. While driving: the truck's engine, following its speed and throttle through four gears,
 a bump when it hits something, a warning each second outside the fence, and, in a turn, a ping
 that quickens as the nearest drone closes on the truck.
+
+Each drone sounds like a 5 inch quad: its four motors, each from its own output in
+SERVO_OUTPUT_RAW (motor speed off ArduPilot's thrust curve), whining at their blade rate a
+little out of tune with each other, with the prop wash under them. The props spool up and run
+down, a punch out opens the sound up, and a flip pulls the four apart. Each drone is heard
+from the map's camera: through a drone's camera, that drone at full loudness; from farther,
+quieter, panned left or right, its pitch rising as it closes and dropping as it passes. A
+landed, disarmed drone is silent. The nearest 6 within 600 m are heard. The driver in a duel
+hears the pilot's drones coming, their motor outputs sent with their poses. A log from before
+the motor outputs plays each armed drone at hover.
 
 Each sound is fixed in `sounds.js`, the same for both players. **Sound** in the toolbar, or `M`
 while driving, turns all of it on or off; the browser remembers which, and the COP and the

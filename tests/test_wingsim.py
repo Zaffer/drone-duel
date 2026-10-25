@@ -1,0 +1,439 @@
+"""The Chupito's flight model (swarm.wingsim), held to what is known of the real one.
+
+The targets come from TBS's specification and one pilot's INAV blackbox log; swarm.wingsim.airframe
+says which is which.
+"""
+
+import math
+
+import pytest
+
+from swarm.wingsim.aircraft import Aircraft, Controls, Phase
+from swarm.wingsim.airframe import CHUPITO
+from swarm.wingsim.rigidbody import from_euler, rotate, to_euler, unrotate
+from swarm.wingsim.strips import (
+    Flow,
+    Planform,
+    Section,
+    forces_and_moments,
+    lifting_line,
+    wing_strips,
+)
+from swarm.wingsim.weather import FOOT, Weather
+
+DT = 0.001
+ROLL_MIX = 0.95
+"""The logging pilot's roll mix: full roll stick drives each servo to 95 % of its travel."""
+
+
+def hold_level(ac: Aircraft, throttle: float, seconds: float, roll: float = 0.0) -> None:
+    """Fly level for `seconds` at `throttle`, an elevator loop holding the height, the aileron
+    holding `roll` (rad, right wing down positive)."""
+    target = ac.body.position[2]
+    climb_i = 0.0
+    for _ in range(round(seconds / DT)):
+        b = ac.body
+        bank, pitch, _ = to_euler(b.attitude)
+        climb = -b.velocity[2] - 0.5 * (b.position[2] - target)  # NED: down positive
+        climb_i += climb * DT
+        # Trailing edge down noses down: climbing, or pitching up, asks for more of it.
+        elevator = 0.08 * climb + 0.04 * climb_i + 0.15 * b.rates[1] + 0.3 * pitch
+        aileron = -1.5 * (bank - roll) - 0.1 * b.rates[0]
+        elevator = max(-1.0, min(1.0, elevator))
+        aileron = max(-1.0, min(1.0, aileron))
+        ac.step(Controls(throttle, elevator + aileron, elevator - aileron), DT, ground_down=1e6)
+
+
+def flying(speed: float) -> Aircraft:
+    """Thrown, then settled level near `speed` m/s by trading throttle for it."""
+    ac = Aircraft(CHUPITO)
+    ac.throw()
+    for _ in range(round(CHUPITO.launch.duration / DT) + 1):
+        ac.step(Controls(1.0), DT, ground_down=1e6)
+    throttle = 0.5
+    for _ in range(40):
+        hold_level(ac, throttle, 0.5)
+        throttle = max(0.0, min(1.0, throttle + 0.03 * (speed - ac.air.airspeed)))
+    return ac
+
+
+def test_frames() -> None:
+    q = from_euler(0.3, -0.2, 2.0)
+    assert to_euler(q) == pytest.approx((0.3, -0.2, 2.0))
+    v = (1.0, -2.0, 0.5)
+    assert unrotate(q, rotate(q, v)) == pytest.approx(v)
+    # Nose up 90 degrees: the nose points up, NED's -z.
+    assert rotate(from_euler(0, math.pi / 2, 0), (1.0, 0.0, 0.0)) == pytest.approx(
+        (0, 0, -1), abs=1e-9
+    )
+
+
+def test_controls_move_it_the_right_way() -> None:
+    af = CHUPITO
+    v = (20.0, 0.0, 0.0)
+    _, m0, _ = forces_and_moments(af.wing, v, (0, 0, 0), (0.0, 0.0), 1.225)
+    _, m_down, _ = forces_and_moments(af.wing, v, (0, 0, 0), (0.1, 0.1), 1.225)
+    _, m_roll, _ = forces_and_moments(af.wing, v, (0, 0, 0), (0.1, -0.1), 1.225)
+    assert m_down[1] < m0[1], "trailing edges down pitch the nose down"
+    assert m_roll[0] > 0, "left elevon down, right up, rolls right"
+    # Weathervane: air from the right (positive sideslip) yaws the nose right.
+    _, m_slip, _ = forces_and_moments(af.wing, (20.0, 2.0, 0.0), (0, 0, 0), (0, 0), 1.225)
+    assert m_slip[2] > 0
+
+
+def test_in_the_hand_the_accelerometer_reads_one_g_up() -> None:
+    ac = Aircraft(CHUPITO)
+    ac.step(Controls(), DT)
+    up = rotate(ac.body.attitude, ac.specific_force)
+    assert up == pytest.approx((0, 0, -9.80665), abs=1e-6)
+    assert ac.phase == Phase.HAND
+
+
+def test_the_throw_reads_as_a_launch_and_lets_go_at_launch_speed() -> None:
+    ac = Aircraft(CHUPITO)
+    ac.throw()
+    peak = 0.0
+    while ac.phase == Phase.THROW:
+        ac.step(Controls(1.0), DT)
+        peak = max(peak, ac.specific_force[0])
+    assert peak > 2 * 9.81, "INAV detects a throw at about 1.9 g forward"
+    assert ac.air.airspeed == pytest.approx(CHUPITO.launch.speed, rel=0.02)
+
+
+def test_it_flies_away_from_the_throw() -> None:
+    """With the wings held level and the nose up 20 degrees, as INAV's launch mode does: hands
+    off, the motor's torque rolls it over, and the thrust line, above the centre of mass, noses
+    it down."""
+    ac = Aircraft(CHUPITO)
+    ac.throw()
+    for _ in range(3000):
+        bank, pitch, _ = ac.euler
+        p, q, _ = ac.body.rates
+        aileron = max(-1.0, min(1.0, -1.5 * bank - 0.1 * p))
+        elevator = max(-1.0, min(1.0, 1.5 * (pitch - math.radians(20)) + 0.1 * q))
+        ac.step(Controls(1.0, elevator + aileron, elevator - aileron), DT)
+    assert ac.phase == Phase.FLYING
+    assert -ac.body.position[2] > CHUPITO.launch.height + 5, "climbs out at full throttle"
+
+
+def test_top_speed_and_power_match_the_log() -> None:
+    ac = flying(60)  # asks for more than it has: full throttle
+    ac.power.used_mah = 500  # the log's pack was part used: about 22 V under load
+    hold_level(ac, 1.0, 5)
+    assert ac.power.pack_voltage * ac.power.pack_current == pytest.approx(540, rel=0.15)
+    assert ac.air.airspeed == pytest.approx(42, abs=3)
+
+
+def test_it_cruises_as_tbs_says() -> None:
+    """TBS: cruise 55-70 km/h, at its 35 % cruise throttle."""
+    ac = Aircraft(CHUPITO)
+    ac.throw()
+    for _ in range(round(CHUPITO.launch.duration / DT) + 1):
+        ac.step(Controls(1.0), DT, ground_down=1e6)
+    hold_level(ac, 0.35, 25)
+    assert 55 / 3.6 * 0.85 < ac.air.airspeed < 70 / 3.6 * 1.15
+
+
+def coefficients(alpha: float, elevator: float = 0.0, speed: float = 15.0) -> tuple[float, float]:
+    """Lift and pitching moment coefficients at `alpha`, the elevons both at `elevator` (rad)."""
+    v = (speed * math.cos(alpha), 0.0, speed * math.sin(alpha))
+    wing = CHUPITO.wing
+    force, moment, _ = forces_and_moments(wing, v, (0, 0, 0), (elevator, elevator), 1.225)
+    q = 0.5 * 1.225 * speed * speed * wing.reference.area
+    lift = force[0] * math.sin(alpha) - force[2] * math.cos(alpha)
+    return lift / q, moment[1] / (q * wing.reference.chord)
+
+
+def trimmed_lift(alpha: float) -> float:
+    """The lift at `alpha` with the elevons holding it there, as a tailless wing must."""
+    lo, hi = -CHUPITO.elevon_max, CHUPITO.elevon_max
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if coefficients(alpha, mid)[1] > 0 else (lo, mid)
+    return coefficients(alpha, lo)[0]
+
+
+def test_stall_speed_is_tbs() -> None:
+    """TBS's 35 km/h: the most lift the elevons can hold, a tailless wing's trim costing some."""
+    cl_max = max(trimmed_lift(math.radians(a / 2)) for a in range(16, 60))
+    weight = CHUPITO.inertia.mass * 9.80665
+    stall = math.sqrt(2 * weight / (1.225 * CHUPITO.wing.reference.area * cl_max))
+    assert stall * 3.6 == pytest.approx(35, abs=2)
+
+
+@pytest.mark.parametrize(("speed", "logged"), [(23, 650), (45, 700)])
+def test_full_elevon_roll_rate_matches_the_log(speed: float, logged: float) -> None:
+    ac = flying(speed)
+    peak = 0.0
+    for _ in range(400):
+        ac.step(Controls(0.6, ROLL_MIX, -ROLL_MIX), DT, ground_down=1e6)
+        peak = max(peak, math.degrees(ac.body.rates[0]))
+    assert peak == pytest.approx(logged, rel=0.15)
+
+
+def test_hands_off_it_does_not_diverge_in_pitch() -> None:
+    ac = flying(25)
+    throttle = 0.5
+    hold_level(ac, throttle, 2)
+    trim = Controls(throttle, *[e / CHUPITO.elevon_max for e in ac.elevons])
+    for _ in range(5000):
+        ac.step(trim, DT, ground_down=1e6)
+    _, pitch, _ = ac.euler
+    assert abs(math.degrees(pitch)) < 35
+
+
+def test_a_dive_into_the_ground_is_a_crash_and_a_glide_on_is_a_landing() -> None:
+    ac = flying(25)
+    ground = ac.body.position[2] + 3
+    for _ in range(3000):
+        ac.step(Controls(1.0, 0.6, 0.6), DT, ground_down=ground)
+    assert ac.phase == Phase.CRASHED
+
+    ac = flying(15)
+    b = ac.body
+    ground = b.position[2] + 0.2
+    b.velocity = (b.velocity[0], b.velocity[1], 0.8)  # sinking gently, wings level
+    trim = Controls(0.0, *[e / CHUPITO.elevon_max for e in ac.elevons])
+    for _ in range(5000):
+        ac.step(trim, DT, ground_down=ground)
+    assert ac.phase == Phase.LANDED
+    assert math.hypot(ac.body.velocity[0], ac.body.velocity[1]) < 0.1, "slid to a stop"
+
+
+def test_the_vortex_lattice_agrees_with_lifting_surface_theory() -> None:
+    """A rectangular wing of the Chupito's aspect ratio against Helmbold's lift slope; sweep of
+    either sign, the Chupito's 12 degrees, hardly changes it."""
+    section = Section(
+        lift_slope=2 * math.pi,
+        zero_lift=0.0,
+        cm0=0.0,
+        cd0=0.0,
+        alpha_stall=1.0,
+        alpha_stall_neg=1.0,
+        stall_sharpness=30.0,
+        cd90=1.3,
+    )
+    cuts = tuple(0.4 * i / 8 for i in range(9))
+
+    def lift_slope(sweep_deg: float) -> float:
+        dx = 0.4 * math.tan(math.radians(sweep_deg))
+        plan = Planform(stations=((0.0, 0.092, -0.092), (0.4, 0.092 + dx, -0.092 + dx)), cuts=cuts)
+        strips = wing_strips(plan, section, (0.0, 0.0), (0.0, 0.0, 0.01), 1.0)
+        loading = lifting_line(strips)
+        area = sum(s.area for s in strips)
+        return (
+            2
+            * math.pi
+            * sum(sum(row) * s.area for row, s in zip(loading, strips, strict=True))
+            / area
+        )
+
+    aspect = 0.8**2 / (0.8 * 0.184)
+    helmbold = 2 * math.pi * aspect / (2 + math.sqrt(aspect**2 + 4))
+    assert lift_slope(0) == pytest.approx(helmbold, rel=0.06)
+    assert lift_slope(12) == pytest.approx(lift_slope(0), rel=0.04)
+    assert lift_slope(-12) == pytest.approx(lift_slope(0), rel=0.04)
+
+
+def test_a_full_pitch_pull_matches_the_log() -> None:
+    """LOG: at full pitch command (65 % of the elevons' travel) near 29 m/s, 7.5 g (6.1 to 9.1)
+    at a CL of 0.66 (0.47 to 0.81), the wing still flying."""
+    ac = flying(29)
+    trim = sum(ac.elevons) / 2 / CHUPITO.elevon_max
+    g, cl, alpha = [], [], []
+    for i in range(500):
+        ac.step(Controls(0.7, trim - 0.65, trim - 0.65), DT, ground_down=1e6)
+        if i >= 100:
+            q = 0.5 * 1.225 * ac.air.airspeed**2 * CHUPITO.wing.reference.area
+            g.append(-ac.specific_force[2] / 9.80665)
+            cl.append(g[-1] * CHUPITO.inertia.mass * 9.80665 / q)
+            alpha.append(math.degrees(ac.air.alpha))
+    assert 6.0 < sorted(g)[len(g) // 2] < 9.1
+    assert 0.47 < sorted(cl)[len(cl) // 2] < 0.81
+    assert max(alpha) < 20, "pulls hard, short of the stall"
+
+
+def test_let_go_in_a_stall_it_recovers() -> None:
+    """INAV's full up elevon at low speed, power off: it mushes, stalled, without dropping a wing
+    hard; let go, it flies again: no locked deep stall."""
+    ac = flying(15)
+    for _ in range(3000):
+        ac.step(Controls(0.0, -0.6, -0.6), DT, ground_down=1e6)
+    assert math.degrees(ac.air.alpha) > 12, "stalled"
+    assert abs(math.degrees(ac.euler[0])) < 30, "a gentle stall: no hard wing drop"
+    for _ in range(3000):
+        ac.step(Controls(0.0), DT, ground_down=1e6)
+    assert math.degrees(ac.air.alpha) < 8
+    assert ac.air.airspeed > 12
+
+
+def test_a_tail_slide_flips_it_over() -> None:
+    """Straight up, motor off: it stops, slides back tail first, and the reversed flow flips it
+    nose down (Selig's tail slide)."""
+    ac = Aircraft(CHUPITO)
+    ac.phase = Phase.FLYING
+    ac.body.position = (0.0, 0.0, -300.0)
+    ac.body.attitude = from_euler(0.0, math.radians(89), 0.0)
+    ac.body.velocity = (0.0, 0.0, -12.0)
+    least = 90.0
+    for _ in range(5000):
+        ac.step(Controls(0.0), DT, ground_down=1e6)
+        least = min(least, math.degrees(ac.euler[1]))
+    assert least < -30, "flipped nose down"
+    assert ac.air.airspeed > 10 and abs(math.degrees(ac.air.alpha)) < 20, "and flies again"
+
+
+def test_the_wing_damps_roll_with_no_airspeed() -> None:
+    """Hanging still, rolling: each strip meets the air of its own motion (strip theory)."""
+    _, moment, _ = forces_and_moments(CHUPITO.wing, (0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0, 0), 1.225)
+    assert moment[0] < -0.01
+
+
+def test_punching_the_throttle_kicks_it_in_roll() -> None:
+    """The airframe takes the motor's torque: spinning the rotor up, more than the prop's drag."""
+    ac = flying(20)
+    ac.power.omega = 300.0
+    ac.step(Controls(1.0), DT, ground_down=1e6)
+    kick = abs(ac.power.torque)
+    for _ in range(1000):
+        ac.step(Controls(1.0), DT, ground_down=1e6)
+    assert kick > 1.5 * abs(ac.power.torque)
+
+
+def test_flying_into_a_roof_is_a_crash_however_gently() -> None:
+    """Climbing gently, low, into something taller than it is: not a landing."""
+    ac = flying(16)
+    b = ac.body
+    b.velocity = (b.velocity[0], b.velocity[1], -1.0)
+    roof = b.position[2] - 3  # 3 m above it
+    ac.step(Controls(0.5), DT, ground_down=roof)
+    assert ac.phase == Phase.CRASHED
+
+
+def _lift(
+    alpha: float,
+    flow: Flow | None = None,
+    dt: float = 0.0,
+    ground: tuple[float, tuple[float, float, float]] | None = None,
+    speed: float = 12.0,
+) -> tuple[float, float, tuple[float, float, float]]:
+    """The whole wing's lift and drag coefficients at `alpha`, and its moment, N m."""
+    wing = CHUPITO.wing
+    v = (speed * math.cos(alpha), 0.0, speed * math.sin(alpha))
+    force, moment, _ = forces_and_moments(wing, v, (0, 0, 0), (0, 0), 1.225, flow, dt, ground)
+    q = 0.5 * 1.225 * speed**2 * wing.reference.area
+    lift = force[0] * math.sin(alpha) - force[2] * math.cos(alpha)
+    drag = -force[0] * math.cos(alpha) - force[2] * math.sin(alpha)
+    return lift / q, drag / q, moment
+
+
+def _sweep(degrees: list[float], rate: float, flow: Flow) -> dict[float, float]:
+    """Lift coefficients met at `degrees`, swept through at `rate` deg/s."""
+    dt, met = 0.002, {}
+    for a, b in zip(degrees, degrees[1:], strict=False):
+        steps = max(1, round(abs(b - a) / rate / dt))
+        for i in range(steps):
+            alpha = a + (b - a) * i / steps
+            met[round(alpha, 1)] = _lift(math.radians(alpha), flow, dt)[0]
+    return met
+
+
+def test_the_stall_has_hysteresis() -> None:
+    """Swept slowly up past the stall and back, the flow reattaches only below the angle it
+    separated at (low Reynolds numbers' laminar bubble), and lower down it is the same again."""
+    flow = Flow()
+    up = _sweep([0.0, 30.0], 2.0, flow)
+    down = _sweep([30.0, 0.0], 2.0, flow)
+    assert up[20.0] - down[20.0] > 0.15
+    assert up[10.0] == pytest.approx(down[10.0], abs=0.02)
+    assert up[10.0] == pytest.approx(_lift(math.radians(10))[0], abs=0.02), "slowly: static"
+
+
+def test_a_quick_pull_outruns_the_stall() -> None:
+    """Dynamic stall: pitched up fast, the flow separates late and the wing lifts past its static
+    maximum for a moment (Lorber and Carta's ramps, 30 to 70 % at these rates)."""
+    static = max(_lift(math.radians(a / 10))[0] for a in range(0, 300, 5))
+    slow = max(_sweep([0.0, 30.0], 5.0, Flow()).values())
+    quick = max(_sweep([0.0, 30.0], 200.0, Flow()).values())
+    assert slow == pytest.approx(static, rel=0.05)
+    assert 1.3 * static < quick < 1.8 * static
+
+
+def test_ground_effect_lifts_more_for_less_drag() -> None:
+    """McCormick's: at a tenth of the span up, the weaker downwash lifts more at the same angle
+    of attack for less drag; a span up, it is gone."""
+    alpha, up = math.radians(6), (0.0, 0.0, -1.0)
+    cl_free, cd_free, _ = _lift(alpha)
+    cl_low, cd_low, _ = _lift(alpha, ground=(0.1 * 0.8, up))
+    cl_high, _, _ = _lift(alpha, ground=(0.8, up))
+    assert 1.08 * cl_free < cl_low < 1.25 * cl_free
+    assert cd_low < cd_free
+    assert cl_high == pytest.approx(cl_free, rel=0.01)
+
+
+def test_ground_effect_rolls_a_low_wing_back_up() -> None:
+    """Banked low over the ground, the lower tip feels it most."""
+    bank = math.radians(10)
+    up = (0.0, -math.sin(bank), -math.cos(bank))  # right wing down: the ground's up, body frame
+    _, _, moment = _lift(math.radians(6), ground=(0.1, up))
+    assert moment[0] < -0.01, "rolls left, back toward level"
+
+
+def test_turbulence_is_mil_spec_dryden() -> None:
+    """MIL-F-8785C's low-altitude intensities at 100 ft in a 10 m/s wind, and its rotational
+    spectra integrated: σ_q 0.215, σ_r 0.193 rad/s at 15 m/s."""
+    weather = Weather(speed=10.0, span=0.8, seed=7)
+    w_, v_, p_, q_, r_ = [], [], [], [], []
+    for _ in range(100_000):
+        weather.step(0.01, 100 * FOOT, 15.0, (1.0, 0.0, 0.0, 0.0))
+        w_.append(weather.eddies[2])
+        v_.append(weather.eddies[1])
+        p, q, r = weather.rates
+        p_.append(p)
+        q_.append(q)
+        r_.append(r)
+
+    def sd(x: list[float]) -> float:
+        m = sum(x) / len(x)
+        return math.sqrt(sum((a - m) ** 2 for a in x) / len(x))
+
+    k = 0.177 + 0.000823 * 100
+    assert sd(w_) == pytest.approx(1.0, rel=0.1)
+    assert sd(v_) == pytest.approx(1.0 / k**0.4, rel=0.15)
+    long_w = 100 * FOOT
+    sigma_p = math.sqrt(0.1 * math.pi**2 * (math.pi * long_w / 3.2) ** (1 / 3) / (0.8 * long_w))
+    assert sd(p_) == pytest.approx(sigma_p, rel=0.1)
+    assert sd(q_) == pytest.approx(0.215, rel=0.1)
+    assert sd(r_) == pytest.approx(0.193, rel=0.1)
+
+
+def test_the_wind_falls_off_toward_the_ground() -> None:
+    weather = Weather(speed=8.0, from_deg=270.0, turbulence=0.0)
+    assert weather.shear(20 * FOOT) == pytest.approx(1.0)
+    assert weather.shear(0.02) == 0.0
+    assert 0.6 < weather.shear(1.0) < 0.8
+    weather.step(0.01, 20 * FOOT, 15.0, (1.0, 0.0, 0.0, 0.0))
+    assert weather.wind == pytest.approx((0.0, 8.0, 0.0), abs=1e-9), "from the west: to the east"
+
+
+def test_gusts_come_and_go() -> None:
+    weather = Weather(speed=5.0, from_deg=0.0, gusts=6.0, turbulence=0.0, seed=3)
+    peaks = []
+    for _ in range(12_000):
+        weather.step(0.01, 20 * FOOT, 15.0, (1.0, 0.0, 0.0, 0.0))
+        peaks.append(math.hypot(*weather.gust))
+    assert 2.0 < max(peaks) <= 6.0
+    assert peaks.count(0.0) > len(peaks) / 3, "and between them, the steady wind"
+
+
+def test_it_flies_through_rough_air() -> None:
+    """A strong wind's turbulence and gusts toss it about; it keeps flying."""
+    ac = flying(16)
+    ac.weather = Weather(speed=12.0, from_deg=90.0, gusts=8.0, span=0.8, seed=5)
+    speeds = []
+    for _ in range(20):
+        hold_level(ac, 0.5, 0.5)
+        speeds.append(ac.air.airspeed)
+        assert abs(math.degrees(ac.euler[0])) < 60
+    assert ac.phase == Phase.FLYING
+    assert max(speeds) - min(speeds) > 1.0, "tossed about"

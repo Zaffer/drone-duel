@@ -33,8 +33,11 @@ STREAMS_HZ: dict[int, float] = {
     apm.MAVLINK_MSG_ID_EKF_STATUS_REPORT: 2.0,
     apm.MAVLINK_MSG_ID_EXTENDED_SYS_STATE: 2.0,
     apm.MAVLINK_MSG_ID_RC_CHANNELS: 10.0,
+    apm.MAVLINK_MSG_ID_SERVO_OUTPUT_RAW: 10.0,
     apm.MAVLINK_MSG_ID_MISSION_CURRENT: 1.0,
 }
+MOTORS = 4
+"""A quad's motors: SERVO_OUTPUT_RAW's first four outputs."""
 PARAM_REFRESH_S = 15.0
 AVOID_PARAMS = ("AVD_ENABLE", "AVD_F_ACTION")
 """ArduPilot avoidance between the drones (sitl/swarm.parm), read back from each vehicle."""
@@ -169,6 +172,10 @@ class MavlinkLink:
             count = min(int(msg.chancount), 18)  # type: ignore[attr-defined]
             vehicle.rc_channels_us = tuple(
                 int(getattr(msg, f"chan{i}_raw")) for i in range(1, count + 1)
+            )
+        elif kind == "SERVO_OUTPUT_RAW":
+            vehicle.motors_us = tuple(
+                int(getattr(msg, f"servo{i}_raw")) for i in range(1, MOTORS + 1)
             )
         elif kind == "SYS_STATUS":
             health: int = msg.onboard_control_sensors_health  # type: ignore[attr-defined]

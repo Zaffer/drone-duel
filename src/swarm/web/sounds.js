@@ -14,6 +14,35 @@ const DEFAULT_GAP_MS = 40;
 const GEARS = [6, 13, 21, 34];
 /** Every engine's level: it runs the whole drive, so it stays under the other sounds. */
 const ENGINE_LEVEL = 0.5;
+/** The drones' motors: the sim's 5 inch quad (sitl/fpv5.json), 2207 motors on 5.1 inch
+ * tri-blades, about 30,000 rpm at full output. */
+const MOTOR = { maxRevS: 500, blades: 3, polePairs: 7, thrustExpo: 0.7 };
+/** Each motor a little off the others, cents: four never quite in tune, so they beat. */
+const MOTOR_DETUNE = [-14, 9, -5, 17];
+/** Motor speed (motorRevs) of an armed drone on the ground and hovering, for a report
+ * without its motor outputs (an old log). */
+const IDLE_REVS = 0.06;
+const HOVER_REVS = 0.33;
+/** A drone in FPV cruising is about as loud as the truck's engine to its driver, flat out
+ * still under a strike. */
+const DRONE_LEVEL = 0.22;
+/** Each drone a little off the others, cents at most: drones together never lock in phase. */
+const DRONE_SPREAD = 25;
+/** A drone this near is heard at full loudness; twice as far, half as loud. */
+const DRONE_FULL_M = 10;
+/** The other player's truck, heard by the pilot, likewise. */
+const TRUCK_FULL_M = 25;
+/** Drones heard together are turned down by their summed loudness to this power: five as
+ * near as one are about 2 dB louder than it, not 7. */
+const DRONE_CROWD = 0.75;
+/** The nearest drones are heard, this many at most, out to this far. */
+const DRONE_VOICES = 6;
+const DRONE_HEAR_M = 600;
+const SOUND_MS = 343;
+/** A drone's pitch shifts with its speed towards the listener, up to this fraction. */
+const DOPPLER_MAX = 0.15;
+/** A range changing faster than this, m/s, is a jump (another drone in the camera), not speed. */
+const JUMP_MS = 120;
 
 const hz = (midi) => 440 * 2 ** ((midi - 69) / 12);
 const clamp01 = (x) => Math.min(1, Math.max(0, Number(x) || 0));
@@ -175,6 +204,105 @@ function dieselEngine(ctx, out) {
     },
     stop: () => fadeOut(ctx, bus, sources),
   };
+}
+
+/** A quad's four motors: each a sawtooth at its blade rate, through a lowpass that opens as
+ * they speed up, with the motor's own whine above it, and the prop wash as noise. */
+function quadVoice(ctx, out, spread = 0) {
+  const bus = ctx.createGain();
+  bus.gain.value = 0;
+  const panner = ctx.createStereoPanner();
+  const level = ctx.createGain();
+  level.gain.value = DRONE_LEVEL;
+  bus.connect(panner).connect(level).connect(out);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.Q.value = 0.9;
+  filter.connect(bus);
+  const motors = MOTOR_DETUNE.map((detune) => {
+    const blade = ctx.createOscillator();
+    blade.type = "sawtooth";
+    blade.detune.value = detune + spread;
+    const whine = ctx.createOscillator();
+    whine.type = "triangle";
+    whine.detune.value = detune + spread;
+    const bladeGain = ctx.createGain();
+    bladeGain.gain.value = 0;
+    const whineGain = ctx.createGain();
+    whineGain.gain.value = 0;
+    blade.connect(bladeGain).connect(filter);
+    whine.connect(whineGain).connect(bus);
+    return { blade, whine, bladeGain, whineGain };
+  });
+  const wash = noiseSource(ctx);
+  const washFilter = ctx.createBiquadFilter();
+  washFilter.type = "bandpass";
+  washFilter.Q.value = 0.7;
+  const washGain = ctx.createGain();
+  washGain.gain.value = 0;
+  wash.connect(washFilter).connect(washGain).connect(bus);
+  const sources = [...motors.flatMap((m) => [m.blade, m.whine]), wash];
+  startAll(sources);
+  let lastMean = 0;
+  return {
+    /** `revs`: each motor 0..1 (motorRevs); `gain` for its distance, `pan` -1..1, and
+     * `doppler`, the factor on its pitch. */
+    set({ revs, gain, pan, doppler }, now = false) {
+      const t = ctx.currentTime;
+      const mean = revs.reduce((sum, r) => sum + r, 0) / revs.length;
+      // Props spin up quicker than they run down.
+      const k = now ? 0.005 : mean >= lastMean ? 0.04 : 0.15;
+      lastMean = mean;
+      for (const [i, m] of motors.entries()) {
+        const r = revs[i] ?? mean;
+        const revS = Math.max(1, MOTOR.maxRevS * r * doppler);
+        m.blade.frequency.setTargetAtTime(revS * MOTOR.blades, t, k);
+        m.whine.frequency.setTargetAtTime(revS * MOTOR.polePairs, t, k);
+        // Quiet at idle, near full by hover, a little louder still flat out.
+        m.bladeGain.gain.setTargetAtTime(0.16 * Math.min(1, 3 * r) ** 1.2 * (0.4 + r), t, k);
+        m.whineGain.gain.setTargetAtTime(0.02 * r, t, k);
+      }
+      filter.frequency.setTargetAtTime((700 + 4200 * mean) * doppler, t, k);
+      washFilter.frequency.setTargetAtTime((350 + 1600 * mean) * doppler, t, k);
+      washGain.gain.setTargetAtTime(0.5 * mean * mean, t, k);
+      bus.gain.setTargetAtTime(gain, t, 0.05);
+      panner.pan.setTargetAtTime(pan, t, now ? 0.005 : 0.05);
+    },
+    stop: () => fadeOut(ctx, bus, sources),
+  };
+}
+
+/** A motor's speed, 0 (stopped) to 1 (full), from its output in µs (1000 to 2000): its thrust
+ * on ArduPilot's thrust curve (MOT_THST_EXPO), the speed that thrust's square root. */
+export function motorRevs(us) {
+  const out = clamp01((us - 1000) / 1000);
+  const e = MOTOR.thrustExpo;
+  return Math.sqrt((1 - e) * out + e * out * out);
+}
+
+/** Each of a drone's four motors' speed (motorRevs) from its report: its motor outputs or,
+ * without them, an armed drone idling on the ground or hovering. */
+export function droneRevs(motors, armed, flying) {
+  if (motors?.length >= 4) return motors.slice(0, 4).map(motorRevs);
+  const r = !armed ? 0 : flying ? HOVER_REVS : IDLE_REVS;
+  return [r, r, r, r];
+}
+
+/** A drone's loudness `range` m from the listener: full up to DRONE_FULL_M, then falling as
+ * 1 / distance. */
+export function droneGain(range) {
+  return Math.min(1, DRONE_FULL_M / Math.max(range, 1e-3));
+}
+
+/** The truck's loudness to the pilot, `range` m from the listener. */
+export function truckGain(range) {
+  return Math.min(1, TRUCK_FULL_M / Math.max(range, 1e-3));
+}
+
+/** The factor on a drone's pitch closing on the listener at `rate` m/s (opening: negative). */
+export function doppler(rate) {
+  const f = SOUND_MS / (SOUND_MS - rate);
+  return Math.min(1 + DOPPLER_MAX, Math.max(1 - DOPPLER_MAX, f));
 }
 
 /** Drone closing pings once the nearest drone is this near the truck, m. */
@@ -349,9 +477,15 @@ class Sfx {
     play({ ctx: this.ctx, out: this._out, t: this.ctx.currentTime + 0.01 }, opts);
   }
 
-  /** The truck's engine, while sound is on. */
-  engine() {
-    return new EngineSound(this);
+  /** The truck's engine, while sound is on; `spatial`: heard from where it is (update's
+   * `where`), not from the driver's seat. */
+  engine({ spatial = false } = {}) {
+    return new EngineSound(this, spatial);
+  }
+
+  /** The drones' motors, each heard from where it is, while sound is on. */
+  drones() {
+    return new DroneSounds(this);
   }
 
   /** Whether sounds can play now: started by a click or key, the page shown. */
@@ -398,20 +532,31 @@ class Sfx {
 /** The engine's voice, made when it can be heard and dropped when it cannot (sound off, the
  * truck off the map, the page hidden). */
 class EngineSound {
-  constructor(sfx) {
+  constructor(sfx, spatial = false) {
     this.sfx = sfx;
+    this.spatial = spatial;
     this.voice = null;
+    /** A spatial engine's {gain, panner}, between its voice and the page's output. */
+    this._where = null;
     this.on = false;
     this.state = revs(0, 0);
+    this.where = { gain: 1, pan: 0 };
     this._unsubscribe = sfx.onChange(() => this._sync());
   }
 
-  /** Each frame: the truck's speed, m/s, and throttle -1..1; `on` false silences it. */
-  update(speed, throttle, on = true) {
+  /** Each frame: the truck's speed, m/s, and throttle -1..1; `on` false silences it. A spatial
+   * engine's `where`: {gain, pan} for its distance and side. */
+  update(speed, throttle, on = true, where = this.where) {
     this.on = on;
     this.state = revs(speed, throttle);
+    this.where = where;
     this._sync();
     this.voice?.set(this.state);
+    if (this._where) {
+      const t = this.sfx.ctx.currentTime;
+      this._where.gain.gain.setTargetAtTime(where.gain, t, 0.05);
+      this._where.panner.pan.setTargetAtTime(where.pan, t, 0.05);
+    }
   }
 
   stop() {
@@ -426,9 +571,92 @@ class EngineSound {
     if (want === Boolean(this.voice)) return;
     this.voice?.stop();
     this.voice = null;
+    this._where = null;
     if (!want) return;
-    this.voice = dieselEngine(sfx.ctx, sfx._out);
+    let out = sfx._out;
+    if (this.spatial) {
+      const gain = sfx.ctx.createGain();
+      gain.gain.value = this.where.gain;
+      const panner = sfx.ctx.createStereoPanner();
+      panner.pan.value = this.where.pan;
+      gain.connect(panner).connect(out);
+      this._where = { gain, panner };
+      out = gain;
+    }
+    this.voice = dieselEngine(sfx.ctx, out);
     this.voice.set(this.state, true);
+  }
+}
+
+/** The drones' voices: the nearest ones spinning, each made when it can be heard and dropped
+ * when it cannot (sound off, out of hearing, landed and disarmed, gone from the map). */
+class DroneSounds {
+  constructor(sfx) {
+    this.sfx = sfx;
+    /** id -> quadVoice, of those heard now. */
+    this.voices = new Map();
+    /** id -> {range, at, rate}: how fast each drone closes on the listener, m/s. */
+    this._motion = new Map();
+    this.heard = [];
+    /** The factor on every drone's gain for how many are heard (DRONE_CROWD). */
+    this._crowd = 1;
+    this._unsubscribe = sfx.onChange(() => this._sync());
+  }
+
+  /** Each frame: every drone there is to hear, [{id, revs (droneRevs), range: metres from
+   * the listener, pan: -1 (left) to 1}]. */
+  update(drones) {
+    const now = performance.now();
+    for (const d of drones) d.rate = this._closing(d, now);
+    for (const id of this._motion.keys()) {
+      if (!drones.some((d) => d.id === id)) this._motion.delete(id);
+    }
+    this.heard = drones
+      .filter((d) => d.range < DRONE_HEAR_M && d.revs.some((r) => r > 0.01))
+      .sort((a, b) => a.range - b.range)
+      .slice(0, DRONE_VOICES);
+    const total = Math.hypot(...this.heard.map((d) => droneGain(d.range)));
+    this._crowd = 1 / Math.max(1, total) ** DRONE_CROWD;
+    this._sync();
+    for (const d of this.heard) this.voices.get(d.id)?.set(this._sound(d));
+  }
+
+  stop() {
+    this._unsubscribe();
+    this.heard = [];
+    this._sync();
+  }
+
+  _sound(d) {
+    return { revs: d.revs, gain: droneGain(d.range) * this._crowd, pan: d.pan, doppler: doppler(d.rate) };
+  }
+
+  /** Drone `d`'s speed towards the listener, m/s, smoothed over the frames. */
+  _closing(d, now) {
+    const m = this._motion.get(d.id);
+    this._motion.set(d.id, { range: d.range, at: now, rate: m?.rate ?? 0 });
+    const dt = m ? (now - m.at) / 1000 : 0;
+    if (!(dt > 0)) return m?.rate ?? 0;
+    const raw = (m.range - d.range) / dt;
+    const rate = Math.abs(raw) > JUMP_MS ? 0 : m.rate + (raw - m.rate) * Math.min(1, dt / 0.25);
+    this._motion.get(d.id).rate = rate;
+    return rate;
+  }
+
+  _sync() {
+    const sfx = this.sfx;
+    const want = sfx.live && sfx.enabled ? new Map(this.heard.map((d) => [d.id, d])) : new Map();
+    for (const [id, voice] of this.voices) {
+      if (want.has(id)) continue;
+      voice.stop();
+      this.voices.delete(id);
+    }
+    for (const [id, d] of want) {
+      if (this.voices.has(id)) continue;
+      const voice = quadVoice(sfx.ctx, sfx._out, (Math.random() * 2 - 1) * DRONE_SPREAD);
+      voice.set(this._sound(d), true);
+      this.voices.set(id, voice);
+    }
   }
 }
 

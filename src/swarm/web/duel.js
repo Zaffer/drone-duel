@@ -16,8 +16,9 @@
 //                          "out" (the guest's drones are all out)
 //   field   pilot → driver {b: [lat, lon], fence: [[lat, lon], ...]}: the truck's start, the
 //                          fence it keeps inside (none: anywhere)
-//   drones  pilot → driver [[sysid, x, y, z, qx, qy, qz, qw, armed], ...]: those still flying
-//   car     driver → pilot [x, y, z, qx, qy, qz, qw, speed]
+//   drones  pilot → driver [[sysid, x, y, z, qx, qy, qz, qw, armed, m1, m2, m3, m4], ...]: those
+//                          still flying, with their motor outputs in µs (none: not reported)
+//   car     driver → pilot [x, y, z, qx, qy, qz, qw, speed, throttle]: m/s, -1..1
 //   hit     pilot → driver {sysid, at: [x, y, z], counted}: a drone struck the truck
 //   lost    pilot → driver {sysid, at: [x, y, z], why}: a drone crashed; it is out
 

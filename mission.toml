@@ -18,10 +18,10 @@ landing_zone_radius_m = 25.0           # Landing zone around point B. The viewer
 [fence]  # Sim and real drones. The stack uploads it to every drone. Each drone checks it on board.
 enabled = true                         # false: the stack turns the fence off on every drone.
 corners = [                            # Polygon the drones must stay inside: [lat, lon], 3 or more, in order around.
-  [45.32225, -75.76260],
-  [45.32225, -75.75500],
-  [45.31685, -75.75500],
-  [45.31685, -75.76260],
+  [45.326717, -75.751174],
+  [45.323087, -75.765724],
+  [45.310873, -75.760051],
+  [45.315727, -75.743700],
 ]
 max_height_m = 100.0                   # Ceiling, metres above the takeoff point. 10 to 1000.
 action = "brake"                       # At the fence: "brake" (stop and hover), "rtl" (fly home), "land", "report" (warn only).
@@ -31,7 +31,7 @@ home = [45.319821, -75.758630]         # Start point of drone 1 [lat, lon].
 ground_alt_m = 77.0                    # Ground height at home, metres above sea level. "auto" gets it from the internet.
 spawn_spacing_m = 5.0                  # Distance between drones at the start. They stand in a line to the east.
 router = "sitl"                        # "sitl": simulated drones. "field": UDP, the same as the real drones.
-wind_speed_ms = 0.0                    # Wind speed, m/s.
+wind_speed_ms = 0.0                    # Wind speed, m/s. The wing (swarm wingsim): at 6 m up, less lower down, turbulent to match.
 wind_from_deg = 180.0                  # Wind direction, degrees true: where the wind comes from.
-wind_turbulence_ms = 0.0               # Gusts, m/s.
+wind_turbulence_ms = 0.0               # Gusts, m/s. The wing: the strongest gust's rise above the wind.
 vtx_mw = 25.0                          # Camera feed: the video transmitter's power, mW (25 to 800). Farther from takeoff, the analog picture gets noisier.

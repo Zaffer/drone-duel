@@ -16,12 +16,12 @@ import { BaseMap } from "./basemap.js";
 import { Director } from "./director.js";
 import { DuelMatch } from "./duelmatch.js";
 import { callsign, controlMode, DEFAULT_COLOR, DRONE_COLORS, Fleet } from "./fleet.js";
-import { AnalogFeed, dipoleGainDbi, linkCnrDb } from "./analog.js";
+import { AnalogFeed, linkCnrDb } from "/vendor/analog-vision/analog.js";
 import { Instruments } from "./instruments.js";
 import { OsdRaster, OsdView } from "./osd.js";
 import { PlanLayer } from "./plans.js";
 import { cameraAxes } from "./sensor.js";
-import { sfx } from "./sounds.js";
+import { droneRevs, sfx, truckGain } from "./sounds.js";
 
 const C = Cesium;
 const $ = (id) => document.getElementById(id);
@@ -380,6 +380,49 @@ viewer.scene.postRender.addEventListener(() => {
   }
 });
 
+// -- the drones' sound ---------------------------------------------------------------------
+// Each drone's motors, heard from the map's camera: through a drone's camera, that drone's
+// own; driving in the duel, the pilot's drones closing on the truck. Flying in the duel, the
+// driver's truck too.
+
+const droneSounds = sfx.drones();
+const truckSound = sfx.engine({ spatial: true });
+const toSource = new C.Cartesian3();
+
+/** How far `pos` is from the camera, m, and to which side: pan -1 (left) to 1. */
+function heardFrom(pos) {
+  C.Cartesian3.subtract(pos, camera.positionWC, toSource);
+  const range = C.Cartesian3.magnitude(toSource);
+  const pan = range < 1 ? 0 : (0.7 * C.Cartesian3.dot(toSource, camera.rightWC)) / range;
+  return { range, pan };
+}
+
+/** Every drone there is to hear (DroneSounds.update), from the camera. */
+function audibleDrones() {
+  const sources = [];
+  if (!fleet.driving) {
+    for (const v of fleet.vehicles.values()) {
+      const d = v.data;
+      if (!d?.link || fleet.lost.has(v.sysid)) continue;
+      sources.push({ id: v.sysid, pos: v.currentPosition(), revs: droneRevs(d.motors, d.armed, d.alt > 0.5) });
+    }
+  }
+  sources.push(...duel.audibleDrones());
+  return sources.filter((s) => s.pos).map((s) => ({ id: s.id, revs: s.revs, ...heardFrom(s.pos) }));
+}
+
+function hearTruck() {
+  const truck = duel.audibleTruck();
+  if (!truck) return truckSound.update(0, 0, false);
+  const { range, pan } = heardFrom(truck.pos);
+  truckSound.update(truck.speed, truck.throttle, true, { gain: truckGain(range), pan });
+}
+
+viewer.scene.postRender.addEventListener(() => {
+  droneSounds.update(audibleDrones());
+  hearTruck();
+});
+
 // -- the camera feed's video link -----------------------------------------------------------
 
 /** The receiver's antenna above the ground at the takeoff point, m: the pilot's goggles. */
@@ -389,6 +432,14 @@ const RECEIVER_HEIGHT_M = 1.5;
 const FADE_DB = 2;
 const FADE_S = 0.6;
 let fade = { db: 0, at: 0 };
+
+/** A half-wave dipole's gain, dBi, at `cosAxis`, the cosine of the angle from its axis: 2.15
+ * broadside, a null along the axis (filled in to -20 dBi by reflections). */
+function dipoleGainDbi(cosAxis) {
+  const s = Math.sqrt(Math.max(1 - cosAxis * cosAxis, 1e-6));
+  const g = (Math.cos((Math.PI / 2) * cosAxis) / s) ** 2 * 1.64;
+  return Math.max(10 * Math.log10(g), -20);
+}
 
 /** The video link's carrier to noise for the camera feed's drone, dB: free space from the
  * takeoff point (the frame's origin) at the VTX power, each end a dipole standing up from its
@@ -875,4 +926,6 @@ window.swarmView = {
   freeCamera,
   select,
   duel,
+  droneSounds,
+  truckSound,
 };

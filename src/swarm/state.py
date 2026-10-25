@@ -73,6 +73,9 @@ class VehicleState:
     mode_changed_s: float = 0.0
     rc_channels_us: tuple[int, ...] = ()
     """Raw RC input per channel, channel 1 first, as reported in RC_CHANNELS."""
+    motors_us: tuple[int, ...] = ()
+    """Output to motors 1-4 in µs, as reported in SERVO_OUTPUT_RAW: SERVO1-4 drive a quad's
+    motors (ArduPilot's defaults)."""
     mission_seq: int | None = None
     """Mission item being flown or next up, from MISSION_CURRENT. Home is item 0."""
     mission_state: int = 0

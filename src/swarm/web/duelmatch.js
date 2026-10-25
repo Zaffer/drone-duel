@@ -160,6 +160,16 @@ export class DuelMatch {
     this._setUrl(null);
   }
 
+  /** The opponent's drones to hear while driving (DriverRole.audible); none otherwise. */
+  audibleDrones() {
+    return this.role instanceof DriverRole ? this.role.audible() : [];
+  }
+
+  /** The driver's truck to hear while flying (PilotRole.audibleTruck); null otherwise. */
+  audibleTruck() {
+    return this.role instanceof PilotRole ? this.role.audibleTruck() : null;
+  }
+
   /** Each telemetry frame. */
   frame() {
     this._revive();

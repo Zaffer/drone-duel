@@ -97,6 +97,7 @@ export class PilotRole {
     link.on("car", (pose) => {
       this.track.add(pose);
       this.truckSpeed = Number(pose[7]) || 0;
+      this.truckThrottle = Number(pose[8]) || 0;
     });
     this.sendField();
   }
@@ -111,6 +112,12 @@ export class PilotRole {
   /** The driver's truck is on the map, its poses coming. */
   get truckLive() {
     return this.link.connected && this.track.age < TRUCK_STALE_MS;
+  }
+
+  /** The truck to hear: {pos, speed, throttle}; null while it is not on the map. */
+  audibleTruck() {
+    const pos = this.truckLive ? this.currentPosition() : undefined;
+    return pos ? { pos, speed: this.truckSpeed ?? 0, throttle: this.truckThrottle ?? 0 } : null;
   }
 
   /** Where the truck is drawn now; for the range and bearing line (Fleet.duelTruck). */
@@ -151,7 +158,7 @@ export class PilotRole {
     for (const view of this.fleet.vehicles.values()) {
       if (!view.data?.link || this.fleet.lost.has(view.sysid)) continue;
       const pose = view.framePose();
-      if (pose) drones.push([view.sysid, ...packPose(pose.pos, pose.quat), view.data.armed ? 1 : 0]);
+      if (pose) drones.push([view.sysid, ...packPose(pose.pos, pose.quat), view.data.armed ? 1 : 0, ...(view.data.motors ?? [])]);
     }
     this.link.send("drones", drones);
   }

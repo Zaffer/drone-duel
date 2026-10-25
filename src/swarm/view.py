@@ -8,7 +8,10 @@ also streams every copter's physics (swarm.physics) to a page showing a camera f
 state as it comes, unbuffered: what a camera would see, not the telemetry; and every copter's
 ArduPilot OSD (swarm.osd), each screen as it is drawn, to lay over it. The page is
 swarm/web/, with its drone and truck models (swarm.fpvmodel, swarm.truckmodel), and
-drive.html beside it, a truck to drive on the map's 3D tiles (`swarm drive`). The two pages
+drive.html beside it, a truck to drive on the map's 3D tiles (`swarm drive`), and wing.html,
+the TBS Chupito to fly (`swarm wing`, its model fetched by scripts/setup.sh), or to watch fly on
+INAV SITL (`swarm wingsim`: the wing streamed from /wing, the map's ground under it posted back).
+The first two pages
 meet in the duel peer to peer, browser to browser (duel.js), not through this server. The
 libraries they load (CesiumJS, milsymbol, mgrs, Rapier, Trystero) are in external/web/,
 fetched by scripts/setup.sh. Map keys come from the environment or .env.local.
@@ -27,7 +30,7 @@ from dataclasses import asdict, dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict, cast
 
 from swarm.geo import LocalFrame
 from swarm.launch import LEADER_RADIUS_M
@@ -87,6 +90,25 @@ class RadioSource(Protocol):
     def stop(self) -> None: ...
 
 
+class WingSource(Protocol):
+    """The fixed wing on INAV SITL (swarm.wingrun), for wing.html to draw: where it is, as a
+    Feed, and the page's commands back. The wing flies in its own heights above sea level from
+    `origin` (lat, lon, alt), the map in its own; the page lines the two up at the origin."""
+
+    @property
+    def origin(self) -> tuple[float, float, float]: ...
+
+    def latest(self) -> dict[int, tuple[int, Any]]: ...
+
+    def throw(self) -> None: ...
+
+    def reset(self) -> None: ...
+
+    def ground(self, lat: float, lon: float, alt: float) -> None:
+        """The map's ground at `lat`, `lon` is at `alt`, in the wing's heights."""
+        ...
+
+
 class Feed(Protocol):
     def latest(self) -> dict[int, tuple[int, Any]]:
         """Per copter: how many states so far, and the last, a dataclass."""
@@ -124,6 +146,8 @@ class ViewVehicle(TypedDict):
     battery_v: float | None
     sticks: list[int]
     """RC input of channels 1-4 (roll, pitch, throttle, yaw) in µs; empty until reported."""
+    motors: list[int]
+    """Output to motors 1-4 in µs (SERVO_OUTPUT_RAW); empty until reported."""
     slot: list[float] | None
     """The formation slot ArduPilot FOLLOW flies to, as [lat, lon]; None when not following."""
     wp: int | None
@@ -173,6 +197,7 @@ def to_view_frame(snap: dict[str, Any], fallback_origin: LocalFrame) -> ViewFram
                 battery=v.get("battery"),
                 battery_v=v.get("battery_v"),
                 sticks=v.get("sticks", []),
+                motors=v.get("motors", []),
                 slot=None
                 if slot_n is None or slot_e is None
                 else list(frame.to_latlon(slot_n, slot_e)),
@@ -294,7 +319,7 @@ class ViewConfig:
     """The fence's corners, [lat, lon] in order round; empty with the fence off. The duel's
     truck must keep inside it."""
     vtx_mw: float = 25.0
-    """The camera feed's video transmitter power (web/analog.js)."""
+    """The camera feed's video transmitter power (analog-vision's analog.js, in app.js)."""
     host: str = "127.0.0.1"
     http_port: int = DEFAULT_HTTP_PORT
     telemetry_port: int = DEFAULT_PORT
@@ -328,6 +353,8 @@ class ViewServer:
         """The sim's copters, for the duel's /sim/destroy and /sim/reset; None elsewhere."""
         self.radio: RadioSource | None = None
         """The radio, for /radio: read from the first page that asks (radio_source)."""
+        self.wing: WingSource | None = None
+        """The wing on INAV SITL, for /wing and wing.html; None elsewhere."""
         self._radio_lock = threading.Lock()
 
     @property
@@ -353,6 +380,7 @@ class ViewServer:
             "vtxMw": self.config.vtx_mw,
             "replay": self.replay.name if self.replay else None,
             "sim": self.sim is not None,
+            "wing": {"origin": self.wing.origin} if self.wing else None,
         }
 
     def start(self) -> None:
@@ -461,6 +489,8 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 self._feed(server.osd)
             elif path == "/radio":
                 self._radio()
+            elif path == "/wing":
+                self._feed(server.wing)
             elif path.startswith("/osd/font/") and path.endswith(".png"):
                 index = path.removeprefix("/osd/font/").removesuffix(".png")
                 png = font_png(int(index)) if index.isdigit() else None
@@ -476,26 +506,43 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 self._file(WEB, path.lstrip("/") or "index.html")
 
         def do_POST(self) -> None:  # noqa: N802
-            """The duel's sim controls. Only from this machine, and only as JSON: a web page
-            elsewhere cannot send JSON here without a CORS preflight, which is refused."""
+            """The duel's sim controls and the wing's. Only from this machine, and only as JSON:
+            a web page elsewhere cannot send JSON here without a CORS preflight, which is
+            refused."""
             path = self.path.split("?", 1)[0]
             sim = server.sim
-            if path not in ("/sim/destroy", "/sim/reset") or sim is None:
+            wing = server.wing
+            if path in ("/sim/destroy", "/sim/reset") and sim is not None:
+                body = self._json_body()
+                if body is not None:
+                    self._sim(path, sim, body)
+            elif path in ("/wing/throw", "/wing/reset", "/wing/ground") and wing is not None:
+                body = self._json_body()
+                if body is not None:
+                    self._wing(path, wing, body)
+            else:
                 self.send_error(HTTPStatus.NOT_FOUND)
-                return
+
+        def _json_body(self) -> dict[str, object] | None:
+            """The posted JSON object, or None having refused it."""
             loopback = self.client_address[0] in ("127.0.0.1", "::1")
             json_body = self.headers.get("Content-Type", "").startswith("application/json")
             if not loopback or not json_body:
                 self.send_error(HTTPStatus.FORBIDDEN)
-                return
+                return None
             length = int(self.headers.get("Content-Length") or 0)
             try:
-                body: Any = json.loads(self.rfile.read(length) or b"{}")
+                body: object = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
+                body = None
+            if not isinstance(body, dict):
                 self.send_error(HTTPStatus.BAD_REQUEST)
-                return
+                return None
+            return cast(dict[str, object], body)
+
+        def _sim(self, path: str, sim: SimControl, body: dict[str, object]) -> None:
             if path == "/sim/destroy":
-                sysid = body.get("sysid") if isinstance(body, dict) else None
+                sysid = body.get("sysid")
                 if not isinstance(sysid, int):
                     self.send_error(HTTPStatus.BAD_REQUEST)
                     return
@@ -505,6 +552,21 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 threading.Thread(target=sim.reset, name="sim-reset", daemon=True).start()
                 done = True
             self._send(json.dumps({"ok": done}).encode(), ".json")
+
+        def _wing(self, path: str, wing: WingSource, body: dict[str, object]) -> None:
+            if path == "/wing/ground":
+                keys = ("lat", "lon", "alt")
+                where = [v for k in keys if isinstance(v := body.get(k), int | float)]
+                if len(where) != 3:
+                    self.send_error(HTTPStatus.BAD_REQUEST)
+                    return
+                lat, lon, alt = (float(v) for v in where)
+                wing.ground(lat, lon, alt)
+            elif path == "/wing/throw":
+                wing.throw()
+            else:
+                wing.reset()
+            self._send(b'{"ok": true}', ".json")
 
         def _send(self, body: bytes, suffix: str) -> None:
             self.send_response(HTTPStatus.OK)

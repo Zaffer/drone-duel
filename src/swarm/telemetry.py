@@ -35,6 +35,8 @@ class VehicleSnapshot(TypedDict):
     battery_v: float | None
     sticks: list[int]
     """RC input of channels 1-4 (roll, pitch, throttle, yaw) in µs; empty until reported."""
+    motors: list[int]
+    """Output to motors 1-4 in µs (SERVO_OUTPUT_RAW); empty until reported."""
     slot_n: float | None
     slot_e: float | None
     wp: int | None

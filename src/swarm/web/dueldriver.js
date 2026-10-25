@@ -7,7 +7,7 @@ import { packModelMatrix, PoseTrack } from "./duel.js";
 import { DriveSession } from "./drivesession.js";
 import { callsign, DRONE_MODEL } from "./fleet.js";
 import { poof } from "./smoke.js";
-import { PROXIMITY_M, proximityGap, sfx } from "./sounds.js";
+import { droneRevs, PROXIMITY_M, proximityGap, sfx } from "./sounds.js";
 
 const C = Cesium;
 const $ = (id) => document.getElementById(id);
@@ -43,7 +43,7 @@ export class DriverRole {
     this._destroyed = false;
     this._sentAt = 0;
     this._pingAt = 0;
-    /** sysid -> {track, armed, out} */
+    /** sysid -> {track, armed, motors, out} */
     this.drones = new Map();
     this.source = new C.CustomDataSource("duel");
     this.viewer.dataSources.add(this.source);
@@ -122,7 +122,8 @@ export class DriverRole {
     const now = performance.now();
     if (now - this._sentAt < 1000 / TRUCK_HZ) return;
     this._sentAt = now;
-    this.link.send("car", [...packModelMatrix(session.car.modelMatrix), Math.round(session.car.speed * 10) / 10]);
+    const round = (x) => Math.round((x ?? 0) * 10) / 10;
+    this.link.send("car", [...packModelMatrix(session.car.modelMatrix), round(session.car.speed), round(session.throttle)]);
   }
 
   /** In a turn, a ping as the nearest drone closes on the truck: quicker the nearer. */
@@ -170,16 +171,28 @@ export class DriverRole {
 
   _drones(list) {
     if (!Array.isArray(list)) return;
-    for (const [sysid, x, y, z, qx, qy, qz, qw, armed] of list) {
+    for (const [sysid, x, y, z, qx, qy, qz, qw, armed, ...motors] of list) {
       if (!Number.isInteger(sysid)) continue;
       const d = this.drones.get(sysid) ?? this._addDrone(sysid);
       d.track.add([x, y, z, qx, qy, qz, qw]);
       d.armed = Boolean(armed);
+      d.motors = motors.every(Number.isFinite) ? motors : [];
     }
   }
 
+  /** The pilot's drones to hear: [{id, pos, revs}] of those in play. */
+  audible() {
+    const out = [];
+    for (const d of this.drones.values()) {
+      if (d.out || d.track.age >= DRONE_STALE_MS) continue;
+      const pos = d.track.position.getValue(C.JulianDate.now());
+      if (pos) out.push({ id: `duel-${d.sysid}`, pos, revs: droneRevs(d.motors, d.armed, true) });
+    }
+    return out;
+  }
+
   _addDrone(sysid) {
-    const d = { sysid, track: new PoseTrack(DRONE_DELAY_S), armed: false, out: false };
+    const d = { sysid, track: new PoseTrack(DRONE_DELAY_S), armed: false, motors: [], out: false };
     this.drones.set(sysid, d);
     const shown = () => !d.out && d.track.age < DRONE_STALE_MS;
     const threat = new C.CallbackProperty(() => shown() && d.armed, false);

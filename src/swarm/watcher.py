@@ -192,6 +192,7 @@ class Watcher:
                     battery=v.battery_pct,
                     battery_v=v.battery_v,
                     sticks=list(v.rc_channels_us[:4]),
+                    motors=list(v.motors_us),
                     slot_n=None if slot is None else float(slot[0]),
                     slot_e=None if slot is None else float(slot[1]),
                     wp=v.mission_seq,

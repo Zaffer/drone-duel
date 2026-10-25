@@ -43,8 +43,8 @@ export function isRadio(pad) {
 }
 
 /** The radio's channels from /radio, one stream for the page: [-1..1, ...] from channel 1, or
- * null with no radio. Open while a DriveRadio is. */
-const feed = {
+ * null with no radio. Open while a DriveRadio (or the wing page, wing.js) is. */
+export const feed = {
   channels: null,
   source: null,
   users: 0,

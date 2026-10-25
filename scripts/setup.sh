@@ -84,6 +84,36 @@ fetch_npm trystero "$TRYSTERO_VERSION"
 fetch_npm @trystero-p2p/nostr "$TRYSTERO_VERSION" trystero-nostr
 fetch_npm @trystero-p2p/core "$TRYSTERO_VERSION" trystero-core
 fetch_npm @noble/secp256k1 "$SECP256K1_VERSION" noble-secp256k1
+# The camera feed's analog video link (app.js): analog-vision's GPU chain, copied from a
+# checkout beside this one (ANALOG_VISION, default ../analog-vision) on every run, so it
+# follows that checkout; else fetched from GitHub at ANALOG_VISION_REF.
+ANALOG_VISION="${ANALOG_VISION:-$ROOT/../analog-vision}"
+ANALOG_VISION_REF="${ANALOG_VISION_REF:-main}"
+mkdir -p "$WEB/analog-vision"
+if [ -f "$ANALOG_VISION/src/analog_vision/web/analog.js" ]; then
+    cp "$ANALOG_VISION/src/analog_vision/web/analog.js" "$WEB/analog-vision/analog.js"
+else
+    curl -fsSL -o "$WEB/analog-vision/analog.js" \
+        "https://raw.githubusercontent.com/Synetic-Labs/Analog-Vision/$ANALOG_VISION_REF/src/analog_vision/web/analog.js"
+fi
+# The wing page's TBS Chupito (wing.js): narenana's model for Nanawing, as sim.narenana.com
+# serves it. Not committed: it has no licence, and it carries Team BlackSheep's logos.
+CHUPITO_GLB=chupito_v6.glb
+mkdir -p "$WEB/chupito"
+[ -f "$WEB/chupito/$CHUPITO_GLB" ] ||
+    curl -fsSL -o "$WEB/chupito/$CHUPITO_GLB" "https://sim.narenana.com/assets/models/real/$CHUPITO_GLB"
+
+# INAV SITL for the Chupito's flight model (swarm.wingsim). Building INAV needs Ruby, so this is
+# the binary INAV's Configurator ships for its SITL tab (Configurator 9.1.1: INAV 9.1.0).
+INAV_CONFIGURATOR_VERSION=9.1.1
+if [ ! -x "$EXT/inav/inav_SITL" ]; then
+    mkdir -p "$EXT/inav"
+    zip="$(mktemp --suffix=.zip)"
+    curl -fsSL -o "$zip" "https://github.com/iNavFlight/inav-configurator/releases/download/$INAV_CONFIGURATOR_VERSION/INAV-Configurator_linux_x64_$INAV_CONFIGURATOR_VERSION.zip"
+    unzip -j -o "$zip" '*/resources/sitl/linux/inav_SITL' -d "$EXT/inav"
+    chmod +x "$EXT/inav/inav_SITL"
+    rm -f "$zip"
+fi
 # The drone model is committed with the viewer (src/swarm/web/models/, built by swarm.fpvmodel).
 
 echo "setup complete"

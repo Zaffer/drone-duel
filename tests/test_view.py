@@ -5,6 +5,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -125,9 +126,10 @@ def test_watcher_snapshot_georeferences_back_to_the_vehicle_position() -> None:
     assert (row["roll"], row["pitch"], row["battery"], row["battery_v"]) == (0.05, -0.1, 77, 24.8)
 
 
-def test_snapshot_marks_pilot_flown_drones_and_carries_their_sticks() -> None:
+def test_snapshot_marks_pilot_flown_drones_and_carries_their_sticks_and_motors() -> None:
     pilot = _flying(1, apm.COPTER_MODE_LOITER)
     pilot.rc_channels_us = (1500, 1400, 1650, 1500, 1800, 1000)
+    pilot.motors_us = (1230, 1250, 1240, 1260)
     grounded = _flying(3, apm.COPTER_MODE_STABILIZE, east=10.0)
     grounded.armed = False
     link = FakeLink([pilot, _flying(2, apm.COPTER_MODE_GUIDED, east=5.0), grounded])
@@ -141,6 +143,8 @@ def test_snapshot_marks_pilot_flown_drones_and_carries_their_sticks() -> None:
     assert [rows[s]["pilot"] for s in (1, 2, 3)] == [True, False, False]
     assert rows[1]["sticks"] == [1500, 1400, 1650, 1500]
     assert rows[2]["sticks"] == []
+    assert rows[1]["motors"] == [1230, 1250, 1240, 1260]
+    assert rows[2]["motors"] == []
 
 
 def test_view_frame_converts_slot_and_target_to_lat_lon() -> None:
@@ -170,7 +174,7 @@ def test_old_logs_without_origin_or_attitude_use_the_fallback() -> None:
     v = frame["vehicles"][0]
     assert (v["lat"], v["lon"]) == pytest.approx(FALLBACK.to_latlon(100.0, -50.0))
     assert (v["roll"], v["pitch"], v["battery"], v["battery_v"]) == (0.0, 0.0, None, None)
-    assert (v["pilot"], v["sticks"]) == (False, [])
+    assert (v["pilot"], v["sticks"], v["motors"]) == (False, [], [])
 
 
 def test_env_file_parsing(tmp_path: Path) -> None:
@@ -235,6 +239,8 @@ def test_config_and_page_are_served(server: str) -> None:
         assert b"app.js" in r.read()
     with urllib.request.urlopen(f"{server}/drive.html") as r:
         assert b"drive.js" in r.read()
+    with urllib.request.urlopen(f"{server}/wing.html") as r:
+        assert b"wing.js" in r.read()
 
 
 def test_config_carries_the_duels_field() -> None:
@@ -388,5 +394,62 @@ def test_events_stream_carries_plans_from_the_log(tmp_path: Path) -> None:
                     assert json.loads(line.removeprefix("data: "))["sysid"] == 1
                     return
         pytest.fail("no plan event on /events")
+    finally:
+        s.stop()
+
+
+class FakeWing:
+    origin = (45.0, -75.0, 77.0)
+
+    def __init__(self) -> None:
+        self.throws = 0
+        self.resets = 0
+        self.grounds: list[tuple[float, float, float]] = []
+
+    def latest(self) -> dict[int, tuple[int, Any]]:
+        return {0: (self.throws, FakeWingState(self.throws))}
+
+    def throw(self) -> None:
+        self.throws += 1
+
+    def reset(self) -> None:
+        self.resets += 1
+
+    def ground(self, lat: float, lon: float, alt: float) -> None:
+        self.grounds.append((lat, lon, alt))
+
+
+@dataclass
+class FakeWingState:
+    throws: int
+
+
+def test_the_wing_streams_and_takes_the_pages_commands(tmp_path: Path) -> None:
+    log = tmp_path / "run.jsonl"
+    log.write_text(json.dumps(_snapshot()) + "\n")
+    s = ViewServer(ViewConfig(markers=[], http_port=0), FALLBACK, replay=log)
+    s.start()
+    assert s._httpd is not None  # pyright: ignore[reportPrivateUsage]
+    url = f"http://127.0.0.1:{s._httpd.server_address[1]}"  # pyright: ignore[reportPrivateUsage]
+    try:
+        assert s.page_config()["wing"] is None
+        assert _post(f"{url}/wing/throw", {}) == 404  # no wing
+        wing = FakeWing()
+        s.wing = wing
+        assert s.page_config()["wing"] == {"origin": (45.0, -75.0, 77.0)}
+        with urllib.request.urlopen(f"{url}/wing", timeout=5) as r:
+            seen: list[object] = []
+            while len(seen) < 2:
+                line = r.readline().decode()
+                if line.startswith("data: "):
+                    seen.append(json.loads(line.removeprefix("data: ")))
+                    assert _post(f"{url}/wing/throw", {}) == 200
+        assert seen == [{"0": {"throws": 0}}, {"0": {"throws": 1}}]
+        assert _post(f"{url}/wing/reset", {}) == 200
+        assert _post(f"{url}/wing/ground", {"lat": 45.1, "lon": -75.1, "alt": 80}) == 200
+        assert _post(f"{url}/wing/ground", {"lat": 45.1, "lon": -75.1}) == 400
+        assert _post(f"{url}/wing/ground", [1, 2, 3]) == 400
+        assert _post(f"{url}/wing/throw", {}, "text/plain") == 403  # a form post
+        assert (wing.resets, wing.grounds) == (1, [(45.1, -75.1, 80.0)])
     finally:
         s.stop()

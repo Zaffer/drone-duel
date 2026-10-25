@@ -313,6 +313,7 @@ export class DriveSession {
 
   /** The engine at the truck's speed and throttle; a bump when it stops short on something. */
   _sound(input) {
+    this.throttle = input.throttle;
     this.engine.update(this.car.speed, input.throttle);
     const v = this.car.body.linvel();
     const prev = this._vel;
