@@ -27,6 +27,8 @@ SWARM_KEYS = {
     "landing_zone_radius_m",
 }
 FENCE_KEYS = {"enabled", "corners", "max_height_m", "action"}
+FENCE_OPTIONAL = {"corners"}
+"""Without corners the fence is the ceiling alone."""
 FENCE_MAX_HEIGHT_M = (10.0, 1000.0)
 """FENCE_ALT_MAX's range in ArduPilot."""
 SIM_KEYS = {
@@ -104,7 +106,7 @@ def load_settings(path: Path = SETTINGS_PATH) -> Settings:
         raise SettingsError(f"{path}: {exc}") from None
     mission = _table(data, "mission", MISSION_KEYS, path)
     swarm = _table(data, "swarm", SWARM_KEYS, path)
-    fence = _table(data, "fence", FENCE_KEYS, path)
+    fence = _table(data, "fence", FENCE_KEYS, path, optional=FENCE_OPTIONAL)
     sim = _table(data, "sim", SIM_KEYS, path)
     home = _point(sim, "home", path)
     router = sim["router"]
@@ -155,20 +157,20 @@ def _swarm(table: dict[str, Any], path: Path) -> SwarmSettings:
 
 
 def _fence(table: dict[str, Any], path: Path) -> Fence:
-    enabled, action, corners = table["enabled"], table["action"], table["corners"]
+    enabled, action, corners = table["enabled"], table["action"], table.get("corners")
     if not isinstance(enabled, bool):
         raise SettingsError(f"{path}: [fence] enabled must be true or false")
     if action not in FENCE_ACTIONS:
         raise SettingsError(
             f"{path}: [fence] action is {action!r}, not one of {sorted(FENCE_ACTIONS)}"
         )
-    if not isinstance(corners, list) or len(corners) < 3:  # pyright: ignore[reportUnknownArgumentType]
+    if corners is not None and (not isinstance(corners, list) or len(corners) < 3):  # pyright: ignore[reportUnknownArgumentType]
         raise SettingsError(f"{path}: [fence] corners must be 3 [latitude, longitude] or more")
     points = tuple(
         _point({"corner": c}, "corner", path)
-        for c in corners  # pyright: ignore[reportUnknownVariableType]
+        for c in corners or []  # pyright: ignore[reportUnknownVariableType]
     )
-    if self_intersects(points):
+    if points and self_intersects(points):
         raise SettingsError(f"{path}: [fence] corners: two edges cross; list them in order round")
     low, high = FENCE_MAX_HEIGHT_M
     max_height_m = _number(table, "max_height_m", path)
@@ -180,7 +182,7 @@ def _fence(table: dict[str, Any], path: Path) -> Fence:
 def _check_inside_fence(settings: Settings, path: Path) -> None:
     """A, B and the sim's start line inside the fence: a drone outside does not arm."""
     fence, field = settings.fence, settings.field
-    if not fence.enabled:
+    if not fence.enabled or not fence.corners:
         return
     starts = [
         (
@@ -194,11 +196,13 @@ def _check_inside_fence(settings: Settings, path: Path) -> None:
             raise SettingsError(f"{path}: {name} [{lat:.6f}, {lon:.6f}] is outside the fence")
 
 
-def _table(data: dict[str, Any], name: str, keys: set[str], path: Path) -> dict[str, Any]:
+def _table(
+    data: dict[str, Any], name: str, keys: set[str], path: Path, optional: set[str] | None = None
+) -> dict[str, Any]:
     table = data.get(name)
     if not isinstance(table, dict):
         raise SettingsError(f"{path}: no [{name}] table")
-    missing, unknown = keys - table.keys(), table.keys() - keys
+    missing, unknown = keys - (optional or set()) - table.keys(), table.keys() - keys
     if missing:
         raise SettingsError(f"{path}: [{name}] is missing {', '.join(sorted(missing))}")
     if unknown:

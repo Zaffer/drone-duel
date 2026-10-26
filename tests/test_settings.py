@@ -48,7 +48,8 @@ vtx_mw = 25.0
 
 def test_the_sample_has_every_key_the_mission_file_has() -> None:
     def keys(text: str) -> set[str]:
-        return {line.split("=")[0].strip() for line in text.splitlines() if "=" in line}
+        lines = (line.lstrip("# ") for line in text.splitlines())  # commented out: still a key
+        return {line.split("=")[0].strip() for line in lines if "=" in line}
 
     assert keys(SAMPLE) == keys(SETTINGS_PATH.read_text())
 
@@ -159,6 +160,17 @@ def test_the_fence_comes_from_the_file(tmp_path: Path) -> None:
 def test_fence_mistakes_are_reported(tmp_path: Path, old: str, new: str, error: str) -> None:
     with pytest.raises(SettingsError, match=error):
         load_settings(_edited(tmp_path, (old, new)))
+
+
+def test_a_fence_without_corners_is_the_ceiling_alone(tmp_path: Path) -> None:
+    path = _edited(
+        tmp_path,
+        ("corners = [", "# corners = ["),
+        ("point_b = [", "point_b = [43.64, -79.40]\n# was ["),
+    )
+    fence = load_settings(path).fence
+    assert fence.enabled and fence.corners == ()
+    assert fence.params()["FENCE_TYPE"] == 1.0
 
 
 def test_a_fence_turned_off_does_not_need_the_places_inside(tmp_path: Path) -> None:

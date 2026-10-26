@@ -554,10 +554,12 @@ def test_modes_are_not_resent_during_an_escape_but_land_is() -> None:
 AROUND = ((45.01, -77.01), (45.01, -76.99), (44.99, -76.99), (44.99, -77.01))
 
 
-def _fenced(enabled: bool = True) -> tuple[FakeLink, Launcher, Clock]:
+def _fenced(
+    enabled: bool = True, corners: tuple[tuple[float, float], ...] = AROUND
+) -> tuple[FakeLink, Launcher, Clock]:
     link = FakeLink([_copter(1, 0.0, apm.COPTER_MODE_LOITER), _copter(2, 10.0)])
     clock = Clock()
-    fence = Fence(enabled, AROUND, 80.0, "brake")
+    fence = Fence(enabled, corners, 80.0, "brake")
     launcher = Launcher(link, 1, [2], fence=fence, clock=clock)  # type: ignore[arg-type]
     launcher.take_over(None)
     return link, launcher, clock
@@ -585,6 +587,19 @@ def test_the_fence_goes_up_then_on_and_arming_waits_for_it() -> None:
     assert link.vehicles[2].params["FENCE_ENABLE"] == 1.0
     assert launcher.fence_ready(1) and launcher.fence_ready(2)
     assert link.vehicles[1].armed and link.vehicles[2].armed
+
+
+def test_a_fence_without_corners_clears_the_polygon_and_keeps_the_ceiling() -> None:
+    link, launcher, clock = _fenced(corners=())
+    link.upload_fence(2, AROUND)  # a polygon from before
+    for _ in range(3):
+        clock.now += 3.0
+        launcher.step()
+    assert link.fences[2] == ()
+    assert ("fence", 1, 0) in link.calls and ("fence", 2, 0) in link.calls
+    assert link.vehicles[2].params["FENCE_TYPE"] == 1.0  # ceiling only
+    assert link.vehicles[2].params["FENCE_ENABLE"] == 1.0
+    assert launcher.fence_ready(1) and launcher.fence_ready(2)
 
 
 def test_a_fence_turned_off_is_turned_off_on_every_drone() -> None:

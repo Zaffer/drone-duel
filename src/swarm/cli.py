@@ -353,21 +353,28 @@ def cmd_wingsim(args: argparse.Namespace) -> None:
 
     settings = _settings(args)
     field, sim = settings.field, settings.sim
-    lat, lon = args.at or field.point_a
+    lat, lon = args.at or (field.home.origin_lat_deg, field.home.origin_lon_deg)
     weather = Weather(
         speed=sim.wind_speed_ms if args.wind is None else args.wind,
         from_deg=sim.wind_from_deg if args.wind_from is None else args.wind_from,
         gusts=sim.wind_turbulence_ms if args.gusts is None else args.gusts,
         span=REFERENCE.span,
     )
-    view = None if args.no_view else _view_server(args, [Marker(name="A", lat=lat, lon=lon)])
+    markers = [Marker(name="Start", lat=lat, lon=lon), *_field_markers(args)]
+    view = None if args.no_view else _view_server(args, markers)
     wingrun.run((lat, lon, field.home_alt_m or 0.0), args.heading, args.demo, view, weather=weather)
 
 
 def cmd_drive(args: argparse.Namespace) -> None:
     """The 3D viewer alone, for one of its demo pages (`args.page`): drive.html, a car on the
     map's 3D tiles, or wing.html, the TBS Chupito to fly."""
-    server = _view_server(args, _field_markers(args))
+    from swarm.view import Marker
+
+    markers = _field_markers(args)
+    if args.page == "wing.html":  # the wing starts at the first marker: the sim's home
+        home = _settings(args).field.home
+        markers.insert(0, Marker(name="Start", lat=home.origin_lat_deg, lon=home.origin_lon_deg))
+    server = _view_server(args, markers)
     try:
         server.start()
     except OSError as exc:
@@ -716,7 +723,7 @@ def main() -> None:
         "drive", help="drive a car on the map's Google 3D tiles, with physics (demo)"
     )
     p.add_argument(
-        "--at", type=_parse_point, metavar="LAT,LON", help="start here instead of point A"
+        "--at", type=_parse_point, metavar="LAT,LON", help="start here instead of [sim] home"
     )
     _add_field_args(p)
     _add_view_args(p)
@@ -724,7 +731,7 @@ def main() -> None:
 
     p = sub.add_parser("wing", help="fly the TBS Chupito, a fixed wing, on the map (demo)")
     p.add_argument(
-        "--at", type=_parse_point, metavar="LAT,LON", help="start here instead of point A"
+        "--at", type=_parse_point, metavar="LAT,LON", help="start here instead of [sim] home"
     )
     _add_field_args(p)
     _add_view_args(p)
@@ -734,7 +741,7 @@ def main() -> None:
         "wingsim", help="fly the TBS Chupito on INAV SITL with its own flight model (radio)"
     )
     p.add_argument(
-        "--at", type=_parse_point, metavar="LAT,LON", help="throw it here instead of point A"
+        "--at", type=_parse_point, metavar="LAT,LON", help="throw it here instead of [sim] home"
     )
     p.add_argument("--heading", type=float, default=0.0, help="facing this way, degrees true")
     p.add_argument("--demo", action="store_true", help="no radio: arm, throw and circle on its own")

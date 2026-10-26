@@ -1,7 +1,7 @@
 // Fly the TBS Chupito on the map: Nanawing's flight model (wingflight.js) in a local frame round
 // the start, drawn as narenana's Chupito (external/web/chupito/, fetched by scripts/setup.sh).
 // A first, basic demo: the ground under it is all it can hit. Start somewhere else with
-// ?at=LAT,LON[,HEADING_DEG]; it starts at the mission's point A.
+// ?at=LAT,LON[,HEADING_DEG]; it starts at mission.toml's [sim] home, where drone 1 starts.
 //
 // The sticks: the keys, a gamepad (right stick, right trigger the throttle) or the drone radio
 // (swarm.view's /radio, as mode 2). Raising the radio's throttle from the bottom throws it.

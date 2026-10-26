@@ -17,17 +17,18 @@ landing_zone_radius_m = 25.0           # Landing zone around point B. The viewer
 
 [fence]  # Sim and real drones. The stack uploads it to every drone. Each drone checks it on board.
 enabled = true                         # false: the stack turns the fence off on every drone.
-corners = [                            # Polygon the drones must stay inside: [lat, lon], 3 or more, in order around.
-  [45.326717, -75.751174],
-  [45.323087, -75.765724],
-  [45.310873, -75.760051],
-  [45.315727, -75.743700],
-]
+# corners = [                            # Polygon the drones must stay inside: [lat, lon], 3 or more, in order around. Leave out for the ceiling alone.
+#  [45.326717, -75.751174],
+#  [45.323087, -75.765724],
+#  [45.310873, -75.760051],
+#  [45.315727, -75.743700],
+# ]
 max_height_m = 100.0                   # Ceiling, metres above the takeoff point. 10 to 1000.
 action = "brake"                       # At the fence: "brake" (stop and hover), "rtl" (fly home), "land", "report" (warn only).
 
 [sim]  # Sim only. Real drones start where they stand.
-home = [45.319821, -75.758630]         # Start point of drone 1 [lat, lon].
+# home = [45.319821, -75.758630]         # Start point of drone 1 [lat, lon]. AreaXO
+home = [43.630930, -79.389450]         # Start point of drone 1 [lat, lon]. Toronto Billy Bishop
 ground_alt_m = 77.0                    # Ground height at home, metres above sea level. "auto" gets it from the internet.
 spawn_spacing_m = 5.0                  # Distance between drones at the start. They stand in a line to the east.
 router = "sitl"                        # "sitl": simulated drones. "field": UDP, the same as the real drones.

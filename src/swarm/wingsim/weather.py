@@ -30,12 +30,15 @@ GROUND_ROUGHNESS = 0.15 * FOOT
 REFERENCE_HEIGHT = 20 * FOOT
 MIN_AIRSPEED = 2.0
 """The turbulence is met at no less than this, m/s: held in the hand or hanging in a tail slide,
-the wind still carries it past."""
+the wind still carries it past (EST)."""
 GUST_EVERY = 10.0
 """Mean time between gusts, s (EST)."""
 GUST_TIME = (2.0, 5.0)
-"""Each gust's rise and fall, s: from, to."""
+"""Each gust's rise and fall, s: from, to (EST, about the WMO's 3 s gust)."""
 GUST_SPREAD = math.radians(30)
+"""How far off the wind's direction a gust can blow (EST)."""
+GUST_LEAST = 0.4
+"""The weakest gust, as a share of the strongest (EST)."""
 
 
 class Weather:
@@ -158,7 +161,7 @@ class Weather:
                 heading += self.rng.uniform(-GUST_SPREAD, GUST_SPREAD)
             else:
                 heading = self.rng.uniform(-math.pi, math.pi)
-            peak = self.gusts * self.rng.uniform(0.4, 1.0)
+            peak = self.gusts * self.rng.uniform(GUST_LEAST, 1.0)
             self._gust = (
                 0.0,
                 self.rng.uniform(*GUST_TIME),

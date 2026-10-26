@@ -44,14 +44,15 @@ class PowerTrain:
     pack_resistance: float
     torque_sign: float
     """The motor's reaction on the airframe about the thrust axis: -1 for a prop turning
-    clockwise seen from behind, which rolls the wing left."""
+    clockwise seen from behind, which rolls the wing left; +1 counterclockwise, right."""
     prop_position: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """The prop's hub from the centre of mass, body frame, m."""
     momentum_drag: float = 0.9
-    """The share of the flow across the disc that the induced flow turns (Selig's k, 0.8-1)."""
+    """The share of the flow across the disc that the induced flow turns (EST, in Selig's range
+    for k, 0.8-1)."""
     normal_force: float = 0.2
     """In forward flight, the prop's normal force per unit of crossflow, as a share of the air
-    coming through its disc: N = k rho A V v_across."""
+    coming through its disc: N = k rho A V v_across (EST)."""
 
     @property
     def disc_area(self) -> float:
@@ -59,7 +60,9 @@ class PowerTrain:
 
     def coefficients(self, j: float) -> tuple[float, float]:
         """CT and CP at advance ratio `j` (negative: the air comes from behind). UIUC's GWS 5x3,
-        thrust and power over their static values against J over J of no thrust."""
+        thrust and power over their static values against J over J of no thrust: a two-blade's
+        shape for TBS's three-blade (EST), and beyond UIUC's measured 0 to J of no thrust, its
+        quadratics carried on (EST)."""
         x = max(-0.5, min(1.6, j / self.j_zero))
         return (
             self.ct0 * (1 - 0.8 * x - 0.2 * x * x),
@@ -109,7 +112,8 @@ class PowerTrainState:
             thrust = ct * rho * n * n * d**4
             prop_torque = cp * rho * n * n * d**5 / (2 * math.pi)
         else:
-            # Stopped, or nearly: the air turns it, if it flows hard enough; a stopped prop drags.
+            # Stopped, or nearly: the air turns it, if it flows hard enough; a stopped prop drags
+            # (EST: CD 0.06 on its disc).
             thrust = -0.5 * rho * pt.disc_area * 0.06 * axial_speed * abs(axial_speed)
             prop_torque = 0.0
         motor_torque = ke * (motor_current - math.copysign(pt.no_load_current, motor_current))

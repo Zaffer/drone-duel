@@ -29,12 +29,13 @@ from swarm.wingsim.weather import Weather
 STANDARD_GRAVITY = 9.80665
 SEA_LEVEL_DENSITY = 1.225
 SERVO_RATE = math.radians(600)
-"""How fast an elevon servo moves, rad/s: a typical 0.1 s per 60 degrees."""
+"""How fast an elevon servo moves, rad/s (EST: a typical 0.1 s per 60 degrees; TBS's servo's
+own is unknown)."""
 BELLY = 0.04
+"""The belly's height below the centre of mass, m: where the wing touches the ground (EST)."""
 OBSTACLE = 0.3
 """Found this far, m, below the ground in one step, the wing has flown into something that rose
-in its way, not come down onto it."""
-"""The belly's height below the centre of mass, m: where the wing touches the ground."""
+in its way, not come down onto it (EST)."""
 
 
 class Phase(StrEnum):

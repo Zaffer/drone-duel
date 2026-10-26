@@ -26,8 +26,9 @@ Sources
 
 Calibrated (tests/test_wingsim.py holds the model to these)
   the prop's static coefficients and no-thrust advance ratio, the motor's resistance
-                LOG's 42 m/s level on 540 W at full throttle; TBS's cruise, 55 km/h at its 35 %
-                cruise throttle (58 km/h); a static thrust near 1.2 kgf
+                LOG's 42 m/s level on 540 W at full throttle (TBS's listing: 160 km/h); TBS's
+                cruise at its 35 % cruise throttle, 55 km/h in its manual, 70 km/h in its
+                listing (the model: about 70); a static thrust near 1.2 kgf
   the elevons' effectiveness, the wing's twist under them (FLEX_PA)
                 LOG's steady full-elevon rolls, 600 deg/s at 23 m/s and 700 at 45 m/s, fitted
                 in the full nonlinear model: 1.05 times a plain flap's thin-aerofoil effectiveness.
@@ -37,6 +38,44 @@ Calibrated (tests/test_wingsim.py holds the model to these)
                 28 m/s with the elevons neutral (LOG)
   the stall, the centre of mass
                 TBS's 35 km/h, a stall the elevons hold (13 deg up): CL max 0.75 so trimmed
+
+Guesses (EST here and where they live), most felt first. Of how it stalls, nothing is known
+beyond TBS's 35 km/h and that it is "stable at low speeds and forgiving in stalls" (TBS's
+dealers); no pilot's account of a wing drop, tip stall or bobbing has been found, nor a log.
+  inertia       summed from parts (INERTIA): how fast it starts and stops rolling and pitching,
+                the pitch bounce on letting go. A swing test would measure it.
+  the stall's shape
+                how sharply each strip stalls (30 /rad, Beard and McLain's generic value); that
+                the stall starts at the root and spreads out (no washout or stall spread is
+                known); the negative stall (14 deg); how far an elevon moves the stall
+                (flap_stall) and works in separated flow (flap_separated, strips.py). Together:
+                whether a held stall mushes, as now, or drops a wing.
+  the stall's memory
+                SEPARATION_DELAY (2.0 chord times, chosen in a 0.85 to 4.4 range, by the held
+                stall's bobbing), the hysteresis (2 deg, in a 1 to 4 range), the lag (3.75, a
+                two-dimensional section's), DYNAMIC_STALL_MAX (10 deg, strips.py): how high a
+                quick pull peaks, how long a stall lingers once the stick is eased.
+  the centre of mass's height, and its x but through TBS's stall speed: the static margin
+  torque roll   LOG's wing rolls right with power, so the motor is taken to turn the way that
+                does; but LOG's needs 15 times the elevon the motor's torque explains, and the
+                rest, its cause unknown, is left out (see POWER_TRAIN)
+  the prop      a two-blade's measured shape for TBS's three-blade, carried past the measured
+                range (windmilling, reverse flow); its crossflow forces (momentum_drag,
+                normal_force) and stopped drag (propulsion.py); its rotor's inertia
+  reversed flow trailing edge first: its lift slope and its stall at 8 deg (strips.py): tail
+                slides
+  the fin       its stall (20 deg) and broadside drag (1.2): sideslip far past the stall
+  ground effect McCormick's whole-wing formula taken strip by strip (strips.py): how far it
+                floats, how hard a low tip is pushed up
+  the gusts     how often (10 s), how long (2 to 5 s), how far off the wind (30 deg), how weak
+                (40 % of the strongest, weather.py); the turbulence's least airspeed (2 m/s).
+                The turbulence itself is MIL-F-8785C's, made for full-size aircraft
+  the rest      the servo's speed (600 deg/s), the belly's height, what counts as flying into
+                something, a landing's limits and the grass's friction (aircraft.py, GROUND);
+                the throw (LAUNCH); the section's profile drag (the rest of CD0 goes to the
+                body); the motor's no-load current and the pack's resistance
+And the sources' own limits: TBS's numbers are a manufacturer's; LOG had no pitot, so its
+airspeeds are GPS speeds in an unknown wind, and its pilot's mix and tune were their own.
 """
 
 import math
@@ -131,7 +170,6 @@ CD0 = 0.028
 WING = Wing(
     reference=REFERENCE,
     strips=(*WING_STRIPS, FIN),
-    oswald=0.8,
     # Everything the sections' profile drag leaves of CD0: the pod, the camera, the gaps.
     body_cd=CD0 - SECTION.cd0 * (sum(s.area for s in WING_STRIPS) + FIN_AREA) / REFERENCE.area,
     flex_pa=FLEX_PA,
@@ -151,6 +189,13 @@ INERTIA = Inertia(
     ixz=0.0004,
 )
 
+# Torque roll. LOG, wings level with the stick centred for 3 to 17 s: INAV's roll I-term holds
+# +10 to +40 below 8 A and -100 to -165 at 20 to 27 A, climbing, level or descending alike, and
+# neither servo near its end; both servos sit about 180 µs higher at full power: about 9 deg of
+# roll trim per elevon at TBS's throws. Its sign says the wing rolls right with power, as a prop
+# turning counterclockwise seen from behind rolls it (torque_sign). Its size is 15 times what the
+# motor's reaction needs here (0.11 N m at 27 A, from its KV: about 0.5 deg). Something else in
+# that build rolls it with power (a canted motor? a warp?); unknown, so not modelled.
 POWER_TRAIN = PowerTrain(
     # The prop's coefficients and the resistance are fitted together (see the header).
     kv=2200,  # TBS
@@ -166,7 +211,7 @@ POWER_TRAIN = PowerTrain(
     cell_empty=3.5,
     capacity_mah=1300,  # TBS's 20 minute pack
     pack_resistance=0.06,  # EST: a 1300 mAh 6S under 30 A
-    torque_sign=-1.0,  # EST: which way the motor turns is unknown
+    torque_sign=1.0,  # LOG: it rolls right with power (see Torque roll, above)
     prop_position=(-0.253, 0.0, -0.01),  # GLB: the hub, behind the centre of mass
 )
 

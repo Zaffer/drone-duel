@@ -1,14 +1,15 @@
 """The geofence from mission.toml, uploaded to every drone. Each drone enforces it on board.
 
-ArduPilot keeps an inclusion polygon (FENCE_TYPE bit 2) and a ceiling above home (bit 0) and
-checks them at 25 Hz. A drone outside the fence does not arm. On a breach it does FENCE_ACTION;
-a mode change during a breach turns the fence off for 10 s, so the pilot can fly back in
-(AC_Fence manual recovery).
+ArduPilot keeps a ceiling above home (FENCE_TYPE bit 0) and, when mission.toml lists corners,
+an inclusion polygon (bit 2), and checks them at 25 Hz. A drone outside the fence does not
+arm. On a breach it does FENCE_ACTION; a mode change during a breach turns the fence off for
+10 s, so the pilot can fly back in (AC_Fence manual recovery).
 
 The polygon goes up with the MAVLink mission protocol, mission type FENCE: we send
 MISSION_COUNT, the drone asks for each item with MISSION_REQUEST, we answer MISSION_ITEM_INT,
 and it ends with MISSION_ACK. Each corner is one MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION
-item with the corner count in param1. The upload is checked by downloading the fence again
+item with the corner count in param1. Without corners the upload is empty, which clears any
+polygon a drone kept. The upload is checked by downloading the fence again
 (swarm.mission.PlanReader), as the 3D viewer draws it.
 """
 
@@ -39,7 +40,8 @@ UPLOAD_TRIES = 3
 class Fence:
     enabled: bool
     corners: tuple[tuple[float, float], ...]
-    """[lat, lon] in order round the polygon the drones must stay inside."""
+    """[lat, lon] in order round the polygon the drones must stay inside; empty for the ceiling
+    alone."""
     max_height_m: float
     """The ceiling above home."""
     action: str
@@ -48,7 +50,7 @@ class Fence:
     def params(self) -> dict[str, float]:
         """The FENCE_* parameters, FENCE_ENABLE aside: it goes on once the polygon is there."""
         return {
-            "FENCE_TYPE": float(TYPE_ALT_MAX | TYPE_POLYGON),
+            "FENCE_TYPE": float(TYPE_ALT_MAX | (TYPE_POLYGON if self.corners else 0)),
             "FENCE_ACTION": float(FENCE_ACTIONS[self.action]),
             "FENCE_ALT_MAX": self.max_height_m,
         }

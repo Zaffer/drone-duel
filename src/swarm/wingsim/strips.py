@@ -42,10 +42,11 @@ from swarm.wingsim.aero import AirData, Geometry, air_data
 from swarm.wingsim.rigidbody import Vec, add, cross, dot, scale, sub
 
 REVERSED_STALL = math.radians(8)
-"""Trailing edge first, the section holds attached flow only this far either side of 180°."""
+"""Trailing edge first, the section holds attached flow only this far either side of 180°
+(EST: a sharp trailing edge as leading edge stalls early; no data for this section)."""
 DYNAMIC_STALL_MAX = math.radians(10)
 """The most a rising angle of attack can outrun the stall by, rad: Goman and Khrabrov's delay is
-linear in the rate, real aerofoils' is not for long (Leishman's dynamic stall data)."""
+linear in the rate, real aerofoils' is not for long (EST, after Leishman's dynamic stall data)."""
 
 
 @dataclass(frozen=True)
@@ -72,12 +73,12 @@ class Section:
     flap_moment: float = 0.0
     """d cm (quarter chord) per dδ, rad: trailing edge down noses the section down."""
     flap_separated: float = 0.3
-    """The fraction of τ still at work once the flow is separated."""
+    """The fraction of τ still at work once the flow is separated (EST)."""
     flap_stall: float = 0.35
     """The fraction of the flap's angle (τ δ) by which it brings the stall closer: a flap down
-    raises the section's maximum lift, by most of what it adds below the stall."""
+    raises the section's maximum lift, by most of what it adds below the stall (EST)."""
     reverse_slope: float = 1.5
-    """Lift slope trailing edge first, per rad."""
+    """Lift slope trailing edge first, per rad (EST: Selig's reversed sections are weak)."""
     induced_drag: float = 0.0
     """1 / (π e AR) for a surface outside the wing's vortex lattice (a fin), whose lift slope is
     then its own three-dimensional one."""
@@ -137,8 +138,6 @@ class Wing:
 
     reference: Geometry
     strips: tuple[Strip, ...]
-    oswald: float
-    """For each lifting strip's induced drag."""
     body_cd: float
     """The pod's and everything else's drag, on the reference area, along the flow."""
     flex_pa: float
@@ -255,7 +254,8 @@ def _settle(
 
 
 def _ground_effect(height: float, span: float) -> float:
-    """McCormick's: the share of the downwash left at `height` above the ground, m."""
+    """McCormick's: the share of the downwash left at `height` above the ground, m. His is a
+    whole wing's induced drag; taking it strip by strip, each at its own height, is ours (EST)."""
     x = 16 * max(0.0, height) / span
     return x * x / (1 + x * x)
 
