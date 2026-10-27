@@ -574,6 +574,19 @@ included, and the flight model flies over that ground. On the page, Space throws
 back in the hand, C changes the camera. `--no-view` leaves the viewer out, and `--view-port`
 moves it (the Google tiles' key only works on 8600).
 
+The page shows the flight model at work. D opens the panels of numbers. Keys 1-5 draw layers on
+the wing, any of them together, with or without the panels:
+1. **Forces:** each strip's force, coloured by how attached its flow is, plus the prop, the pod's
+   drag, gravity and the totals.
+2. **Air:** the airflow, the air past each strip, the wind and the trailing vortices.
+3. **Lift & balance:** each strip's patch of the wing tinted by its flow, and the centre of mass,
+   centre of pressure and neutral point on the root chord.
+4. **Rotation:** the net moment and the rotation rate about each axis.
+5. **Path:** a 30 s trail. Shift+5 switches its colour between load factor, airspeed, attached
+   flow and energy gain.
+
+[ and ] size the arrows.
+
 Keys in the terminal, then Enter: `t` throws it, `r` puts it back in the hand, `q` quits.
 Each run is recorded to `logs/wingsim/` (CSV, 50 Hz): the wing's true state, the sticks, INAV's
 outputs, its own estimate of the attitude, and the wind.

@@ -2,7 +2,8 @@
 
 `Aircraft.step` advances it by one physics step under `Controls`: the throttle and each elevon's
 servo, as the flight controller drives them. Between steps it keeps what an IMU, a pitot and a
-GPS would read (specific force, rates, airspeed, position), for the flight controller.
+GPS would read (specific force, rates, airspeed, position), for the flight controller, and the
+forces and moments that moved it, piece by piece (`Forces`), to look into the model.
 """
 
 import math
@@ -23,7 +24,7 @@ from swarm.wingsim.rigidbody import (
     to_euler,
     unrotate,
 )
-from swarm.wingsim.strips import Flow, Wing, forces_and_moments
+from swarm.wingsim.strips import Flow, Loads, Wing, forces_and_moments
 from swarm.wingsim.weather import Weather
 
 STANDARD_GRAVITY = 9.80665
@@ -81,6 +82,35 @@ class Airframe:
     ground: GroundContact
 
 
+@dataclass(frozen=True)
+class Forces:
+    """One step's forces (N) and moments (N m, about the centre of mass), body frame, by where
+    they come from; gravity aside. Nothing but in flight."""
+
+    aero: Vec = (0.0, 0.0, 0.0)
+    """The strips' and the pod's."""
+    aero_moment: Vec = (0.0, 0.0, 0.0)
+    prop: Vec = (0.0, 0.0, 0.0)
+    """Its thrust, and the air crossing its disc."""
+    prop_moment: Vec = (0.0, 0.0, 0.0)
+    """The prop's force off the centre of mass, and the motor's reaction."""
+    gyroscopic: Vec = (0.0, 0.0, 0.0)
+    """The spinning rotor's."""
+    loads: Loads = field(default_factory=Loads)
+    """The aerodynamics piece by piece."""
+
+    @property
+    def total(self) -> Vec:
+        return add(self.aero, self.prop)
+
+    @property
+    def total_moment(self) -> Vec:
+        return add(add(self.aero_moment, self.prop_moment), self.gyroscopic)
+
+
+STILL = Forces()
+
+
 @dataclass
 class Controls:
     throttle: float = 0.0
@@ -108,6 +138,9 @@ class Aircraft:
     phase: Phase = Phase.HAND
     elevons: tuple[float, float] = (0.0, 0.0)
     """Where the elevons are, rad, trailing edge down positive."""
+    servos: tuple[float, float] = (0.0, 0.0)
+    """Where the flight controller has sent them, rad: the servos follow at their own speed."""
+    forces: Forces = STILL
     specific_force: Vec = (0.0, 0.0, 0.0)
     """What an accelerometer at the centre of mass reads, body frame, m/s²."""
     air: AirData = field(default_factory=lambda: AirData(0.0, 0.0, 0.0, 0.0))
@@ -149,8 +182,12 @@ class Aircraft:
         """Roll, pitch, yaw, rad."""
         return to_euler(self.body.attitude)
 
-    def step(self, controls: Controls, dt: float, ground_down: float = 0.0) -> None:
-        """Advance by `dt` s. `ground_down`: the ground under the wing, NED down, m."""
+    def step(
+        self, controls: Controls, dt: float, ground_down: float = 0.0, detail: bool = False
+    ) -> None:
+        """Advance by `dt` s. `ground_down`: the ground under the wing, NED down, m. `detail`:
+        find the aerodynamics piece by piece too (`Forces.loads`), which costs a little; else
+        the last found stay."""
         af = self.airframe
         self._move_elevons(controls, dt)
         height = ground_down - self.body.position[2]
@@ -160,12 +197,14 @@ class Aircraft:
         v_air_body = unrotate(self.body.attitude, sub(self.body.velocity, self.wind))
         v_prop = add(v_air_body, cross(self.body.rates, af.power_train.prop_position))
         self.power.step(af.power_train, controls.throttle, v_prop[0], self.rho, dt)
+        if self.phase != Phase.FLYING:
+            self.forces = STILL
         if self.phase == Phase.HAND:
             self._held()
         elif self.phase == Phase.THROW:
             self._swing(dt)
         elif self.phase == Phase.FLYING:
-            self._fly(dt, v_air_body, height)
+            self._fly(dt, v_air_body, height, detail)
             depth = self.body.position[2] - (ground_down - BELLY)
             if depth >= 0:
                 self._touch_down(ground_down, struck=depth > OBSTACLE)
@@ -179,13 +218,14 @@ class Aircraft:
     def _move_elevons(self, controls: Controls, dt: float) -> None:
         travel = SERVO_RATE * dt
         full = self.airframe.elevon_max
+        self.servos = (controls.left * full, controls.right * full)
 
         def toward(now: float, servo: float) -> float:
-            return now + max(-travel, min(travel, servo * full - now))
+            return now + max(-travel, min(travel, servo - now))
 
         self.elevons = (
-            toward(self.elevons[0], controls.left),
-            toward(self.elevons[1], controls.right),
+            toward(self.elevons[0], self.servos[0]),
+            toward(self.elevons[1], self.servos[1]),
         )
 
     def _held(self) -> None:
@@ -216,28 +256,31 @@ class Aircraft:
             b.velocity = scale(path, launch.speed)
             self.phase = Phase.FLYING
 
-    def _fly(self, dt: float, v_air_body: Vec, height: float) -> None:
+    def _fly(self, dt: float, v_air_body: Vec, height: float, detail: bool) -> None:
         af = self.airframe
         b = self.body
         # Through the air: the turbulence turns with it.
         rates = b.rates if self.weather is None else sub(b.rates, self.weather.rates)
         up = unrotate(b.attitude, (0.0, 0.0, -1.0))
-        force, moment, self.air = forces_and_moments(
-            af.wing, v_air_body, rates, self.elevons, self.rho, self.flow, dt, (height, up)
+        loads = Loads() if detail else None
+        aero, aero_moment, self.air = forces_and_moments(
+            af.wing, v_air_body, rates, self.elevons, self.rho, self.flow, dt, (height, up), loads
         )
         pt = af.power_train
         v_prop = add(v_air_body, cross(rates, pt.prop_position))
         side, normal = momentum_drag(pt, self.power, v_prop[0], (v_prop[1], v_prop[2]), self.rho)
         prop_force = (self.power.thrust, side, normal)
-        force = add(force, prop_force)
-        moment = add(moment, cross(pt.prop_position, prop_force))
-        moment = add(moment, (self.power.torque, 0.0, 0.0))
+        prop_moment = add(cross(pt.prop_position, prop_force), (self.power.torque, 0.0, 0.0))
         # The spinning rotor's gyroscopic moment, -ω × H: pitching yaws it, yawing pitches it.
         spin = -pt.torque_sign * pt.rotor_inertia * self.power.omega
         _, q, r = b.rates
-        moment = add(moment, (0.0, -r * spin, q * spin))
+        gyroscopic = (0.0, -r * spin, q * spin)
+        loads = loads or self.forces.loads
+        forces = Forces(aero, aero_moment, prop_force, prop_moment, gyroscopic, loads)
+        self.forces = forces
+        force = forces.total
         self.specific_force = scale(force, 1 / af.inertia.mass)
-        b.step(af.inertia, force, moment, self.gravity, dt)
+        b.step(af.inertia, force, forces.total_moment, self.gravity, dt)
 
     def _touch_down(self, ground_down: float, struck: bool = False) -> None:
         """On the ground; `struck`, into something that rose above it (a roof, a tree): a crash

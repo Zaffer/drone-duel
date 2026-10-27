@@ -152,6 +152,7 @@ def test_the_viewer_sees_the_wing_and_gives_it_the_maps_ground() -> None:
     (tick, frame), *_ = view.latest().values()
     assert frame.blockers == ("starting",)
     assert frame.wing.agl == pytest.approx(CHUPITO.launch.height)
+    assert frame.dynamics.strips == (), "in the hand: no air on it"
     view.status = inav.Status(armed=True, blockers=())
     view.ground(ORIGIN[0], ORIGIN[1], ORIGIN[2] + 10)  # a roof under it
     time.sleep(0.05)

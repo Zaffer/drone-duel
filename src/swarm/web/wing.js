@@ -8,10 +8,12 @@
 //
 // Under `swarm wingsim` it flies on INAV SITL instead, in Python (swarm.wingsim): this page only
 // draws it, from swarm.view's /wing, and posts back the map's ground under it, which the flight
-// model then flies over. The radio is INAV's, read there.
+// model then flies over. The radio is INAV's, read there. D shows the flight model at work, on the
+// wing and beside it (wingdynamics.js).
 
 import { BaseMap } from "./basemap.js";
 import { feed as radio, isRadio } from "./driveradio.js";
+import { ARROW_ID, DynamicsView } from "./wingdynamics.js";
 import {
   CHUPITO,
   STEP_S,
@@ -232,6 +234,11 @@ class WingSession {
     this.cameraHeading = heading;
     this._propAngle = 0;
     this.radioPanel = link && ui.radio ? new RadioPanel(ui.radio) : null;
+    /** The flight model at work: only swarm.wingsim's tells. */
+    this.dynamics =
+      link && ui.dynamics
+        ? new DynamicsView(this.viewer, this.localToFixed, ui.dynamics, ui.dynamicsHistory, ui.dynamicsLegend)
+        : null;
 
     this.modelMatrix = C.Matrix4.clone(C.Matrix4.IDENTITY);
     this.model = null;
@@ -288,6 +295,15 @@ class WingSession {
         this.setCamera(CAMERA_NAMES[(i + 1) % CAMERA_NAMES.length]);
       }
       if (e.code === "KeyH") this.ui.help.hidden = !this.ui.help.hidden;
+      // The dynamics panel takes the help's corner.
+      if (e.code === "KeyD" && this.dynamics) this.ui.help.hidden = this.dynamics.togglePanel();
+      if (e.code === "BracketLeft" || e.code === "BracketRight") this.dynamics?.resize(e.code === "BracketRight");
+      // The dynamics on the wing: each layer on its number, Shift+5 the trail's colours.
+      const layer = /^Digit([1-5])$/.exec(e.code);
+      if (layer && this.dynamics) {
+        if (e.shiftKey && layer[1] === "5") this.dynamics.cycleTrail();
+        else this.dynamics.toggleLayer(Number(layer[1]));
+      }
       if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
     });
     addEventListener("keyup", (e) => this.keys.delete(e.code));
@@ -377,13 +393,18 @@ class WingSession {
     return input;
   }
 
+  /** What the ground is not: the wing and its dynamics arrows. */
+  _notGround() {
+    return this.model ? [this.model, ARROW_ID] : [ARROW_ID];
+  }
+
   /** The ground's height under the wing, from what is drawn there: the 3D tiles' roofs too. */
   _sampleGround() {
     const fixed = C.Matrix4.multiplyByPoint(this.localToFixed, enu(this.state.position), new C.Cartesian3());
     const carto = C.Cartographic.fromCartesian(fixed);
     const scene = this.viewer.scene;
     const h = this.map.groundIsTiles
-      ? scene.sampleHeight(carto, this.model ? [this.model] : undefined)
+      ? scene.sampleHeight(carto, this._notGround())
       : scene.globe.getHeight(carto);
     if (h !== undefined) this._setGround(carto, h);
   }
@@ -407,7 +428,7 @@ class WingSession {
       carto.height = undefined;
       try {
         if (this.map.groundIsTiles) {
-          await scene.sampleHeightMostDetailed([carto], this.model ? [this.model] : undefined);
+          await scene.sampleHeightMostDetailed([carto], this._notGround());
         } else if (terrain instanceof C.EllipsoidTerrainProvider) {
           carto.height = 0;
         } else {
@@ -440,6 +461,7 @@ class WingSession {
       this._fly(dt);
     }
     this._draw(this.input, dt);
+    if (this.link) this.dynamics?.update(this.link.frame, enu(this.state.position), this._axes(), now);
     this._updateCamera(dt);
     const hud = this._hud;
     hud.frames++;
@@ -645,6 +667,9 @@ const link = simOrigin ? new WingLink(simOrigin, groundH) : null;
 const ui = {
   notice,
   radio: $("radio"),
+  dynamics: $("dynamics"),
+  dynamicsHistory: $("dynamics-history"),
+  dynamicsLegend: $("dynamics-legend"),
   help: $("help"),
   camMode: $("cam-mode"),
   hud: {

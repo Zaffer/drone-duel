@@ -85,6 +85,11 @@ class PowerTrainState:
     """The motor's reaction on the airframe about the thrust axis (PowerTrain.torque_sign)."""
     pack_voltage: float = 0.0
     pack_current: float = 0.0
+    motor_current: float = 0.0
+    advance_ratio: float = 0.0
+    """J = V / (n D): the air coming at the prop over how far it would screw forward a turn."""
+    prop_torque: float = 0.0
+    """What the air takes to turn the prop, N m."""
 
     def step(
         self, pt: PowerTrain, throttle: float, axial_speed: float, rho: float, dt: float
@@ -107,8 +112,9 @@ class PowerTrainState:
 
         n = omega / (2 * math.pi)
         d = pt.prop_diameter
+        self.advance_ratio = axial_speed / (n * d) if n > 1.0 else 0.0
         if n > 1.0:
-            ct, cp = pt.coefficients(axial_speed / (n * d))
+            ct, cp = pt.coefficients(self.advance_ratio)
             thrust = ct * rho * n * n * d**4
             prop_torque = cp * rho * n * n * d**5 / (2 * math.pi)
         else:
@@ -122,6 +128,8 @@ class PowerTrainState:
         self.omega = max(0.0, omega + (motor_torque - prop_torque) / pt.rotor_inertia * dt)
         self.thrust = thrust
         self.torque = pt.torque_sign * motor_torque
+        self.motor_current = motor_current
+        self.prop_torque = prop_torque
         self.used_mah += pack_current * dt / 3.6
 
 

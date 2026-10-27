@@ -166,6 +166,43 @@ class Flow:
         self.alpha.clear()
 
 
+@dataclass(frozen=True, slots=True)
+class StripLoad:
+    """One strip's flow and load at a step: rad, Pa, N (body frame)."""
+
+    alpha: float
+    """Its own angle of attack, the twist included, before the downwash."""
+    downwash: float
+    """Taken off `alpha` by the rest of the wing's lift; ground effect included."""
+    ground_effect: float
+    """The share of the downwash the ground leaves (1: far from it)."""
+    lead: float
+    """How far the stall has fallen behind a changing angle of attack (dynamic stall)."""
+    flap: float
+    """Its elevon's effective deflection, over the share of it the elevon spans."""
+    attached: float
+    """The share of its flow attached."""
+    cl: float
+    cd: float
+    cm: float
+    dynamic_pressure: float
+    force: Vec
+    air: Vec = (0.0, 0.0, 0.0)
+    """The air coming past it, m/s: its own motion's and the aircraft's rotation's (at its 3/4
+    chord), the part across its span turned by the downwash. (Its section feels only that part.)"""
+
+
+@dataclass
+class Loads:
+    """The aerodynamics piece by piece, as `forces_and_moments` found them: each strip's, the
+    elevons after the wing's twist (rad), the pod's drag (N) and Munk moment (N m)."""
+
+    strips: tuple[StripLoad, ...] = ()
+    elevons: tuple[float, float] = (0.0, 0.0)
+    pod_drag: Vec = (0.0, 0.0, 0.0)
+    munk: Vec = (0.0, 0.0, 0.0)
+
+
 def _sigmoid(x: float) -> float:
     if x > 40:
         return 1.0
@@ -235,9 +272,9 @@ def elevon_deflections(
 
 def _settle(
     strip: Strip, alpha: float, flap: float, speed: float, flow: Flow, i: int, dt: float
-) -> float:
+) -> tuple[float, float]:
     """Goman and Khrabrov: strip `i`'s attached share relaxes toward the settled one, at an angle
-    of attack lagging the strip's own by its delay."""
+    of attack lagging the strip's own by its delay. Returns the share, and that lag, rad."""
     sec = strip.section
     chord_time = strip.chord / max(speed, 0.5)
     rate = ((alpha - flow.alpha[i] + math.pi) % (2 * math.pi) - math.pi) / dt
@@ -250,7 +287,7 @@ def _settle(
     if lag > 0:
         target += (attached - target) * math.exp(-dt / lag)
     flow.attached[i], flow.alpha[i] = target, alpha
-    return target
+    return target, ahead
 
 
 def _ground_effect(height: float, span: float) -> float:
@@ -269,12 +306,14 @@ def forces_and_moments(
     flow: Flow | None = None,
     dt: float = 0.0,
     ground: tuple[float, Vec] | None = None,
+    loads: Loads | None = None,
 ) -> tuple[Vec, Vec, AirData]:
     """Body-frame aerodynamic force (N) and moment (N m) about the centre of mass, the air's
     velocity being `v_body` (the aircraft's through the air), its rotation `rates`; elevons in
     rad, trailing edge down positive. `flow`: the strips' memory, from the step `dt` s ago
     (default: none, the flow settled). `ground`: the centre of mass's height above flat ground,
-    m, and the body-frame unit vector up from it (default: none near)."""
+    m, and the body-frame unit vector up from it (default: none near). `loads`: filled in with
+    the pieces, to look into them."""
     ad = air_data(v_body, rho)
     deflection = elevon_deflections(wing, elevons, ad.dynamic_pressure)
     # Each strip's flow, angle of attack and flap.
@@ -293,15 +332,17 @@ def forces_and_moments(
         for (_, _, a, flap), st in zip(flows, wing.strips, strict=False)
     ]
     downwash = [0.0] * len(wing.strips)
+    near = [1.0] * len(wing.strips)
     for i, row in enumerate(wing.loading):
         alpha = flows[i][2]
         taper = math.cos(alpha) ** 2 if abs(alpha) < math.pi / 2 else 0.0
         downwash[i] = taper * (loaded[i] - sum(k * a for k, a in zip(row, loaded, strict=False)))
         if ground is not None:
             height, up = ground
-            downwash[i] *= _ground_effect(
+            near[i] = _ground_effect(
                 height + dot(wing.strips[i].quarter_chord, up), wing.reference.span
             )
+            downwash[i] *= near[i]
     # What each strip's section sees.
     seen = [
         (a - eps + math.pi) % (2 * math.pi) - math.pi
@@ -315,11 +356,18 @@ def forces_and_moments(
         ]
         memory.alpha = seen[:]
     fx = fy = fz = mx = my = mz = 0.0
-    for i, (s, (u, w, _, flap), eps) in enumerate(zip(wing.strips, flows, downwash, strict=False)):
+    pieces: list[StripLoad] = []
+    for i, (s, (u, w, a, flap), eps) in enumerate(zip(wing.strips, flows, downwash, strict=False)):
         speed2 = u * u + w * w
         speed = math.sqrt(speed2)
-        attached = None if memory is None else _settle(s, seen[i], flap, speed, memory, i, dt)
+        if memory is None:
+            attached, lead = attachment(s.section, seen[i], flap, s.stall_offset), 0.0
+        else:
+            attached, lead = _settle(s, seen[i], flap, speed, memory, i, dt)
         if speed2 < 1e-6:
+            if loads is not None:
+                still = StripLoad(a, eps, near[i], lead, flap, attached, 0, 0, 0, 0, (0, 0, 0))
+                pieces.append(still)
             continue
         cl, cd, cm, cl_att = section_coefficients(
             s.section, seen[i], flap, s.stall_offset, attached
@@ -336,22 +384,39 @@ def forces_and_moments(
         drag_dir = (lw * n[0] - lu * f[0], lw * n[1] - lu * f[1], lw * n[2] - lu * f[2])
         force = add(scale(lift_dir, q_area * cl), scale(drag_dir, q_area * cd))
         moment = add(cross(s.quarter_chord, force), scale(s.pitch_axis, q_area * s.chord * cm))
+        if loads is not None:
+            # Across the span, the air goes the drag's way; along it, as the strip meets it.
+            v = add(v_body, cross(rates, s.three_quarter_chord))
+            along = sub(scale(v, -1), add(scale(f, -u), scale(n, w)))
+            air = add(scale(drag_dir, speed), along)
+            load = StripLoad(
+                a, eps, near[i], lead, flap, attached, cl, cd, cm, q_area / s.area, force, air
+            )
+            pieces.append(load)
         fx += force[0]
         fy += force[1]
         fz += force[2]
         mx += moment[0]
         my += moment[1]
         mz += moment[2]
+    pod_drag = munk_moment = (0.0, 0.0, 0.0)
     if ad.airspeed > 1e-3:
         body_drag = ad.dynamic_pressure * wing.reference.area * wing.body_cd / ad.airspeed
-        fx -= body_drag * v_body[0]
-        fy -= body_drag * v_body[1]
-        fz -= body_drag * v_body[2]
+        pod_drag = scale(v_body, -body_drag)
+        fx += pod_drag[0]
+        fy += pod_drag[1]
+        fz += pod_drag[2]
         # Munk: q Vol (k2 - k1) sin 2α, nose further up; and yawing away from the sideslip.
         munk = 0.5 * rho * wing.body_volume * wing.body_munk
         u, v, w = v_body
-        my += munk * 2 * u * w
-        mz -= munk * 2 * u * v
+        munk_moment = (0.0, munk * 2 * u * w, -munk * 2 * u * v)
+        my += munk_moment[1]
+        mz += munk_moment[2]
+    if loads is not None:
+        loads.strips = tuple(pieces)
+        loads.elevons = deflection
+        loads.pod_drag = pod_drag
+        loads.munk = munk_moment
     return (fx, fy, fz), (mx, my, mz), ad
 
 

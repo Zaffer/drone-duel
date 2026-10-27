@@ -12,6 +12,7 @@ calibrated against TBS's specification and a real Chupito's INAV blackbox log.
     propulsion  ESC, motor, prop and pack
     rigidbody   6-DOF state and its integration (NED world, forward-right-down body)
     aircraft    the whole wing: hand, throw, flight, ground
+    dynamics    all of it at work, to look into as it flies
     xplane      INAV's side of the X-Plane UDP protocol
     inav        the INAV SITL process and its configuration
     server      the real-time loop between INAV and the aircraft

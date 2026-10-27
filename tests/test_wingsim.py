@@ -4,15 +4,19 @@ The targets come from TBS's specification and one pilot's INAV blackbox log; swa
 says which is which.
 """
 
+import json
 import math
+from dataclasses import asdict
 
 import pytest
 
 from swarm.wingsim.aircraft import Aircraft, Controls, Phase
 from swarm.wingsim.airframe import CHUPITO
+from swarm.wingsim.dynamics import Dynamics
 from swarm.wingsim.rigidbody import from_euler, rotate, to_euler, unrotate
 from swarm.wingsim.strips import (
     Flow,
+    Loads,
     Planform,
     Section,
     forces_and_moments,
@@ -437,3 +441,81 @@ def test_it_flies_through_rough_air() -> None:
         assert abs(math.degrees(ac.euler[0])) < 60
     assert ac.phase == Phase.FLYING
     assert max(speeds) - min(speeds) > 1.0, "tossed about"
+
+
+def test_the_dynamics_add_up() -> None:
+    """What the dynamics view shows is what moved the wing: the strips and the pod make the
+    aerodynamic force, it, the prop and gravity the net force; level, it pulls one g. In rough
+    air too, where the wind is its mean, the turbulence and a gust."""
+    ac = flying(20)
+    for weather in (None, Weather(speed=6.0, from_deg=90.0, gusts=3.0, span=0.8, seed=2)):
+        ac.weather = weather
+        hold_level(ac, 0.45, 2.0)
+        ac.step(Controls(0.45), DT, ground_down=1e6, detail=True)
+        d = Dynamics.of(ac)
+        assert len(d.strips) == len(CHUPITO.wing.strips)
+        pieces = [sum(s.force[k] for s in d.strips) + d.pod_drag[k] for k in range(3)]
+        assert pieces == pytest.approx(d.aero, abs=0.01)
+        net = [d.aero[k] + d.prop[k] + d.gravity[k] for k in range(3)]
+        assert net == pytest.approx(d.total, abs=0.01)
+        moment = [d.aero_moment[k] + d.prop_moment[k] + d.gyroscopic[k] for k in range(3)]
+        assert moment == pytest.approx(d.total_moment, abs=0.002)
+        wind = [d.wind_mean[k] + d.turbulence[k] + d.gust[k] for k in range(3)]
+        assert wind == pytest.approx(d.wind, abs=0.002)
+        json.dumps(asdict(d), allow_nan=False)  # as the viewer gets it: no NaN
+        if weather is None:
+            assert -d.load[2] == pytest.approx(1.0, abs=0.15)
+            weight = CHUPITO.inertia.mass * ac.gravity
+            lift = d.coefficients[0] * d.dynamic_pressure * CHUPITO.wing.reference.area
+            assert lift == pytest.approx(weight, rel=0.15)
+            assert all(s.attached > 0.9 and s.seen < s.stall for s in d.strips), "none stalled"
+            assert 0 < d.flex < 1 and abs(d.effective[0]) <= abs(d.elevons[0])
+
+
+def test_the_dynamics_show_its_balance_wake_and_energy() -> None:
+    """The neutral point gives the calibrated static margin; trimmed, the centre of pressure
+    sits near the centre of mass; the trailing vortices sum to nothing, strongest at the tips;
+    the energy height is the height and the speed's, and gliding it falls."""
+    ac = flying(25)
+    ac.step(Controls(0.4), DT, ground_down=1e6, detail=True)
+    d = Dynamics.of(ac)
+    assert d.static_margin == pytest.approx(0.086, abs=0.01)
+    assert d.centre_of_pressure is not None and abs(d.centre_of_pressure) < 0.01
+    strengths = [w[1] for w in d.wake]
+    assert sum(strengths) == pytest.approx(0.0, abs=1e-3)
+    assert strengths[-1] == pytest.approx(-strengths[0], rel=0.05)
+    assert abs(strengths[-1]) == max(abs(g) for g in strengths)
+    speed2 = sum(v * v for v in ac.body.velocity)
+    assert d.energy_height == pytest.approx(d.height + speed2 / (2 * ac.gravity), abs=0.01)
+    for _ in range(500):
+        ac.step(Controls(0.0), DT, ground_down=1e6, detail=True)
+    assert Dynamics.of(ac).energy_rate < -0.5, "the drag takes its energy"
+
+
+def test_looking_into_it_changes_nothing() -> None:
+    ac, looked = Aircraft(CHUPITO), Aircraft(CHUPITO)
+    for a in (ac, looked):
+        a.throw()
+    for i in range(3000):
+        controls = Controls(0.6, -0.1 + 0.2 * math.sin(i / 300), -0.1)
+        ac.step(controls, DT, ground_down=1e6)
+        looked.step(controls, DT, ground_down=1e6, detail=i % 4 == 0)
+    assert looked.body == ac.body
+    assert looked.forces.loads.strips and not ac.forces.loads.strips
+
+
+def test_each_strip_meets_its_own_air() -> None:
+    """Level at 20 m/s the air comes at every strip from ahead; hanging still and rolling right,
+    the right tip, going down, meets it from below and the left tip from above."""
+    wing = CHUPITO.wing
+    loads = Loads()
+    forces_and_moments(wing, (20.0, 0.0, 0.0), (0, 0, 0), (0, 0), 1.225, loads=loads)
+    for load in loads.strips[:-1]:  # the wing's; the fin's is edge on
+        assert load.air == pytest.approx((-20, 0, 0), abs=0.5)
+    loads = Loads()
+    forces_and_moments(wing, (0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0, 0), 1.225, loads=loads)
+    pairs = zip(wing.strips, loads.strips, strict=True)
+    tips = [(s.quarter_chord[1], load.air[2]) for s, load in pairs]
+    right, left = max(tips), min(tips)
+    assert right[1] < -1.5, "the right tip meets air coming up (body z is down)"
+    assert left[1] > 1.5

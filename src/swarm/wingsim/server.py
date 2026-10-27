@@ -147,8 +147,9 @@ class XPlaneServer:
             self._run_commands()
             controls = self._controls()
             ground_down = self._ground_down()
-            for _ in range(self.substeps):
-                self.aircraft.step(controls, dt, ground_down)
+            for i in range(self.substeps):
+                last = i == self.substeps - 1
+                self.aircraft.step(controls, dt, ground_down, detail=last)
             if self.peer and self.subscriptions:
                 readings = self.readings()
                 values = {i: readings.get(name, 0.0) for i, name in self.subscriptions.items()}

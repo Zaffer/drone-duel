@@ -9,7 +9,9 @@ Each run is recorded to logs/wingsim/ (FlightRecorder): the wing's state, the st
 outputs and its estimate of the attitude, the wind, 50 times a second, to look into how it flew.
 
 The 3D viewer's wing.html draws it on the map (WingView, swarm.view's /wing), and tells it where
-the map's ground is under it (MapGround): the 3D tiles' roofs and trees too.
+the map's ground is under it (MapGround): the 3D tiles' roofs and trees too. Its D key shows the
+flight model at work (swarm.wingsim.dynamics, in every frame): the forces on the wing, and every
+number beside it.
 
 INAV's modes (swarm.wingsim.inav): CH5 high arms; CH6 low ANGLE, middle ACRO, high MANUAL; CH7
 high RTH. INAV's launch mode is on: arm, raise the throttle, throw, and INAV runs the motor.
@@ -31,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from swarm.wingsim import inav
 from swarm.wingsim.aircraft import Aircraft, Phase
 from swarm.wingsim.airframe import CHUPITO
+from swarm.wingsim.dynamics import Dynamics
 from swarm.wingsim.server import DEFAULT_PORT, YOKES, Snapshot, XPlaneServer
 from swarm.wingsim.weather import Weather
 
@@ -174,13 +177,14 @@ class FlightRecorder:
 
 @dataclass(frozen=True)
 class WingFrame:
-    """What the 3D viewer draws: the wing, whether INAV is armed or what stops it, and the RC
-    channels INAV gets, µs."""
+    """What the 3D viewer draws: the wing, whether INAV is armed or what stops it, the RC
+    channels INAV gets, µs, and the flight model at work."""
 
     wing: Snapshot
     armed: bool
     blockers: tuple[str, ...]
     rc: tuple[float, ...]
+    dynamics: Dynamics
 
 
 class WingView:
@@ -204,7 +208,9 @@ class WingView:
         if tick != self._tick or frame is None:
             status = self.status
             armed, blockers = (status.armed, status.blockers) if status else (False, ("starting",))
-            frame = WingFrame(self.server.snapshot(), armed, blockers, self.server.sticks)
+            server = self.server
+            dynamics = Dynamics.of(server.aircraft)
+            frame = WingFrame(server.snapshot(), armed, blockers, server.sticks, dynamics)
             self._frame, self._tick = frame, tick
         return {0: (tick, frame)}
 
