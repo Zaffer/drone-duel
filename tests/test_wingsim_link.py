@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from swarm.wingrun import MapGround, WingView
+from swarm.osd import MSP_DISPLAYPORT
+from swarm.wingrun import AirUnit, MapGround, WingView
 from swarm.wingsim import inav, xplane
 from swarm.wingsim.aircraft import Aircraft, Phase
 from swarm.wingsim.airframe import CHUPITO
@@ -188,3 +189,51 @@ def test_back_in_the_hand_is_back_at_the_start() -> None:
     server._run_commands()  # pyright: ignore[reportPrivateUsage]
     assert ac.phase == Phase.HAND
     assert ac.body.position == pytest.approx((0.0, 0.0, -CHUPITO.launch.height))
+
+
+def _displayport(payload: bytes) -> bytes:
+    """An MSP v1 reply carrying `payload` as MSP_DISPLAYPORT."""
+    checksum = len(payload) ^ MSP_DISPLAYPORT
+    for b in payload:
+        checksum ^= b
+    return b"$M>" + bytes([len(payload), MSP_DISPLAYPORT]) + payload + bytes([checksum])
+
+
+def test_the_air_unit_polls_inav_and_keeps_its_osd() -> None:
+    """INAV draws its OSD only to an air unit polling it: this one polls, then keeps the screen
+    INAV drew, on Betaflight-compatible HD's 53 x 20, for the viewer."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    unit = AirUnit(listener.getsockname()[1])
+    unit.start()
+    try:
+        inav_side, _ = listener.accept()
+        inav_side.settimeout(2)
+        assert inav_side.recv(64).startswith(b"$M<"), "it asks first, as an air unit does"
+        screen = (
+            _displayport(bytes([5, 0, 3]))  # options: Betaflight-compatible HD
+            + _displayport(bytes([2]))  # clear
+            + _displayport(bytes([3, 17, 6, 0]) + b"ANGL")
+            + _displayport(bytes([3, 1, 6, 0, 0x96]) + b"0.00")
+            + _displayport(bytes([4]))  # draw
+        )
+        inav_side.sendall(screen)
+        deadline = time.monotonic() + 2
+        while unit.screen is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        osd = unit.screen
+        assert osd is not None
+        assert (osd.cols, osd.rows) == (53, 20)
+        assert osd.text[17][6:10] == "ANGL"
+        assert osd.text[1][6:11] == "\x960.00"
+        inav_side.close()
+    finally:
+        unit.stop()
+        listener.close()
+
+
+def test_inav_gets_tbss_osd() -> None:
+    """TBS's OSD layout, for a DJI air unit on UART3 in Betaflight-compatible HD."""
+    lines = inav.CHUPITO_SETTINGS.splitlines()
+    assert sum(line.startswith("osd_layout") for line in lines) == 27
+    assert "set osd_video_system = BFHDCOMPAT" in lines
+    assert "serial 2 33554432 115200 115200 0 115200" in lines  # MSP DisplayPort

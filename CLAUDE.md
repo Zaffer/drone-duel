@@ -16,7 +16,8 @@ QGroundControl live in `external/` via `scripts/setup.sh`.
   links outside MAVLink are the exception: the USB radio (`swarm.radio`) and the viewer's
   camera feed, which draws SITL's physics (`swarm.physics`) as the camera's video, sent over
   a simulated analog video link (analog-vision's `analog.js`, vendored by `scripts/setup.sh`), and SITL's OSD over MSP DisplayPort
-  (`swarm.osd`) as the analog OSD chip's. The map, the FPV
+  (`swarm.osd`) as the analog OSD chip's; the wing's INAV OSD over MSP DisplayPort as the DJI
+  air unit's (`swarm.wingrun.AirUnit`). The map, the FPV
   view and the dials stay on MAVLink.
 - The mission's places and basic sim settings live in `mission.toml` (`swarm.settings`), not
   in code; CLI flags only override it.

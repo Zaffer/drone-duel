@@ -24,6 +24,16 @@
         font: 12px/1.5 var(--mono);
         pointer-events: none;
       }
+      /* INAV's OSD in the FPV camera: on a 16:9 picture, as the DJI goggles show it. */
+      #osd {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(100vw, calc(100vh * 16 / 9));
+        height: min(100vh, calc(100vw * 9 / 16));
+        pointer-events: none;
+      }
       #hud {
         right: 12px;
         bottom: 28px;
@@ -312,6 +322,7 @@
   </head>
   <body>
     <div id="map"></div>
+    <canvas id="osd"></canvas>
     <div class="wing-panel" id="help">
       <div id="help-keys">
         <div><b>Space</b>throw it; again once down</div>

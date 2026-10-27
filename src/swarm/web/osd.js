@@ -10,6 +10,9 @@
 //
 // Over the analog feed (analog.js) the OSD is not laid over the picture but put into its
 // video, as the chip does: OsdRaster draws the chip's pixels for that, one a field line.
+//
+// A digital system's OSD (the wing's INAV, through a DJI air unit) is drawn by the goggles on a
+// grid that fills the picture, rows and columns alike: OsdView's `fill`.
 
 const GLYPHS = 256;
 /** A character row's height, in NTSC's lines. */
@@ -17,16 +20,19 @@ const ROW_LINES = 18;
 const NTSC_LINES = 240;
 const GLYPH_W = 12;
 
-/** @type {Map<number, HTMLImageElement>} each OSD_FONT as it is asked for. */
+/** @type {Map<string, HTMLImageElement>} each font as it is asked for, by its URL. */
 const fonts = new Map();
 
-/** OSD_FONT `index`, loading the first time; `onload` when it has. */
-function fontImage(index, onload) {
-  let font = fonts.get(index);
+/** ArduPilot's OSD_FONT `index`, as swarm.view serves it. */
+const chipFont = (index) => `/osd/font/${index}.png`;
+
+/** The font at `src`, loading the first time; `onload` when it has. */
+function fontImage(src, onload) {
+  let font = fonts.get(src);
   if (!font) {
     font = new Image();
-    font.src = `/osd/font/${index}.png`;
-    fonts.set(index, font);
+    font.src = src;
+    fonts.set(src, font);
   }
   if (!font.complete) font.decode().then(onload, () => {});
   return font;
@@ -44,9 +50,14 @@ function sharpFont(font, kx, ky) {
 }
 
 export class OsdView {
-  /** @param {HTMLCanvasElement} canvas */
-  constructor(canvas) {
+  /** On `canvas`; `font`, a screen's font index to its URL (default ArduPilot's chip fonts);
+   * `fill`, the grid's rows spread over the whole picture (a digital system's) rather than
+   * NTSC's 18 lines each.
+   * @param {HTMLCanvasElement} canvas */
+  constructor(canvas, { font = chipFont, fill = false } = {}) {
     this.canvas = canvas;
+    this.font = font;
+    this.fill = fill;
     this.ctx = canvas.getContext("2d");
     this._drawn = null;
     this._size = "";
@@ -58,7 +69,8 @@ export class OsdView {
   /** Draw `screen` ({cols, rows, font, text: one Latin-1 string per row}); only when it, or
    * the canvas's size, changed. */
   draw(screen) {
-    const font = fontImage(screen.font ?? 0, () => {
+    const src = this.font(screen.font ?? 0);
+    const font = fontImage(src, () => {
       this._drawn = null; // drawn with the next screen
     });
     if (!font.complete || !font.naturalWidth) return;
@@ -75,11 +87,11 @@ export class OsdView {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     const cw = this.canvas.width / screen.cols;
-    const ch = (this.canvas.height * ROW_LINES) / NTSC_LINES;
+    const ch = this.fill ? this.canvas.height / screen.rows : (this.canvas.height * ROW_LINES) / NTSC_LINES;
     const y0 = (this.canvas.height - ch * screen.rows) / 2;
     const kx = Math.max(1, Math.floor(cw / font.naturalWidth));
     const ky = Math.max(1, Math.floor(ch / (font.naturalHeight / GLYPHS)));
-    const key = `${screen.font ?? 0}:${kx}x${ky}`;
+    const key = `${src}:${kx}x${ky}`;
     if (this._sharpKey !== key) {
       this._sharpKey = key;
       this._sharp = sharpFont(font, kx, ky);
@@ -120,7 +132,7 @@ export class OsdRaster {
 
   /** Draw `screen` (as OsdView.draw), when it is a new one. */
   draw(screen) {
-    const font = fontImage(screen.font ?? 0, () => {
+    const font = fontImage(chipFont(screen.font ?? 0), () => {
       this._drawn = null;
     });
     if (!font.complete || !font.naturalWidth || screen === this._drawn) return;

@@ -23,6 +23,8 @@ CHANMAP = "M01-01,S01-02,S02-03"
 """Motor 1 to the X-Plane throttle, servos 1 and 2 (the elevons) to the first two yokes."""
 CLI_PORT = 5760
 MSP_PORT = CLI_PORT + 1
+OSD_PORT = CLI_PORT + 2
+"""UART3 (`serial 2`): INAV's OSD over MSP DisplayPort, as TBS sets it for the DJI air unit."""
 PROMPT = b"\n# "
 
 CHUPITO_SETTINGS = """
@@ -34,8 +36,10 @@ set baro_hardware = FAKE
 set mag_hardware = FAKE
 set pitot_hardware = VIRTUAL
 set receiver_type = SIM (SITL)
-# Over X-Plane's protocol INAV SITL reads a fixed 16.8 V: a full 4S pack, not the Chupito's 6S.
-set bat_cells = 4
+# TBS's 6S. INAV 9.1 SITL reads a battery only from its own X-Plane plugin (the inav_xitl
+# datarefs, once inav_xitl/plugin/xitlDrefVersion answers), which the simulator does not play:
+# it reads none, 0 V on the OSD.
+set bat_cells = 6
 
 # TBS's Chupito INAV CLI suggestions (INAV 8.0.1), less what is the real board's.
 feature FW_LAUNCH
@@ -92,6 +96,38 @@ set throttle_idle = 5.000
 set nav_fw_cruise_thr = 1350
 set nav_fw_min_thr = 1100
 set nav_fw_launch_thr = 2000
+
+# The OSD: TBS's, for a DJI air unit. Its board sends it over MSP DisplayPort on UART3, in
+# Betaflight-compatible HD (53 x 20, Betaflight's glyphs), and so does SITL, on its TCP port.
+serial 2 33554432 115200 115200 0 115200
+set osd_video_system = BFHDCOMPAT
+osd_layout 0 0 23 0 H
+osd_layout 0 1 10 12 H
+osd_layout 0 7 6 17 V
+osd_layout 0 8 31 0 H
+osd_layout 0 9 0 16 H
+osd_layout 0 11 6 2 V
+osd_layout 0 12 15 1 V
+osd_layout 0 13 32 1 V
+osd_layout 0 14 43 3 V
+osd_layout 0 15 42 2 V
+osd_layout 0 22 26 1 V
+osd_layout 0 23 42 1 V
+osd_layout 0 26 32 2 V
+osd_layout 0 28 39 9 H
+osd_layout 0 30 12 17 V
+osd_layout 0 32 6 1 V
+osd_layout 0 33 12 5 H
+osd_layout 0 35 15 2 V
+osd_layout 0 40 1 4 H
+osd_layout 0 87 6 18 V
+osd_layout 0 107 1 2 V
+osd_layout 0 109 41 17 V
+osd_layout 0 110 42 16 V
+osd_layout 0 111 42 14 V
+osd_layout 0 112 41 15 V
+osd_layout 0 125 47 2 H
+osd_layout 0 142 45 0 H
 
 # Modes: CH5 high arms; CH6 low ANGLE, middle ACRO (no mode), high MANUAL; CH7 high RTH.
 aux 0 0 0 1700 2100

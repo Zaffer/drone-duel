@@ -571,8 +571,17 @@ uv run swarm wingsim            # the drone radio on INAV's sticks
 Watch it at http://localhost:8600/wing.html, on the map's 3D tiles. The page only draws it: the
 flight runs in Python. The page reports the map's ground under the wing, roofs and trees
 included, and the flight model flies over that ground. On the page, Space throws it, R puts it
-back in the hand, C changes the camera. `--no-view` leaves the viewer out, and `--view-port`
-moves it (the Google tiles' key only works on 8600).
+back in the hand, and C cycles the camera: chase, far chase, FPV and free. `--no-view` leaves the
+viewer out, and `--view-port` moves it (the Google tiles' key only works on 8600).
+
+The FPV camera shows INAV's own OSD, as on the real wing. TBS sets INAV up for a DJI air unit:
+it sends its OSD over MSP DisplayPort on UART3, in Betaflight-compatible HD, a 53 x 20 grid of
+Betaflight's glyphs, which the goggles draw. The sim does the same with TBS's OSD layout.
+`swarm.wingrun`'s `AirUnit` polls INAV as the air unit does, since INAV draws nothing until
+something does. The page draws INAV's screen in Betaflight's font, which `scripts/setup.sh`
+fetches. INAV's symbols that Betaflight's font lacks show as `?`, as they do in DJI's goggles.
+The goggles' own status bar is not drawn. The battery reads 0 V: INAV 9.1 SITL takes a battery
+only from its own X-Plane plugin, which the sim does not play.
 
 The page shows the flight model at work. D opens the panels of numbers. Keys 1-5 draw layers on
 the wing, any of them together, with or without the panels:

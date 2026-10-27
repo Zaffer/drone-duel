@@ -103,6 +103,14 @@ mkdir -p "$WEB/chupito"
 [ -f "$WEB/chupito/$CHUPITO_GLB" ] ||
     curl -fsSL -o "$WEB/chupito/$CHUPITO_GLB" "https://sim.narenana.com/assets/models/real/$CHUPITO_GLB"
 
+# Betaflight's OSD font, from its configurator (GPL-3.0): what DJI's goggles draw an MSP
+# DisplayPort OSD in, so the wing's INAV OSD too, in Betaflight-compatible HD (swarm.wingrun).
+BETAFLIGHT_FONT_REF=9f4a52d2702ca0ab109d77b31633b749c5198e47
+mkdir -p "$WEB/betaflight"
+[ -f "$WEB/betaflight/default.mcm" ] ||
+    curl -fsSL -o "$WEB/betaflight/default.mcm" \
+        "https://raw.githubusercontent.com/betaflight/betaflight-configurator/$BETAFLIGHT_FONT_REF/resources/osd/2/default.mcm"
+
 # INAV SITL for the Chupito's flight model (swarm.wingsim). Building INAV needs Ruby, so this is
 # the binary INAV's Configurator ships for its SITL tab (Configurator 9.1.1: INAV 9.1.0).
 INAV_CONFIGURATOR_VERSION=9.1.1

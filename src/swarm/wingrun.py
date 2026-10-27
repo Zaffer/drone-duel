@@ -9,9 +9,9 @@ Each run is recorded to logs/wingsim/ (FlightRecorder): the wing's state, the st
 outputs and its estimate of the attitude, the wind, 50 times a second, to look into how it flew.
 
 The 3D viewer's wing.html draws it on the map (WingView, swarm.view's /wing), and tells it where
-the map's ground is under it (MapGround): the 3D tiles' roofs and trees too. Its D key shows the
-flight model at work (swarm.wingsim.dynamics, in every frame): the forces on the wing, and every
-number beside it.
+the map's ground is under it (MapGround): the 3D tiles' roofs and trees too. Its FPV camera shows
+INAV's own OSD, as the DJI air unit gets it (AirUnit). Its D key shows the flight model at work
+(swarm.wingsim.dynamics, in every frame): the forces on the wing, and every number beside it.
 
 INAV's modes (swarm.wingsim.inav): CH5 high arms; CH6 low ANGLE, middle ACRO, high MANUAL; CH7
 high RTH. INAV's launch mode is on: arm, raise the throttle, throw, and INAV runs the motor.
@@ -21,6 +21,7 @@ import csv
 import logging
 import math
 import select
+import socket
 import sys
 import threading
 import time
@@ -30,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from swarm.osd import MSP_DISPLAYPORT, DisplayPort, MspReader, OsdScreen
 from swarm.wingsim import inav
 from swarm.wingsim.aircraft import Aircraft, Phase
 from swarm.wingsim.airframe import CHUPITO
@@ -175,24 +177,79 @@ class FlightRecorder:
         return [round(v, 4) if isinstance(v, float) else v for v in values]
 
 
+class AirUnit:
+    """The DJI air unit's side of INAV's OSD. INAV sends its OSD over MSP DisplayPort on the
+    UART TBS gives it (inav.OSD_PORT, SITL's TCP), but only to an air unit it hears: the unit
+    polls the flight controller over MSP, and so does this (MSP_FC_VARIANT and MSP_STATUS, ten
+    times a second). `screen`: the last INAV drew, on Betaflight-compatible HD's 53 x 20."""
+
+    GRIDS = {3: (53, 20)}
+    """INAV's resolution in Betaflight-compatible HD (BFHDCOMPAT)."""
+    POLL = b"$M<\x00\x02\x02$M<\x00\x65\x65"
+    POLL_S = 0.1
+
+    def __init__(self, port: int = inav.OSD_PORT) -> None:
+        self.port = port
+        self.screen: OsdScreen | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="air-unit", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                with socket.create_connection(("127.0.0.1", self.port), timeout=2) as sock:
+                    self._listen(sock)
+            except OSError:
+                pass  # INAV not up yet, or restarting with its settings
+            self._stop.wait(0.5)
+
+    def _listen(self, sock: socket.socket) -> None:
+        reader, display = MspReader(), DisplayPort(self.GRIDS, analog=False)
+        polled = 0.0
+        while not self._stop.is_set():
+            now = time.monotonic()
+            if now - polled >= self.POLL_S:
+                sock.sendall(self.POLL)
+                polled = now
+            if not select.select([sock], [], [], self.POLL_S)[0]:
+                continue
+            data = sock.recv(65536)
+            if not data:
+                return
+            for command, payload in reader.feed(data):
+                if command == MSP_DISPLAYPORT and display.handle(payload):
+                    self.screen = display.screen
+
+
 @dataclass(frozen=True)
 class WingFrame:
     """What the 3D viewer draws: the wing, whether INAV is armed or what stops it, the RC
-    channels INAV gets, µs, and the flight model at work."""
+    channels INAV gets, µs, the flight model at work, and INAV's OSD (None until it draws)."""
 
     wing: Snapshot
     armed: bool
     blockers: tuple[str, ...]
     rc: tuple[float, ...]
     dynamics: Dynamics
+    osd: OsdScreen | None = None
 
 
 class WingView:
-    """The wing for the 3D viewer (swarm.view's WingSource)."""
+    """The wing for the 3D viewer (swarm.view's WingSource); INAV's OSD from `air_unit`."""
 
-    def __init__(self, server: XPlaneServer, ground: MapGround) -> None:
+    def __init__(
+        self, server: XPlaneServer, ground: MapGround, air_unit: AirUnit | None = None
+    ) -> None:
         self.server = server
         self.map_ground = ground
+        self.air_unit = air_unit
         self.status: inav.Status | None = None
         """INAV's, as last read; None until it answers."""
         self._tick = -1
@@ -210,7 +267,8 @@ class WingView:
             armed, blockers = (status.armed, status.blockers) if status else (False, ("starting",))
             server = self.server
             dynamics = Dynamics.of(server.aircraft)
-            frame = WingFrame(server.snapshot(), armed, blockers, server.sticks, dynamics)
+            osd = self.air_unit.screen if self.air_unit else None
+            frame = WingFrame(server.snapshot(), armed, blockers, server.sticks, dynamics, osd)
             self._frame, self._tick = frame, tick
         return {0: (tick, frame)}
 
@@ -320,7 +378,8 @@ def run(
     sticks: list[Callable[[], list[float]]] = [lambda: list(NEUTRAL)]
     ground = MapGround(origin)
     server = XPlaneServer(aircraft, origin, rc=lambda: sticks[0](), port=port, ground=ground)
-    wing_view = WingView(server, ground)
+    air_unit = AirUnit()
+    wing_view = WingView(server, ground, air_unit)
     if view:
         view.wing = wing_view
         try:
@@ -334,6 +393,7 @@ def run(
     recorder.start()
     print(f"recording to {recorder.path}", flush=True)
     proc = inav.start(INAV_BINARY, INAV_WORKDIR, port)
+    air_unit.start()
     msp: inav.Msp | None = None
     radio: RadioSticks | None = None
     try:
@@ -373,6 +433,7 @@ def run(
         pass
     finally:
         recorder.stop()
+        air_unit.stop()
         if radio:
             radio.stop()
         if msp:

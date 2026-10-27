@@ -9,10 +9,12 @@
 // Under `swarm wingsim` it flies on INAV SITL instead, in Python (swarm.wingsim): this page only
 // draws it, from swarm.view's /wing, and posts back the map's ground under it, which the flight
 // model then flies over. The radio is INAV's, read there. D shows the flight model at work, on the
-// wing and beside it (wingdynamics.js).
+// wing and beside it (wingdynamics.js). The FPV camera shows INAV's own OSD, as the DJI air unit
+// gets it from the flight controller and the goggles draw it, in Betaflight's font (osd.js).
 
 import { BaseMap } from "./basemap.js";
 import { feed as radio, isRadio } from "./driveradio.js";
+import { OsdView } from "./osd.js";
 import { ARROW_ID, DynamicsView } from "./wingdynamics.js";
 import {
   CHUPITO,
@@ -46,6 +48,8 @@ const RADIO_THROW = { armBelow: 0.1, throwAbove: 0.5 };
 const CAMERAS = {
   /** Nanawing's chase camera. */
   chase: { back: 4, up: 1.4, ahead: 3, fov: 1.1 },
+  /** The same, further back. */
+  "far chase": { back: 7, up: 2.4, ahead: 3, fov: 1.1 },
   /** At the lens on the nose, tilted up. */
   fpv: { nose: 0.22, uptilt: C.Math.toRadians(20), fov: 1.62 },
   free: null,
@@ -239,6 +243,8 @@ class WingSession {
       link && ui.dynamics
         ? new DynamicsView(this.viewer, this.localToFixed, ui.dynamics, ui.dynamicsHistory, ui.dynamicsLegend)
         : null;
+    this.osdView = link && ui.osd ? new OsdView(ui.osd, { font: () => "/osd/font/betaflight.png", fill: true }) : null;
+    this._osdShown = false;
 
     this.modelMatrix = C.Matrix4.clone(C.Matrix4.IDENTITY);
     this.model = null;
@@ -463,6 +469,11 @@ class WingSession {
     this._draw(this.input, dt);
     if (this.link) this.dynamics?.update(this.link.frame, enu(this.state.position), this._axes(), now);
     this._updateCamera(dt);
+    // INAV's OSD, in the FPV camera, as the goggles show it.
+    const osd = this.cameraMode === "fpv" ? this.link?.frame?.osd : null;
+    if (osd) this.osdView?.draw(osd);
+    else if (this._osdShown) this.osdView?.clear();
+    this._osdShown = Boolean(osd);
     const hud = this._hud;
     hud.frames++;
     if (now - hud.fpsT > 250) {
@@ -596,7 +607,7 @@ class WingSession {
       return;
     }
     // Behind the way it is going, swinging round quicker the faster it goes.
-    const rig = CAMERAS.chase;
+    const rig = CAMERAS[this.cameraMode];
     const v = this.state.velocity;
     const heading = Math.hypot(v[0], v[2]) > 2 ? Math.atan2(v[0], v[2]) : this._heading();
     const d = Math.atan2(Math.sin(heading - this.cameraHeading), Math.cos(heading - this.cameraHeading));
@@ -670,6 +681,7 @@ const ui = {
   dynamics: $("dynamics"),
   dynamicsHistory: $("dynamics-history"),
   dynamicsLegend: $("dynamics-legend"),
+  osd: $("osd"),
   help: $("help"),
   camMode: $("cam-mode"),
   hud: {

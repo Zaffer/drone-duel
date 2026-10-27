@@ -34,7 +34,7 @@ from typing import Any, Protocol, TypedDict, cast
 
 from swarm.geo import LocalFrame
 from swarm.launch import LEADER_RADIUS_M
-from swarm.osd import OsdFeed, font_png
+from swarm.osd import BETAFLIGHT_FONT, OsdFeed, font_png, mcm_png
 from swarm.physics import PhysicsFeed
 from swarm.telemetry import DEFAULT_PORT
 
@@ -493,7 +493,10 @@ def _handler_for(server: ViewServer) -> type[BaseHTTPRequestHandler]:
                 self._feed(server.wing)
             elif path.startswith("/osd/font/") and path.endswith(".png"):
                 index = path.removeprefix("/osd/font/").removesuffix(".png")
-                png = font_png(int(index)) if index.isdigit() else None
+                if index == "betaflight":
+                    png = mcm_png(BETAFLIGHT_FONT)
+                else:
+                    png = font_png(int(index)) if index.isdigit() else None
                 if png:
                     self._send(png, ".png")
                 else:
