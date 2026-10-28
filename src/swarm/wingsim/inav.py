@@ -37,10 +37,13 @@ set baro_hardware = FAKE
 set mag_hardware = FAKE
 set pitot_hardware = VIRTUAL
 set receiver_type = SIM (SITL)
-# TBS's 6S. INAV 9.1 SITL reads a battery only from its own X-Plane plugin (the inav_xitl
-# datarefs, once inav_xitl/plugin/xitlDrefVersion answers), which the simulator does not play:
-# it reads none, 0 V on the OSD.
-set bat_cells = 6
+# INAV 9.1 SITL reads our pack only from its own X-Plane plugin (the inav_xitl datarefs, once
+# inav_xitl/plugin/xitlDrefVersion answers), which the simulator does not play. Without it the
+# only battery is SITL's fake one, a fixed 16.8 V: a full 4S, not TBS's 6S, which would read
+# 2.8 V a cell, critical. With no battery at all INAV 9.1 dies on disarming: its OSD's stats
+# divide the lowest voltage by a cell count of 0 (SIGFPE, drawStat_BatteryVoltage).
+set vbat_meter_type = FAKE
+set bat_cells = 4
 
 # TBS's Chupito INAV CLI suggestions (INAV 8.0.1), less what is the real board's.
 feature FW_LAUNCH

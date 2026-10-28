@@ -580,8 +580,9 @@ Betaflight's glyphs, which the goggles draw. The sim does the same with TBS's OS
 `swarm.wingrun`'s `AirUnit` polls INAV as the air unit does, since INAV draws nothing until
 something does. The page draws INAV's screen in Betaflight's font, which `scripts/setup.sh`
 fetches. INAV's symbols that Betaflight's font lacks show as `?`, as they do in DJI's goggles.
-The goggles' own status bar is not drawn. The battery reads 0 V: INAV 9.1 SITL takes a battery
-only from its own X-Plane plugin, which the sim does not play.
+The goggles' own status bar is not drawn. The battery is SITL's fake one, a fixed 16.8 V set up
+as a full 4S, not our model's 6S pack: INAV 9.1 SITL reads a real battery only from its own
+X-Plane plugin, which the sim does not play.
 
 The page shows the flight model at work. D opens the panels of numbers. Keys 1-5 draw layers on
 the wing, any of them together, with or without the panels:
