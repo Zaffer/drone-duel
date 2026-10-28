@@ -22,6 +22,8 @@ Sources
           540 W. Its cruise, about 29 m/s at 45 % throttle on 127 W, is beyond a stock 5x3 prop's
           pitch speed at that throttle: a higher pitch prop, or its GPS-derived airspeed reading
           high. Not used.
+  PACK    The pack flown: Tattu's R-Line V6.0 1300 mAh 6S 160C, a standard LiPo (22.2 V
+          nominal, 4.2 V a cell full), 197-203 g by its listings. Tattu gives no resistance.
   EST     Estimated, and to be measured.
 
 Calibrated (tests/test_wingsim.py holds the model to these)
@@ -73,7 +75,10 @@ dealers); no pilot's account of a wing drop, tip stall or bobbing has been found
   the rest      the servo's speed (600 deg/s), the belly's height, what counts as flying into
                 something, a landing's limits and the grass's friction (aircraft.py, GROUND);
                 the throw (LAUNCH); the section's profile drag (the rest of CD0 goes to the
-                body); the motor's no-load current and the pack's resistance
+                body); the motor's no-load current
+  the pack      its resistance and slow sag, LOG's pack's (another make, a high-voltage one);
+                its discharge curve, a typical LiPo cell's (LIPO_CELL). A charger's per-cell
+                resistance readings, and a logged flight on it, would measure them
 And the sources' own limits: TBS's numbers are a manufacturer's; LOG had no pitot, so its
 airspeeds are GPS speeds in an unknown wind, and its pilot's mix and tune were their own.
 """
@@ -196,21 +201,39 @@ INERTIA = Inertia(
 # turning counterclockwise seen from behind rolls it (torque_sign). Its size is 15 times what the
 # motor's reaction needs here (0.11 N m at 27 A, from its KV: about 0.5 deg). Something else in
 # that build rolls it with power (a canted motor? a warp?); unknown, so not modelled.
+LIPO_CELL = (
+    (0.00, 3.27),
+    (0.05, 3.61),
+    (0.10, 3.69),
+    (0.20, 3.73),
+    (0.30, 3.77),
+    (0.40, 3.80),
+    (0.50, 3.84),
+    (0.60, 3.87),
+    (0.70, 3.95),
+    (0.80, 4.02),
+    (0.90, 4.11),
+    (1.00, 4.20),
+)
+"""EST: a LiPo cell's resting voltage against the charge left, the common hobby chart's: it falls
+quickly from full, flat through the middle, and steeply in the last 10 %."""
+
 POWER_TRAIN = PowerTrain(
     # The prop's coefficients and the resistance are fitted together (see the header).
     kv=2200,  # TBS
-    resistance=0.165,  # fitted
+    resistance=0.095,  # fitted, with the pack's slow sag beside it
     no_load_current=1.0,  # EST
     rotor_inertia=6.0e-6,  # EST: 5 in tri-blade and a 20xx bell
     prop_diameter=5 * 0.0254,  # TBS: 5x3x3
     ct0=0.118,  # fitted: 12.7 N static
     cp0=0.0651,  # fitted
     j_zero=0.661,  # fitted: about a 3.3 in pitch
-    cells=6,  # TBS
-    cell_full=4.2,
-    cell_empty=3.5,
-    capacity_mah=1300,  # TBS's 20 minute pack
-    pack_resistance=0.06,  # EST: a 1300 mAh 6S under 30 A
+    cells=6,  # TBS, PACK
+    cell_curve=LIPO_CELL,
+    capacity_mah=1300,  # PACK; TBS's 20 minute pack
+    pack_resistance=0.06,  # EST: in LOG's pack's 0.050-0.062
+    polarization_resistance=0.07,  # LOG's pack's (EST for ours)
+    polarization_time=7.0,  # LOG's pack's 5-10 s (EST for ours)
     torque_sign=1.0,  # LOG: it rolls right with power (see Torque roll, above)
     prop_position=(-0.253, 0.0, -0.01),  # GLB: the hub, behind the centre of mass
 )

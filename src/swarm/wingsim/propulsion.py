@@ -1,5 +1,8 @@
 """The power train: pack, ESC, brushless motor and prop.
 
+The pack is a LiPo's: its resting voltage falls with the charge used along a cell's discharge
+curve, and under load it sags twice, at once through its resistance and over seconds through its
+polarization (a resistance behind a lag), which builds at power and recovers when it eases.
 The ESC turns the throttle into a duty cycle on the pack's voltage; the motor is a DC machine
 (back EMF and winding resistance, the ESC's and wiring's lumped in); the prop's thrust and power
 coefficients fall with the advance ratio J = V / (n D), so thrust fades as the wing speeds up and
@@ -38,10 +41,15 @@ class PowerTrain:
     j_zero: float
     """The advance ratio of no thrust, about the pitch over the diameter."""
     cells: int
-    cell_full: float
-    cell_empty: float
+    cell_curve: tuple[tuple[float, float], ...]
+    """A cell's resting voltage against the charge left (0 to 1, rising): (charge, volts)."""
     capacity_mah: float
     pack_resistance: float
+    """Its sag at once, ohms."""
+    polarization_resistance: float
+    """Its slow sag at a steady current, ohms."""
+    polarization_time: float
+    """How fast the slow sag builds and recovers, s."""
     torque_sign: float
     """The motor's reaction on the airframe about the thrust axis: -1 for a prop turning
     clockwise seen from behind, which rolls the wing left; +1 counterclockwise, right."""
@@ -69,6 +77,15 @@ class PowerTrain:
             self.cp0 * (1 - 0.18 * x - 0.52 * x * x),
         )
 
+    def cell_voltage(self, charge: float) -> float:
+        """A cell's resting voltage with `charge` (0 to 1) left."""
+        curve = self.cell_curve
+        charge = max(curve[0][0], min(curve[-1][0], charge))
+        for (c0, v0), (c1, v1) in zip(curve, curve[1:], strict=False):
+            if charge <= c1:
+                return v0 + (v1 - v0) * (charge - c0) / (c1 - c0)
+        return curve[-1][1]
+
     @property
     def back_emf(self) -> float:
         """Volts per rad/s, and newton-metres per amp."""
@@ -85,6 +102,8 @@ class PowerTrainState:
     """The motor's reaction on the airframe about the thrust axis (PowerTrain.torque_sign)."""
     pack_voltage: float = 0.0
     pack_current: float = 0.0
+    polarization: float = 0.0
+    """The pack's slow sag, volts."""
     motor_current: float = 0.0
     advance_ratio: float = 0.0
     """J = V / (n D): the air coming at the prop over how far it would screw forward a turn."""
@@ -98,17 +117,20 @@ class PowerTrainState:
         `axial_speed` m/s."""
         duty = max(0.0, min(1.0, throttle))
         charge = max(0.0, 1 - self.used_mah / pt.capacity_mah)
-        open_circuit = pt.cells * (pt.cell_empty + (pt.cell_full - pt.cell_empty) * charge)
+        source = pt.cells * pt.cell_voltage(charge) - self.polarization
         ke = pt.back_emf
         omega = max(0.0, self.omega)
         # The pack sags under the motor's current, which depends on the pack's voltage: solve the
         # loop for the motor current once, linear in it.
-        motor_current = (duty * open_circuit - ke * omega) / (
+        motor_current = (duty * source - ke * omega) / (
             pt.resistance + duty * duty * pt.pack_resistance
         )
         pack_current = max(0.0, duty * motor_current)
-        self.pack_voltage = open_circuit - pack_current * pt.pack_resistance
+        self.pack_voltage = source - pack_current * pt.pack_resistance
         self.pack_current = pack_current
+        settle = 1 - math.exp(-dt / pt.polarization_time)
+        slow_sag = pack_current * pt.polarization_resistance
+        self.polarization += (slow_sag - self.polarization) * settle
 
         n = omega / (2 * math.pi)
         d = pt.prop_diameter

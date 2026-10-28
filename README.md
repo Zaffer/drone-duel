@@ -638,7 +638,9 @@ The flight model is a 6-DOF rigid body:
   across the wing, which rolls, pitches and yaws the wing. Gusts come on top, now and then.
 - **Power train:** the motor, the battery, and a prop with UIUC's measured 5x3 shape. It
   windmills, loads up in reverse flow, kicks the airframe when the throttle is punched, and acts
-  as a fin behind the centre of mass. The spinning rotor adds its gyroscopic moment.
+  as a fin behind the centre of mass. The spinning rotor adds its gyroscopic moment. The pack is
+  a Tattu R-Line V6.0 1300 mAh 6S: a LiPo's discharge curve, a sag at once and a slower one
+  that builds over seconds at power and recovers as it eases.
 - **Ground:** a hand launch and ground contact.
 
 It is calibrated to TBS's specification and to one pilot's INAV blackbox log of a 6S Chupito:

@@ -13,6 +13,7 @@ import pytest
 from swarm.wingsim.aircraft import Aircraft, Controls, Phase
 from swarm.wingsim.airframe import CHUPITO
 from swarm.wingsim.dynamics import Dynamics
+from swarm.wingsim.propulsion import PowerTrainState
 from swarm.wingsim.rigidbody import from_euler, rotate, to_euler, unrotate
 from swarm.wingsim.strips import (
     Flow,
@@ -122,10 +123,43 @@ def test_it_flies_away_from_the_throw() -> None:
 
 def test_top_speed_and_power_match_the_log() -> None:
     ac = flying(60)  # asks for more than it has: full throttle
-    ac.power.used_mah = 500  # the log's pack was part used: about 22 V under load
+    ac.power.used_mah = 300  # the log's pack, part used: 20.8 V under this load
     hold_level(ac, 1.0, 5)
     assert ac.power.pack_voltage * ac.power.pack_current == pytest.approx(540, rel=0.15)
     assert ac.air.airspeed == pytest.approx(42, abs=3)
+
+
+def test_the_pack_sags_at_once_then_slowly_and_recovers() -> None:
+    """LOG's pack: 0.050-0.062 ohm at once, then 0.07 more over 5 to 10 s, back as it eases."""
+    pt = CHUPITO.power_train
+    power = PowerTrainState()
+
+    def run(throttle: float, seconds: float) -> None:
+        for _ in range(round(seconds / DT)):
+            power.step(pt, throttle, 0.0, 1.225, DT)
+
+    def sag() -> float:
+        """Below the pack's voltage at rest with the charge it has now."""
+        rest = pt.cells * pt.cell_voltage(1 - power.used_mah / pt.capacity_mah)
+        return rest - power.pack_voltage
+
+    run(1.0, 0.3)  # the prop spun up
+    assert sag() / power.pack_current == pytest.approx(pt.pack_resistance, rel=0.1)
+    run(1.0, 30)
+    assert sag() / power.pack_current == pytest.approx(pt.pack_resistance + 0.07, rel=0.05)
+    run(0.0, DT)
+    cut = sag()
+    run(0.0, pt.polarization_time)
+    assert sag() == pytest.approx(cut / math.e, rel=0.05), "recovers over its time"
+
+
+def test_a_lipo_holds_its_voltage_through_the_middle() -> None:
+    cell = CHUPITO.power_train.cell_voltage
+    assert cell(1.0) == 4.2
+    middle, top = (cell(0.6) - cell(0.3)) / 0.3, (cell(1.0) - cell(0.8)) / 0.2
+    assert top > 2 * middle, "falls quickly from full, then flat"
+    assert cell(0.05) - cell(0.0) > 0.3, "and drops off a cliff at the end"
+    assert cell(-0.1) == cell(0.0)
 
 
 def test_it_cruises_as_tbs_says() -> None:
