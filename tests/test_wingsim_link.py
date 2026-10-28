@@ -1,7 +1,9 @@
 """swarm.wingsim's link to INAV SITL: X-Plane's protocol, the server, and INAV itself flying it."""
 
 import math
+import signal
 import socket
+import subprocess
 import time
 from pathlib import Path
 
@@ -237,3 +239,25 @@ def test_inav_gets_tbss_osd() -> None:
     assert sum(line.startswith("osd_layout") for line in lines) == 27
     assert "set osd_video_system = BFHDCOMPAT" in lines
     assert "serial 2 33554432 115200 115200 0 115200" in lines  # MSP DisplayPort
+
+
+def test_inav_ignores_a_client_hanging_up(tmp_path: Path) -> None:
+    """SITL writes its TCP UARTs with a bare send(): it must run with SIGPIPE ignored, or a
+    client hanging up as it writes kills it without a word."""
+    binary = tmp_path / "inav_SITL"
+    binary.write_text("#!/bin/sh\ngrep SigIgn /proc/$$/status\n")
+    binary.chmod(0o755)
+    proc = inav.start(binary, tmp_path, 49190)
+    proc.wait(5)
+    ignored = int((tmp_path / "inav.log").read_text().split()[-1], 16)
+    assert ignored & 1 << (signal.SIGPIPE - 1)
+    assert inav.ended(proc) == "exit code 0"
+
+
+def test_how_inav_ended() -> None:
+    killed = subprocess.Popen(["sh", "-c", "kill -PIPE $$"])
+    failed = subprocess.Popen(["sh", "-c", "exit 1"])
+    killed.wait(5)
+    failed.wait(5)
+    assert inav.ended(killed) == "killed by SIGPIPE"
+    assert inav.ended(failed) == "exit code 1"

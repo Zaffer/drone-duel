@@ -9,6 +9,7 @@ over UART2: armed or not, and what stops it arming.
 
 import hashlib
 import logging
+import signal
 import socket
 import struct
 import subprocess
@@ -154,7 +155,24 @@ def start(
     ]
     out = (workdir / "inav.log").open("ab")
     log.info("starting %s", " ".join(args))
-    return subprocess.Popen(args, cwd=workdir, stdout=out, stderr=subprocess.STDOUT)
+    # SITL writes its TCP UARTs with a bare send(), so a client hanging up as it writes would
+    # kill it with SIGPIPE, silently. It keeps Python's SIG_IGN instead and gets EPIPE.
+    return subprocess.Popen(
+        args, cwd=workdir, stdout=out, stderr=subprocess.STDOUT, restore_signals=False
+    )
+
+
+def ended(proc: subprocess.Popen[bytes]) -> str:
+    """How INAV SITL ended: its exit code, or the signal that killed it."""
+    code = proc.returncode
+    if code is None:
+        return "still running"
+    if code < 0:
+        try:
+            return f"killed by {signal.Signals(-code).name}"
+        except ValueError:
+            return f"killed by signal {-code}"
+    return f"exit code {code}"
 
 
 def _commands(settings: str) -> list[str]:

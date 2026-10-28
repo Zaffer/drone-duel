@@ -22,6 +22,7 @@ import logging
 import math
 import select
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -431,6 +432,14 @@ def run(
             print(_status(server, wing_view.status), flush=True)
     except KeyboardInterrupt:
         pass
+    except OSError:
+        try:
+            proc.wait(2)
+        except subprocess.TimeoutExpired:
+            raise  # INAV is still there: something else broke
+        raise SystemExit(
+            f"INAV SITL stopped ({inav.ended(proc)}): see {INAV_WORKDIR / 'inav.log'}"
+        ) from None
     finally:
         recorder.stop()
         air_unit.stop()
