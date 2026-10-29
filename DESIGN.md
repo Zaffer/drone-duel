@@ -1,6 +1,7 @@
 # Drone Duels: design
 
-Status: draft for review, branch `v2`. Nothing in this document is built yet.
+Status: built on branch `v2` (2026-10-29). Where the build found something the draft got wrong, the
+text below says what was done instead.
 
 Drone Duels is a flight simulator game and practice sim. Every aircraft flies on its real flight
 controller firmware in SITL (ArduPilot or INAV, later Betaflight), on the best physics we can
@@ -77,7 +78,8 @@ the truck, Windows/WSL and macOS, and flying real hardware.
  duels server (Python, FastAPI on uvicorn, pydantic)
    ├─ Session          mode-agnostic: spawn / switch / reset / destroy a vehicle at a scenario
    ├─ ContentStore     content/*.toml → typed specs
-   ├─ Prefs            ~/.config/drone-duels/prefs.toml (controls, video, graphics, audio)
+   ├─ Prefs            ~/.config/drone-duels/prefs.json (controls, video, graphics, audio)
+   ├─ RadioStream      the radio read through Linux (evdev), for when Chrome can't see it all
    ├─ RcSink           sticks from the page → the firmware's RC input, with failsafe on silence
    ├─ TelemetryClient  MAVLink via mavlink-router (sysid 254) │ MSP for INAV
    ├─ OsdClient        MSP DisplayPort from the firmware → grid screens
@@ -244,12 +246,12 @@ flight data): rigid body, motor lag, rotor thrust and drag, frame drag, inflow d
 effect. It is close enough to our own 750 g 6S build. It runs on SkyFlow-Dynamics' JAX backend
 as published, on the CPU:
 
-- Per firmware step (400 Hz): one jitted call does three `exact_exp_step_fn` substeps (1.2 kHz)
-  through `make_rollout`, then `imu_fn` for the accelerometer and gyro. Both are jitted once at
-  spawn.
-- Measured on this machine (2026-10-29, x64): **89 µs median, 200 µs p99, 0.5 ms worst** per
-  firmware step, against a 2.5 ms budget. The same spec lambdified to plain Python takes 167 µs,
-  so JAX is not the slow choice.
+- ArduPilot's SITL physics runs at 1200 Hz (`SIM_RATE_HZ 1200` in `sitl.parm`): at 400 Hz
+  ArduCopter refuses to arm ("Gyro 0 rate 400Hz < loop rate*1.8"). Each JSON frame is one jitted
+  call: an `exact_exp_step_fn` step (or as many as fit a slower frame) and `imu_fn` for the
+  accelerometer and gyro. Both are jitted once at spawn.
+- Measured (2026-10-29, x64): **88 µs median, 197 µs p99** per 1200 Hz frame, about 10 % of a
+  core. The same spec lambdified to plain Python takes 167 µs, so JAX is not the slow choice.
 - The cost is at spawn: about 1.5 s to import JAX and 2.3 s to build and jit, hidden behind
   ArduPilot's own boot and EKF start. JAX's persistent compilation cache (`logs/jax-cache/`)
   cuts the jit on later spawns.
@@ -314,12 +316,15 @@ high-rate pose channel.
 | page → server | `ground` | 20 Hz | ground height under the aircraft |
 | page → server | `wind` | on change | speed, direction, turbulence, gust trigger |
 | page → server | `video` | on change | analog or digital (sets the OSD grid, §10) |
+| page → server | `radio_source` | on open | stream the radio as the server reads it |
 | server → page | `status` | on change | slot, vehicle, firmware state, arming blockers |
 | server → page | `pose` | each frame | true position, attitude, velocity, rotor/servo state (binary) |
 | server → page | `osd` | per draw | the firmware's DisplayPort screen |
 | server → page | `telemetry` | 10 Hz | what a GCS sees: mode, armed, GPS, battery, attitude, alt |
 | server → page | `plan` | on change | mission, fence, rally (ArduPilot) |
 | server → page | `dynamics` | 30 Hz | wing internals (when the overlay is on) |
+| server → page | `physics` | on change | what the physics says it is doing: ground, hand, flying, crashed |
+| server → page | `radio` | 250 Hz | the radio's axes, read through Linux (while asked) |
 
 The protocol is defined once, in `server/protocol.py`, as pydantic models: a discriminated union
 on `ch`, validated on the way in. `tools/gen_protocol_ts.py` writes their JSON Schema and
@@ -332,8 +337,13 @@ socket, which either serves easily. The deciding win is pydantic at the edges. O
 validates content files, prefs, REST and WebSocket messages, and generates the TypeScript types,
 so the server and the page cannot disagree silently.
 
-RC failsafe: if no `rc` message arrives for 200 ms (page hidden, tab crashed), the RcSink stops
-sending to the firmware. Its own RC failsafe then runs, as it would on a real link.
+RC failsafe: if no `rc` message arrives for 200 ms (page hidden, tab crashed), the session tells
+the firmware its link is lost, and the firmware's own failsafe runs, as on a real link. ArduPilot
+SITL would hold the last pulses forever, so the adapter sets `SIM_RC_FAIL`; INAV's X-Plane link
+stops reporting a joystick, and its receiver times out. Both come back with the next sticks.
+
+The WebSocket takes only the game's own page (a local Origin), so another site open in the same
+browser cannot fly the sim.
 
 ## 9. Web app state
 
@@ -350,6 +360,9 @@ sending to the firmware. Its own RC failsafe then runs, as it would on a real li
 - TypeScript's DOM lib does not declare `Observable` and `EventTarget.when` yet, so
   `web/src/types/observable.d.ts` declares the subset we use.
 
+Two games on one machine (to test a duel or race) each take a vehicle slot of their own:
+`duels serve --port 8601 --slot 3`.
+
 Toolchain: bun builds and serves the bundle (`bun build`, with watch in dev). Types check with
 `bunx tsc --noEmit`, lint and format with `bunx biome check`, and tests run with `bun test`.
 
@@ -358,7 +371,9 @@ Toolchain: bun builds and serves the bundle (`bun build`, with watch in dev). Ty
 - **FPV** draws the world from the vehicle's camera (tilt, FOV and offset from its spec) at the
   physics' true pose, with no map symbols.
 - **Analog**: analog-vision's AnalogFeed (NTSC, 4:3). Link noise follows range from the pilot
-  and VTX power (Video options). The OSD is the firmware's SD grid (30×16, 13 rows shown on NTSC)
+  and VTX power (Video options), and both antennas' angles (dipoles, their nulls filled to
+  -8 dBi). INAV's analog OSD is its Betaflight-compatible 30×16 mode (BF43COMPAT), laid out for
+  the 13 rows NTSC shows. The OSD is the firmware's SD grid (30×16, 13 rows shown on NTSC)
   laid into the video before the analog chain, as the OSD chip does.
 - **Digital**: 16:9, no effect, and the HD OSD grid laid over the picture as a DJI/HDZero/Walksnail
   goggle does (ArduPilot `OSD1_TXT_RES 1`; INAV's HD DisplayPort). A later item models digital
@@ -433,8 +448,13 @@ at runtime). The firmware OSD keeps its own fonts and colours, as real goggles s
 
 ## 12. Controllers
 
-- `input/gamepad.ts` samples `navigator.getGamepads()` at 250 Hz with a timer (the page is in
-  front while flying) and emits an Observable of channel arrays in µs.
+- `input/radio.ts` samples `navigator.getGamepads()` at 250 Hz with a timer (the page is in
+  front while flying) and emits an Observable of channels, -1..1, "natural" for every firmware
+  (stick forward +1); `flight.ts` applies each firmware's conventions (ArduPilot's pitch) on the way
+  out.
+- Chrome on Linux may not expose a radio until a stick moves, or all its axes. So the server also
+  reads it through Linux itself (`rc/evdev.py`) and streams its axes; the page takes whichever
+  source sees the most axes, through the same profiles and calibration.
 - A profile (`content/controllers/*.toml`) matches a gamepad by its USB vendor and product id,
   and maps axes and buttons to AETR plus AUX1–AUX8 with inversions. We ship LiteRadio 2 (from
   today's radio.py), TX15 and T8L. EdgeTX radios in USB joystick mode order the axes by their

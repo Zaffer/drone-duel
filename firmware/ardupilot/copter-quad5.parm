@@ -1,0 +1,109 @@
+# The 5" quad's airframe: ArduCopter 4.7 parameters for SkyFlow-Dynamics' racer5in (the
+# UZH-RPG Kingfisher: 772 g, 0.13 m arms, 8.5 N a motor, 33 ms motor lag; DESIGN.md §6.2),
+# loaded after ArduPilot's SITL copter.parm and before sitl.parm and the video system's OSD
+# grid (drone_duels.firmware.ardupilot). Only what belongs to the airframe, its control loops
+# and filters, the pilot's switches and its OSD.
+#
+# This stands in for a real drone's own tune. Do not load it onto a real drone: tune that on
+# the airframe itself.
+
+# Quad X: motor 1 front right, 2 rear left, 3 front left, 4 rear right
+# (drone_duels.physics.quad.plant maps them onto racer5in's rotors).
+FRAME_CLASS      1
+FRAME_TYPE       1
+
+# Motors, from the plant (drone_duels.physics.quad.esc; tests/test_physics_quad.py holds these
+# to it). The ESC map is SkyFlow-Dynamics' throttle curve with k 0.5 from racer5in's 150 rad/s
+# floor: thrust over the output range between MOT_SPIN_MIN and MAX fits ArduPilot's
+# (1 - e) x + e x² best at e 0.37 (esc.fit_expo). Hover takes 30 % of the output on a full pack,
+# 0.20 of ArduPilot's throttle (esc.hover_thrust): thrust to weight 4.5. ArduPilot learns the
+# hover throttle in flight (MOT_HOVER_LEARN 2) as the pack sags.
+MOT_PWM_MIN      1000
+MOT_PWM_MAX      2000
+MOT_SPIN_ARM     0.02
+MOT_SPIN_MIN     0.04
+MOT_SPIN_MAX     0.95
+MOT_THST_EXPO    0.37
+MOT_THST_HOVER   0.21
+MOT_SPOOL_TIME   0.25
+# A 6S 1300 mAh pack (esc.py): full 4.2 V a cell, empty 3.3 V.
+MOT_BAT_VOLT_MAX 25.2
+MOT_BAT_VOLT_MIN 19.8
+BATT_CAPACITY    1300
+
+# Lean and attitude limits of a 5 inch.
+ATC_ANGLE_MAX    60
+ATC_ACC_P_MAX    1620
+ATC_ACC_R_MAX    1620
+ATC_ACC_Y_MAX    720
+ATC_ANG_PIT_P    10
+ATC_ANG_RLL_P    10
+ATC_ANG_YAW_P    6
+ATC_INPUT_TC     0.1
+ATC_RATE_P_MAX   720
+ATC_RATE_R_MAX   720
+ATC_RATE_Y_MAX   360
+ATC_THR_MIX_MAN  0.5
+
+# Rate loops. racer5in turns about 1800 rad/s² in roll and 2100 in pitch at full differential
+# thrust (34 N, 0.13 m arms, its inertia), and 95 in yaw (its drag torque is 1.2 % of thrust a
+# metre): the gains are set for that authority behind its 33 ms motor lag.
+ATC_RAT_RLL_P    0.07
+ATC_RAT_RLL_I    0.07
+ATC_RAT_RLL_D    0.0015
+ATC_RAT_RLL_FLTD 40
+ATC_RAT_RLL_FLTT 40
+ATC_RAT_PIT_P    0.06
+ATC_RAT_PIT_I    0.06
+ATC_RAT_PIT_D    0.0012
+ATC_RAT_PIT_FLTD 40
+ATC_RAT_PIT_FLTT 40
+ATC_RAT_YAW_P    0.6
+ATC_RAT_YAW_I    0.06
+ATC_RAT_YAW_D    0
+ATC_RAT_YAW_FLTE 2
+ATC_RAT_YAW_FLTT 40
+
+# Gyro and accel filtering. The plant has no vibration, so no harmonic notch.
+INS_GYRO_FILTER  80
+INS_ACCEL_FILTER 20
+
+# The pilot's switches (content/vehicles/quad5.toml's aux): channel 5 arms and disarms
+# (RC5_OPTION 153), channel 6 is the flight mode on a 3-position switch. ArduPilot reads a
+# mode switch below 1231 µs as FLTMODE1, 1491-1620 as FLTMODE4 and from 1750 as FLTMODE6
+# (RC_Channel::read_6pos_switch): 1000 LOITER, 1500 STABILIZE, 2000 ACRO.
+RC5_OPTION       153
+RC7_OPTION       0
+FLTMODE_CH       6
+FLTMODE1         5
+FLTMODE2         5
+FLTMODE3         0
+FLTMODE4         0
+FLTMODE5         1
+FLTMODE6         1
+
+# ACRO flies like Betaflight: a pure rate mode, no self-levelling, linear throttle, air mode.
+# Bit 0 air mode (full attitude authority at zero throttle), bit 1 rate loop only.
+ACRO_TRAINER     0
+ACRO_OPTIONS     3
+ACRO_THR_MID     0.5
+ACRO_RP_RATE     670
+ACRO_RP_EXPO     0.8
+ACRO_Y_RATE      360
+ACRO_Y_EXPO      0.6
+
+# Speeds and accelerations a 5 inch can do in LOITER.
+LOIT_SPEED_MS    10
+LOIT_ACC_MAX_M   8
+LOIT_BRK_ACC_M   5
+LOIT_BRK_JRK_M   10
+LOIT_BRK_DELAY   0.25
+WP_SPD           10
+
+# The OSD. An analog quad's flight controller has an OSD chip (OSD_TYPE 1, MAX7456) lay
+# ArduPilot's OSD into the camera's video; SITL has none, so it sends the same screen over MSP
+# DisplayPort on SERIAL5 (OSD_TYPE 5, SERIAL5_PROTOCOL 42), which the server draws into the
+# camera feed (drone_duels.video.osd). OSD1_TXT_RES (the grid) follows the video system and is
+# set after this file. Not for a real analog drone: set OSD_TYPE 1 there.
+OSD_TYPE         5
+SERIAL5_PROTOCOL 42

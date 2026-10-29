@@ -1,0 +1,25 @@
+name = "TBS Chupito"
+blurb = "An 800 mm flying wing on INAV 9.1. Hand launched: throw it."
+kind = "fixedwing"
+model = "/vendor/chupito/chupito_v6.glb"
+launch = "hand"
+dynamics_overlay = true
+
+[firmware]
+kind = "inav"
+params = ["inav/chupito.cli"]
+
+[physics]
+kind = "wing"
+airframe = "chupito"
+
+[camera]
+tilt_deg = 20.0
+hfov_deg = 120.0
+offset_m = [0.22, 0.0, 0.0]
+
+[aux]
+arm = 5
+mode = 6
+modes = ["ANGLE", "ACRO", "MANUAL"]
+launch = 8

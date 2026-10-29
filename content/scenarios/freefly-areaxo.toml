@@ -1,0 +1,6 @@
+name = "Free Fly: AreaXO"
+blurb = "Open fields to practise in."
+mode = "freefly"
+location = "area-xo"
+vehicles = ["quad5", "chupito", "truck"]
+default_vehicle = "quad5"

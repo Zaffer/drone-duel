@@ -1,0 +1,19 @@
+name = "Ottawa: AreaXO"
+blurb = "Open test ground south of Ottawa."
+origin = [45.319821, -75.758630]
+ground_alt_m = "auto"
+heading_deg = 180.0
+
+[[pads]]
+at = [45.319821, -75.758630]
+heading_deg = 180.0
+
+[[pads]]
+at = [45.319821, -75.758502]
+heading_deg = 180.0
+
+[wind]
+speed_ms = 2.0
+from_deg = 270.0
+turbulence = "light"
+gusts = false

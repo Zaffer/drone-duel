@@ -1,0 +1,53 @@
+# Eight gates round a loop to the left; gate 1 straight ahead of the start pad.
+name = "AreaXO loop"
+location = "area-xo"
+laps = 2
+alt_ref = "agl"
+
+[[gates]]
+at = [45.3195066, -75.7586300]
+alt_m = 3.0
+ypr_deg = [180.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3192207, -75.7584616]
+alt_m = 4.5
+ypr_deg = [135.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3191023, -75.7580551]
+alt_m = 3.0
+ypr_deg = [90.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3192207, -75.7576486]
+alt_m = 4.5
+ypr_deg = [45.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3195066, -75.7574802]
+alt_m = 3.0
+ypr_deg = [0.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3197924, -75.7576486]
+alt_m = 4.5
+ypr_deg = [315.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3199108, -75.7580551]
+alt_m = 3.0
+ypr_deg = [270.0, 0.0, 0.0]
+size_m = [3.0, 2.5]
+
+[[gates]]
+at = [45.3197924, -75.7584616]
+alt_m = 4.5
+ypr_deg = [225.0, 0.0, 0.0]
+size_m = [3.0, 2.5]

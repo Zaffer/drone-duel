@@ -1,0 +1,19 @@
+name = "Toronto: Billy Bishop Airport"
+blurb = "The island airport, the CN Tower and the harbour beside it."
+origin = [43.630930, -79.389450]
+ground_alt_m = 77.0
+heading_deg = 270.0
+
+[[pads]]                    # player 1
+at = [43.630930, -79.389450]
+heading_deg = 270.0
+
+[[pads]]                    # player 2: 10 m south
+at = [43.630840, -79.389450]
+heading_deg = 270.0
+
+[wind]
+speed_ms = 3.0
+from_deg = 250.0
+turbulence = "light"
+gusts = false

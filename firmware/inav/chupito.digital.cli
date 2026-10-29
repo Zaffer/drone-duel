@@ -1,0 +1,33 @@
+# The Chupito's OSD for digital video (drone_duels.firmware.inav: added to chupito.cli when the
+# video system is digital). TBS's, for a DJI air unit: its board sends it over MSP DisplayPort
+# on UART3, in Betaflight-compatible HD (53 x 20, Betaflight's glyphs), and so does SITL, on its
+# TCP port.
+serial 2 33554432 115200 115200 0 115200
+set osd_video_system = BFHDCOMPAT
+osd_layout 0 0 23 0 H
+osd_layout 0 1 10 12 H
+osd_layout 0 7 6 17 V
+osd_layout 0 8 31 0 H
+osd_layout 0 9 0 16 H
+osd_layout 0 11 6 2 V
+osd_layout 0 12 15 1 V
+osd_layout 0 13 32 1 V
+osd_layout 0 14 43 3 V
+osd_layout 0 15 42 2 V
+osd_layout 0 22 26 1 V
+osd_layout 0 23 42 1 V
+osd_layout 0 26 32 2 V
+osd_layout 0 28 39 9 H
+osd_layout 0 30 12 17 V
+osd_layout 0 32 6 1 V
+osd_layout 0 33 12 5 H
+osd_layout 0 35 15 2 V
+osd_layout 0 40 1 4 H
+osd_layout 0 87 6 18 V
+osd_layout 0 107 1 2 V
+osd_layout 0 109 41 17 V
+osd_layout 0 110 42 16 V
+osd_layout 0 111 42 14 V
+osd_layout 0 112 41 15 V
+osd_layout 0 125 47 2 H
+osd_layout 0 142 45 0 H

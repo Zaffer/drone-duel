@@ -1,0 +1,27 @@
+# ArduCopter 4.7 SITL in the game: what the sim needs on top of the airframe
+# (copter-quad5.parm), loaded after it (drone_duels.firmware.ardupilot).
+
+# The physics runs in lockstep with SITL over its JSON backend (bridges/ardupilot_json.py),
+# one plant step a frame at SITL's 1.2 kHz. The IMU is sampled once a frame, and ArduCopter
+# will not arm with its gyro sampled at less than 1.8 times its 400 Hz loop
+# ("PreArm: Gyro 0 rate 400Hz < loop rate*1.8 720Hz"), so a 400 Hz frame will not do.
+SIM_RATE_HZ      1200
+
+# Ground stations: the game (system 254) and QGroundControl (255). Neither is needed to fly:
+# no GCS failsafe, so a quad flies on when QGroundControl closes or the game's telemetry
+# hiccups, and arms with no GCS at all.
+MAV_GCS_SYSID    254
+MAV_GCS_SYSID_HI 255
+FS_GCS_ENABLE    0
+
+# The radio is the pilot's gamepad, through the page (drone_duels.firmware.ardupilot). When
+# the page goes quiet the receiver stops its pulses (SIM_RC_FAIL 1): after RC_FS_TIMEOUT the
+# quad brakes and holds, or lands where it cannot hold its position (FS_THR_ENABLE 7). Its
+# switches arm (RC5_OPTION 153), so arming needs no rudder stick.
+FS_THR_ENABLE    7
+FS_THR_VALUE     975
+RC_FS_TIMEOUT    1.0
+ARMING_RUDDER    0
+
+# No dataflash logs while disarmed: the spawn's directory stays small.
+LOG_DISARMED     0

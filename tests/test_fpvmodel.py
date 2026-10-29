@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from swarm.fpvmodel import (
+from tools.models.fpvmodel import (
     ARDUPILOT_QUAD_X,
     build_glb,
     nose_rotation,
@@ -15,11 +15,11 @@ from swarm.fpvmodel import (
     spin_direction,
     subset,
 )
-from swarm.gltf import ARRAY_BUFFER, GltfWriter, Primitive, read_accessor, read_glb
+from tools.models.gltf import ARRAY_BUFFER, GltfWriter, Primitive, read_accessor, read_glb
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets" / "fpv_drone.glb"
-COP_MODEL = ROOT / "src" / "swarm" / "web" / "models" / "fpv-drone.glb"
+COP_MODEL = ROOT / "web" / "public" / "models" / "fpv-drone.glb"
 
 
 def test_glb_round_trip() -> None:

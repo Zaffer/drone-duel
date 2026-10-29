@@ -1,31 +1,38 @@
-# drone-duel
+# drone-duels
 
-Python package `swarm` (src layout, uv). ArduPilot SITL, mavlink-router and
-QGroundControl live in `external/` via `scripts/setup.sh`.
+A flight simulator game and practice sim: real flight controller firmware in SITL (ArduPilot,
+INAV) on our own physics, drawn over real places in Chrome. DESIGN.md is the architecture,
+ROADMAP.md what comes next. Python package `drone_duels` (src layout, uv); the page is TypeScript
+in `web/` (bun). ArduPilot, INAV SITL and mavlink-router live in `external/` via
+`scripts/setup.sh`.
 
-- Run everything with `uv run`. Never bare `python`. The sim is `uv run swarm sim` (fly it with
-  `uv run swarm pilot`), or `uv run swarm fly` for both; `uv run swarm rehearse` flies the
-  whole mission hands-free.
-- After code changes run `uv run ruff check src tests`, `uv run basedpyright src tests`,
-  `uv run pytest -q`.
-- ArduCopter is 4.7.x. Use 4.7 parameter names (`MAV_SYSID`, `MAV_GCS_SYSID`,
-  `LOIT_SPEED_MS`, `WP_SPD`). Check `external/ardupilot` source when unsure.
-- The ground stack (`swarm pilot`, the watcher) is MAVLink system 254. QGroundControl is 255.
-  Do not use 255.
-- Sim and hardware differ only in `router/*.conf`. Keep it that way. The sim's stand-ins for
-  links outside MAVLink are the exception: the USB radio (`swarm.radio`) and the viewer's
-  camera feed, which draws SITL's physics (`swarm.physics`) as the camera's video, sent over
-  a simulated analog video link (analog-vision's `analog.js`, vendored by `scripts/setup.sh`), and SITL's OSD over MSP DisplayPort
-  (`swarm.osd`) as the analog OSD chip's; the wing's INAV OSD over MSP DisplayPort as the DJI
-  air unit's (`swarm.wingrun.AirUnit`). The map, the FPV
-  view and the dials stay on MAVLink.
-- The mission's places and basic sim settings live in `mission.toml` (`swarm.settings`), not
-  in code; CLI flags only override it.
-- The fixed wing (the TBS Chupito) flies INAV, not ArduPilot: INAV SITL (`external/inav/`, via
-  `scripts/setup.sh`) on our own flight model, `swarm.wingsim`, over X-Plane's UDP protocol
-  (`uv run swarm wingsim`), drawn on the viewer's wing.html, which posts back the map's ground
-  under it (`swarm.wingrun`). `swarm.wingsim` imports only itself and the standard library; keep it
-  that way. Its aerodynamics are strips over a vortex lattice (`swarm/wingsim/strips.py`), its wind
-  MIL-F-8785C's (`swarm/wingsim/weather.py`); its
-  numbers' sources are in `swarm/wingsim/airframe.py`, and `tests/test_wingsim.py` holds the model
-  to them. `swarm wingsim` records every flight to `logs/wingsim/`.
+- Run everything with `uv run`; never bare `python`. The game is `uv run duels` (serves the page
+  on port 8600 and opens Chrome); `uv run duels doctor` says what is missing.
+- No node here: use bun (`~/.bun/bin/bun`, `bunx`). `cd web && bun run build` builds the page;
+  `bun run dev` rebuilds on change.
+- After changes run `scripts/check.sh` (`--fast` skips the tests that start real firmware): ruff,
+  basedpyright and pytest; tsc, biome, bun test and the page's build; and that the protocol's
+  schema is current.
+- The server ⇄ page protocol lives in `src/drone_duels/server/protocol.py` (pydantic). After
+  changing it run `uv run duels gen-protocol`, which writes `web/src/net/protocol.schema.json` and
+  the generated `web/src/net/protocol.ts` (never edit that by hand).
+- Places, scenarios, vehicles, race courses and radio profiles are TOML in `content/`
+  (`drone_duels.content`), not code. Every key is checked; add a file to add one.
+- Every port is in `src/drone_duels/ports.py`. INAV must stay off 5760 (mavlink-router connects
+  there for ArduPilot).
+- ArduCopter is 4.7.x. Use 4.7 parameter names (`MAV_GCS_SYSID`, `LOIT_SPEED_MS`, `WP_SPD`).
+  Check `external/ardupilot` source when unsure. The game is MAVLink system 254;
+  QGroundControl is 255. Do not use 255.
+- Two kinds of truth, kept apart (DESIGN.md §2.2): what the pilot sees (the camera, from the
+  physics' true pose; the OSD, the firmware's own MSP DisplayPort) and what a ground station sees
+  (the map view, the dials, plans: telemetry only, MAVLink or MSP).
+- Heights: the sim's are above sea level, the map's above the WGS84 ellipsoid. The page measures
+  `mapOffset` at the start pad (`web/src/world/geo.ts`); peers send map heights.
+- `drone_duels.physics.core` and `physics.wing` import only themselves and the standard library
+  (a test holds this). The quad uses SkyFlow-Dynamics' JAX backend as published, on the CPU.
+  The wing's numbers' sources are in `physics/wing/airframe.py`, and `tests/test_physics_wing.py`
+  holds the model to them.
+- The page's state is alien-signals; anything over time (the WebSocket, gamepad samples, frames,
+  timers, peer messages) is a native Chrome Observable (`web/src/types/observable.d.ts`).
+  Chrome only. Colours come from `web/src/theme/tokens.css` ("Dusk").
+- Keep AirMetal branding out of this repo.

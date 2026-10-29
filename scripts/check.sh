@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Every check, Python and the page (DESIGN.md §14). `--fast` skips the tests that start real
+# firmware (pytest -m "not sitl").
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+cd "$ROOT"
+uv run duels gen-protocol --check
+uv run ruff check src tests tools
+uv run basedpyright src tests tools
+if [ "${1:-}" = "--fast" ]; then uv run pytest -q -m "not sitl"; else uv run pytest -q; fi
+cd web
+"$BUN" x tsc --noEmit
+"$BUN" x biome check src scripts test
+"$BUN" test
+"$BUN" run build
+echo "all checks passed"

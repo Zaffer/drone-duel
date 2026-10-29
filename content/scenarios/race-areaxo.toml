@@ -1,0 +1,7 @@
+name = "Race: AreaXO loop"
+blurb = "Two laps through eight gates, head to head."
+mode = "race"
+location = "area-xo"
+course = "areaxo-loop"
+vehicles = ["quad5", "chupito"]
+default_vehicle = "quad5"

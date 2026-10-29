@@ -10,3 +10,5 @@ eeprom.bin
 .pytest_cache/
 .ruff_cache/
 .env.local
+web/node_modules/
+web/dist/

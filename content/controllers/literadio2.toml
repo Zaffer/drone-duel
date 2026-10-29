@@ -1,0 +1,13 @@
+name = "BETAFPV LiteRadio 2"
+notes = "USB joystick mode. CH5 (SA) arms, CH6 (SB, 3 positions) is the mode switch."
+match = ["0483", "5750", "BETAFPV"]
+channels = [
+  { axis = 0 },                  # CH1 roll
+  { axis = 1 },                  # CH2 pitch: stick forward reads high
+  { axis = 2 },                  # CH3 throttle
+  { axis = 3 },                  # CH4 yaw
+  { axis = 4 },                  # CH5 arm
+  { axis = 5 },                  # CH6 mode
+  { axis = 6 },                  # CH7
+  { axis = 7 },                  # CH8
+]

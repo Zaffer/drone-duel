@@ -1,0 +1,19 @@
+/* The FPV camera feed (video/feed.ts): the world cropped to the camera's picture, black round
+   it as goggles show it; the analog picture and the OSD over that frame. */
+html.camera-feed-on,
+html.camera-feed-on body {
+  background: #000;
+}
+
+.camera-feed {
+  position: fixed;
+  pointer-events: none;
+}
+
+.camera-feed canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}

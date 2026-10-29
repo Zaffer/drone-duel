@@ -53,3 +53,18 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 
 - Live mode: the Map/COP view against real aircraft through `router/field.conf`. The design
   keeps the ground-station side on telemetry only, so it needs no change (DESIGN.md §2.2).
+
+## Found while building v1
+
+- The quad: ground effect (SkyFlow-Dynamics has it only as a candidate term), and the
+  turbulence's rotation (`Weather.rates`), which the wing takes and the quad does not yet.
+- The quad's STABILIZE and ACRO tunes: only LOITER has been flown in the tests.
+- INAV's own OSD font for the analog Chupito (its analog OSD is the Betaflight-compatible mode,
+  in Betaflight's glyphs, so a few INAV symbols show as `?`).
+- INAV's climb rate reads low: SITL's fake GPS gives it no vertical speed.
+- Plans: send each item's params (`PlanItem`), so fence circles have their radius, and the
+  mission's current item, so the Map view can tell flown, active and next legs apart.
+- Radio profiles for the TX15 and T8L are EdgeTX's and ELRS's defaults, untested on the real
+  radios; the LiteRadio 2's was checked through Linux.
+- A ghost's model is drawn without the silhouette for now (it broke Cesium's frustums when
+  combined with a model loaded before its first pose).

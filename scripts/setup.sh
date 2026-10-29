@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup: Python env, ArduPilot SITL, mavlink-router, 3D viewer libraries.
+# One-time setup: the Python env, ArduPilot and INAV SITL, mavlink-router, bun and the page.
 # QGroundControl is optional (WITH_QGC=1); nothing in the stack needs it.
 # Everything lands in external/ (git-ignored). Re-running skips finished steps.
 set -euo pipefail
@@ -54,49 +54,17 @@ if [ "$WITH_QGC" = 1 ] && [ ! -x "$EXT/qgc/AppRun" ]; then
     (cd "$EXT" && rm -rf squashfs-root qgc && "$QGC" --appimage-extract >/dev/null && mv squashfs-root qgc)
 fi
 
-# Browser libraries for the 3D viewer (`swarm view`), unpacked from npm tarballs so no Node is
-# needed. Served from external/web/ by swarm.view.
-WEB="$EXT/web"
-CESIUM_VERSION="${CESIUM_VERSION:-1.145.0}"
-MILSYMBOL_VERSION="${MILSYMBOL_VERSION:-3.0.4}"
-MGRS_VERSION="${MGRS_VERSION:-2.2.0}"
-RAPIER_VERSION="${RAPIER_VERSION:-0.20.0}"
-TRYSTERO_VERSION="${TRYSTERO_VERSION:-0.26.0}"
-SECP256K1_VERSION="${SECP256K1_VERSION:-3.2.0}"
-fetch_npm() {  # package version [directory under external/web, default the package]
-    local dir="$WEB/${3:-$1}"
-    if [ ! -f "$dir/.version-$2" ]; then
-        rm -rf "${dir:?}"
-        mkdir -p "$dir"
-        curl -fsSL "https://registry.npmjs.org/$1/-/${1##*/}-$2.tgz" \
-            | tar -xz -C "$dir" --strip-components=1
-        touch "$dir/.version-$2"
-    fi
-}
-fetch_npm cesium "$CESIUM_VERSION"
-fetch_npm milsymbol "$MILSYMBOL_VERSION"
-fetch_npm mgrs "$MGRS_VERSION"
-# Physics for the drive page (`swarm drive`), its WebAssembly inlined.
-fetch_npm @dimforge/rapier3d-compat "$RAPIER_VERSION" rapier
-# Peer-to-peer WebRTC for the duel (duel.js): Trystero over Nostr relays, as ES modules that
-# index.html and drive.html map by name.
-fetch_npm trystero "$TRYSTERO_VERSION"
-fetch_npm @trystero-p2p/nostr "$TRYSTERO_VERSION" trystero-nostr
-fetch_npm @trystero-p2p/core "$TRYSTERO_VERSION" trystero-core
-fetch_npm @noble/secp256k1 "$SECP256K1_VERSION" noble-secp256k1
-# The camera feed's analog video link (app.js): analog-vision's GPU chain, copied from a
-# checkout beside this one (ANALOG_VISION, default ../analog-vision) on every run, so it
-# follows that checkout; else fetched from GitHub at ANALOG_VISION_REF.
-ANALOG_VISION="${ANALOG_VISION:-$ROOT/../analog-vision}"
-ANALOG_VISION_REF="${ANALOG_VISION_REF:-main}"
-mkdir -p "$WEB/analog-vision"
-if [ -f "$ANALOG_VISION/src/analog_vision/web/analog.js" ]; then
-    cp "$ANALOG_VISION/src/analog_vision/web/analog.js" "$WEB/analog-vision/analog.js"
-else
-    curl -fsSL -o "$WEB/analog-vision/analog.js" \
-        "https://raw.githubusercontent.com/Synetic-Labs/Analog-Vision/$ANALOG_VISION_REF/src/analog_vision/web/analog.js"
+# The page's libraries (Cesium, Rapier, Trystero, milsymbol, alien-signals, analog-vision) are
+# bun dependencies, pinned in web/package.json; bun itself is installed here if missing.
+BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+if [ ! -x "$BUN" ]; then
+    curl -fsSL https://bun.sh/install | bash
 fi
-# The wing page's TBS Chupito (wing.js): narenana's model for Nanawing, as sim.narenana.com
+(cd "$ROOT/web" && "$BUN" install --frozen-lockfile && "$BUN" run build)
+
+# Files the page serves from external/web/ (the server's /vendor/).
+WEB="$EXT/web"
+# The Chupito's model (content/vehicles/chupito.toml): narenana's model for Nanawing, as sim.narenana.com
 # serves it. Not committed: it has no licence, and it carries Team BlackSheep's logos.
 CHUPITO_GLB=chupito_v6.glb
 mkdir -p "$WEB/chupito"
@@ -104,14 +72,14 @@ mkdir -p "$WEB/chupito"
     curl -fsSL -o "$WEB/chupito/$CHUPITO_GLB" "https://sim.narenana.com/assets/models/real/$CHUPITO_GLB"
 
 # Betaflight's OSD font, from its configurator (GPL-3.0): what DJI's goggles draw an MSP
-# DisplayPort OSD in, so the wing's INAV OSD too, in Betaflight-compatible HD (swarm.wingrun).
+# DisplayPort OSD in, so the Chupito's INAV OSD too (drone_duels.firmware.inav).
 BETAFLIGHT_FONT_REF=9f4a52d2702ca0ab109d77b31633b749c5198e47
 mkdir -p "$WEB/betaflight"
 [ -f "$WEB/betaflight/default.mcm" ] ||
     curl -fsSL -o "$WEB/betaflight/default.mcm" \
         "https://raw.githubusercontent.com/betaflight/betaflight-configurator/$BETAFLIGHT_FONT_REF/resources/osd/2/default.mcm"
 
-# INAV SITL for the Chupito's flight model (swarm.wingsim). Building INAV needs Ruby, so this is
+# INAV SITL, the Chupito's firmware (drone_duels.firmware.inav). Building INAV needs Ruby, so this is
 # the binary INAV's Configurator ships for its SITL tab (Configurator 9.1.1: INAV 9.1.0).
 INAV_CONFIGURATOR_VERSION=9.1.1
 if [ ! -x "$EXT/inav/inav_SITL" ]; then
@@ -122,6 +90,6 @@ if [ ! -x "$EXT/inav/inav_SITL" ]; then
     chmod +x "$EXT/inav/inav_SITL"
     rm -f "$zip"
 fi
-# The drone model is committed with the viewer (src/swarm/web/models/, built by swarm.fpvmodel).
+# The quad's and truck's models are committed (web/public/models/, built by tools/models/).
 
 echo "setup complete"

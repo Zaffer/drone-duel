@@ -1,0 +1,184 @@
+/* The dynamics overlay's panels (dynamics/overlay.ts): the numbers on the left, the history on
+   the right above the minimap, the layers' chips and legend at the bottom between the corners. */
+
+.dyn-panel {
+  position: absolute;
+  pointer-events: auto;
+  background: var(--surface-glass);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  padding: 10px 12px;
+  color: var(--muted);
+  font: 11px / 1.45 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dyn-numbers {
+  left: 16px;
+  top: 64px;
+  bottom: var(--dyn-numbers-bottom, 150px);
+  width: 600px;
+  max-width: calc(100vw - 32px);
+  overflow-y: auto;
+}
+
+.dyn-history {
+  right: 16px;
+  bottom: var(--dyn-history-bottom, 236px);
+  width: 320px;
+}
+
+.dyn-legend-panel {
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(760px, calc(100vw - 32px));
+}
+
+/* Beside the numbers, between them and the minimap's corner. */
+.dyn-legend-panel.beside {
+  left: 632px;
+  right: var(--dyn-legend-right, 232px);
+  transform: none;
+  width: auto;
+  max-width: none;
+}
+
+.dyn-panel canvas {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.dyn-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  letter-spacing: 0.08em;
+}
+
+.dyn-title span:last-child {
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.dyn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+
+.dyn-numbers h3,
+.dyn-numbers .dyn-row {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, 54px);
+  margin: 0;
+  font: inherit;
+}
+
+.dyn-numbers h3 {
+  margin-top: 8px;
+  color: var(--text);
+  letter-spacing: 0.06em;
+}
+
+.dyn-numbers h3 span:not(:first-child) {
+  text-align: right;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.dyn-numbers h3.dyn-wide {
+  display: block;
+  margin-top: 12px;
+  letter-spacing: 0;
+}
+
+.dyn-numbers .dyn-row b {
+  color: var(--text);
+  font-weight: normal;
+  text-align: right;
+}
+
+.dyn-numbers table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+}
+
+.dyn-numbers th,
+.dyn-numbers td {
+  padding: 0 2px;
+  text-align: right;
+  font-weight: normal;
+}
+
+.dyn-numbers td {
+  color: var(--text);
+}
+
+.dyn-numbers th:first-child,
+.dyn-numbers td:first-child {
+  text-align: left;
+}
+
+.dyn-numbers tr.units th {
+  font-size: 10px;
+}
+
+.dyn-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dyn-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font: 600 11px / 1.6 var(--sans);
+  color: var(--muted);
+  background: var(--raised);
+  border: 1px solid var(--line);
+}
+
+.dyn-chip.on {
+  color: var(--text);
+  background: var(--ember-soft);
+  border-color: var(--ember);
+}
+
+.dyn-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin-top: 6px;
+}
+
+.dyn-legend b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dyn-swatch i {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  margin-right: 5px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.dyn-mini {
+  padding: 0 7px;
+  min-width: 22px;
+  font: 600 11px / 1.6 var(--mono);
+}
+
+.dyn-mini.wide {
+  font-family: var(--sans);
+}

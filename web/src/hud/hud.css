@@ -1,0 +1,150 @@
+/* The HUD's corners (DESIGN.md §11): the dials (hud/dials.ts) and the minimap (hud/minimap.ts),
+   in Dusk. The dials keep their glass-cockpit roles: light scales and references, green live
+   values (--leaf), a yellow aircraft symbol (--sun), sky-blue pilot input (--sky). */
+
+.dials {
+  display: block;
+  /* About 1.45 px a unit of its 260 × 75 drawing; a host can set --dials-width. */
+  width: var(--dials-width, 380px);
+  max-width: calc(100vw - 32px);
+  height: auto;
+  font-family: var(--mono);
+}
+
+.dials .panel {
+  fill: var(--surface-glass);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.dials .rim,
+.dials .tick {
+  fill: none;
+  stroke: var(--text);
+  stroke-opacity: 0.6;
+  stroke-width: 1;
+}
+
+.dials .tick.ref {
+  stroke-opacity: 1;
+  stroke-width: 1.6;
+}
+
+.dials .needle {
+  stroke: var(--leaf);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.dials .horizon,
+.dials .bank {
+  stroke: var(--text);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.dials .hub {
+  fill: var(--text);
+}
+
+.dials .wings {
+  fill: none;
+  stroke: var(--sun);
+  stroke-width: 2;
+  stroke-linecap: square;
+  paint-order: stroke;
+}
+
+.dials .north,
+.dials .label {
+  fill: var(--text);
+  font: 700 8px var(--mono);
+}
+
+.dials .number {
+  fill: var(--muted);
+  font: 700 6.5px var(--mono);
+}
+
+/* The altimeter's drum counter: a window of rolling digits under the dial. */
+.dials .drum {
+  fill: var(--bg);
+  stroke: var(--text);
+  stroke-opacity: 0.6;
+  stroke-width: 0.8;
+}
+
+.dials .digit {
+  fill: var(--leaf);
+  font: 700 11px var(--mono);
+}
+
+.dials .hit {
+  fill: transparent;
+}
+
+.dials .value {
+  fill: var(--leaf);
+  font: 600 11px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dials .track {
+  fill: none;
+  stroke: var(--text);
+  stroke-opacity: 0.45;
+  stroke-width: 0.8;
+}
+
+.dials .zero {
+  stroke: var(--text);
+  stroke-opacity: 0.8;
+  stroke-width: 1;
+}
+
+.dials .mark {
+  fill: var(--sky);
+}
+
+.dials .fill {
+  fill: var(--sky);
+  opacity: 0.4;
+}
+
+.dials.no-sticks .mark,
+.dials.no-sticks .fill {
+  display: none;
+}
+
+/* No telemetry: the needles idle. */
+.dials.no-data .needle,
+.dials.no-data .digit,
+.dials.no-data .value {
+  stroke: var(--muted);
+  fill: var(--muted);
+}
+
+.dials.no-data .needle {
+  fill: none;
+}
+
+/* The minimap: a canvas the size of its box, a hairline round it. */
+.minimap {
+  width: var(--minimap-size, 200px);
+  height: var(--minimap-size, 200px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.minimap.round {
+  border-radius: 50%;
+}
+
+.minimap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

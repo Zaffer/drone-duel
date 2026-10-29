@@ -1,0 +1,13 @@
+name = "Radiomaster T8L"
+notes = "USB joystick mode (ELRS firmware): the eight channels on the eight axes. Calibrate once with the wizard."
+match = ["T8L", "Radiomaster T8"]
+channels = [
+  { axis = 0 },
+  { axis = 1 },
+  { axis = 2 },
+  { axis = 3 },
+  { axis = 4 },
+  { axis = 5 },
+  { axis = 6 },
+  { axis = 7 },
+]

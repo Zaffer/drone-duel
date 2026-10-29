@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from swarm.gltf import Primitive, read_accessor, read_glb
-from swarm.truckmodel import GLASS_NODES, build_glb, merge, truck_parts
+from tools.models.gltf import Primitive, read_accessor, read_glb
+from tools.models.truckmodel import GLASS_NODES, build_glb, merge, truck_parts
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets" / "military_truck.glb"
-COP_MODEL = ROOT / "src" / "swarm" / "web" / "models" / "military-truck.glb"
+COP_MODEL = ROOT / "web" / "public" / "models" / "military-truck.glb"
 
 
 def test_merge_offsets_each_parts_indices_past_the_vertices_before_it() -> None:

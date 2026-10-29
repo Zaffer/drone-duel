@@ -1,0 +1,13 @@
+name = "Radiomaster TX15"
+notes = "EdgeTX USB joystick, its default mapping (Classic, channels to axes in order). Calibrate once with the wizard."
+match = ["Radiomaster TX15", "TX15"]
+channels = [
+  { axis = 0 },
+  { axis = 1 },
+  { axis = 2 },
+  { axis = 3 },
+  { axis = 4 },
+  { axis = 5 },
+  { axis = 6 },
+  { axis = 7 },
+]

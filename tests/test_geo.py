@@ -1,6 +1,6 @@
 import math
 
-from swarm.geo import LocalFrame
+from drone_duels.world.geo import LocalFrame
 
 
 def test_roundtrip_near_origin() -> None:

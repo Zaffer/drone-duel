@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from swarm import elevation
-from swarm.elevation import ElevationError, ground_elevation_m
+from drone_duels.world import elevation
+from drone_duels.world.elevation import ElevationError, ground_elevation_m
 
 
 def test_looks_up_once_then_remembers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

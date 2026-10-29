@@ -1,0 +1,24 @@
+name = "5\" FPV quad"
+blurb = "A 5 inch freestyle quad on ArduCopter 4.7, SkyFlow-Dynamics' racer5in physics."
+kind = "multirotor"
+model = "models/fpv-drone.glb"
+launch = "ground"
+dynamics_overlay = false
+
+[firmware]
+kind = "ardupilot-copter"
+params = ["ardupilot/copter-quad5.parm", "ardupilot/sitl.parm"]
+
+[physics]
+kind = "quad"
+airframe = "racer5in"
+
+[camera]
+tilt_deg = 30.0
+hfov_deg = 120.0
+offset_m = [0.06, 0.0, -0.02]
+
+[aux]
+arm = 5
+mode = 6
+modes = ["LOITER", "STABILIZE", "ACRO"]

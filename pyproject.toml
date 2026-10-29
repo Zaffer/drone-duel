@@ -1,25 +1,30 @@
 [project]
-name = "drone-duel"
-version = "0.1.0"
-description = "Multi-drone leader-follower coordination over MAVLink (ArduPilot SITL and hardware)"
+name = "drone-duels"
+version = "0.2.0"
+description = "A flight simulator game and practice sim: real flight controller firmware in SITL on our own physics, over real places"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pymavlink>=2.4.48",
     "numpy>=2.0",
-    "matplotlib>=3.9",
+    # swarm.osd renders the firmware's OSD fonts.
+    "pillow>=11",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    # The 5" quad's dynamics (DESIGN.md §6.2), on JAX's CPU backend.
+    "skyflow-dynamics[jax] @ git+https://github.com/Synetic-Labs/SkyFlow-Dynamics@c2f6478499d87b0907566eec80445e939879958d",
 ]
 
 [project.scripts]
-swarm = "swarm.cli:main"
+duels = "drone_duels.cli:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
     "basedpyright>=1.20",
-    # swarm.fpvmodel scales the drone model's textures.
-    "pillow>=11",
+    "httpx>=0.27",
 ]
 # Tools needed to build and launch ArduPilot SITL (sim_vehicle.py, waf, mavgen).
 sitl = [
@@ -33,15 +38,16 @@ sitl = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.8,<0.10"]
+requires = ["uv_build>=0.8,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "swarm"
+module-name = "drone_duels"
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["web"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N", "ANN"]
@@ -50,6 +56,9 @@ select = ["E", "F", "I", "UP", "B", "N", "ANN"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
+exclude = ["web", "external", ".venv", "logs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["sitl: starts real firmware (ArduPilot or INAV SITL); slower"]

@@ -1,0 +1,6 @@
+name = "Duel: AreaXO"
+blurb = "The pilot strikes the truck; the driver keeps away. Then swap."
+mode = "duel"
+location = "area-xo"
+vehicles = ["quad5", "chupito", "truck"]
+default_vehicle = "quad5"

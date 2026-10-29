@@ -1,0 +1,32 @@
+/* "Dusk": the game's palette (DESIGN.md §11). Dark only: the game runs at night-sky contrast. */
+:root {
+  color-scheme: dark;
+
+  --bg: #0d0e15;
+  --surface: #151724;
+  --surface-glass: rgb(21 23 36 / 0.86);
+  --raised: #1e2133;
+  --raised-hover: #272b42;
+  --line: #2c3049;
+  --text: #eef0f7;
+  --muted: #8e93ad;
+
+  --ember: #ff6b35; /* primary: actions, selection, the pilot, player 1 */
+  --tide: #22c7b8; /* secondary: the driver, player 2, links */
+  --sun: #ffc845; /* timers, countdown, focus, caution */
+  --rose: #ff4f6e; /* crash, failsafe, disarm, errors */
+  --leaf: #8be07a; /* armed, ready, gate passed */
+  --sky: #6ea8ff; /* telemetry traces, stick meters, trails */
+
+  --ember-soft: rgb(255 107 53 / 0.16);
+  --tide-soft: rgb(34 199 184 / 0.16);
+
+  --sans: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --gap: 12px;
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}

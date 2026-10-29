@@ -1,0 +1,1532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Protocol",
+  "type": "object",
+  "$defs": {
+    "SessionMsg": {
+      "additionalProperties": false,
+      "description": "Start a scenario with a vehicle, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop.",
+      "properties": {
+        "ch": {
+          "const": "session",
+          "default": "session",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "start",
+            "switch",
+            "reset",
+            "destroy",
+            "throw",
+            "stop"
+          ],
+          "type": "string"
+        },
+        "scenario": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pad": {
+          "default": 0,
+          "description": "the start pad: 0 player 1, 1 player 2",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ch",
+        "action",
+        "scenario",
+        "vehicle",
+        "pad"
+      ],
+      "title": "SessionMsg",
+      "type": "object"
+    },
+    "RcMsg": {
+      "additionalProperties": false,
+      "description": "The radio's channels, from channel 1, \u00b5s (1000-2000).",
+      "properties": {
+        "ch": {
+          "const": "rc",
+          "default": "rc",
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "us": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 16,
+          "minItems": 4,
+          "type": "array"
+        }
+      },
+      "required": [
+        "ch",
+        "seq",
+        "us"
+      ],
+      "title": "RcMsg",
+      "type": "object"
+    },
+    "GroundMsg": {
+      "additionalProperties": false,
+      "description": "The ground's height above sea level under the vehicle, from the map's 3D tiles.",
+      "properties": {
+        "ch": {
+          "const": "ground",
+          "default": "ground",
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "alt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "ch",
+        "lat",
+        "lon",
+        "alt"
+      ],
+      "title": "GroundMsg",
+      "type": "object"
+    },
+    "WindMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "ch": {
+          "const": "wind",
+          "default": "wind",
+          "type": "string"
+        },
+        "speed_ms": {
+          "maximum": 30,
+          "minimum": 0,
+          "type": "number"
+        },
+        "from_deg": {
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        },
+        "turbulence": {
+          "enum": [
+            "none",
+            "light",
+            "moderate",
+            "severe"
+          ],
+          "type": "string"
+        },
+        "gusts": {
+          "type": "boolean"
+        },
+        "gust_now": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ch",
+        "speed_ms",
+        "from_deg",
+        "turbulence",
+        "gusts",
+        "gust_now"
+      ],
+      "title": "WindMsg",
+      "type": "object"
+    },
+    "VideoMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "ch": {
+          "const": "video",
+          "default": "video",
+          "type": "string"
+        },
+        "system": {
+          "enum": [
+            "analog",
+            "digital"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "ch",
+        "system"
+      ],
+      "title": "VideoMsg",
+      "type": "object"
+    },
+    "DynamicsMsg": {
+      "additionalProperties": false,
+      "description": "Stream the flight model's internals (the dynamics overlay) or stop.",
+      "properties": {
+        "ch": {
+          "const": "dynamics",
+          "default": "dynamics",
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ch",
+        "on"
+      ],
+      "title": "DynamicsMsg",
+      "type": "object"
+    },
+    "RadioSourceMsg": {
+      "additionalProperties": false,
+      "description": "Read the radio in the server (Linux evdev) and stream its axes here (RadioMsg), for when\nChrome's Gamepad API cannot see all of it; or stop.",
+      "properties": {
+        "ch": {
+          "const": "radio_source",
+          "default": "radio_source",
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ch",
+        "on"
+      ],
+      "title": "RadioSourceMsg",
+      "type": "object"
+    },
+    "StatusMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "ch": {
+          "const": "status",
+          "default": "status",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "idle",
+            "starting",
+            "ready",
+            "failed",
+            "destroyed"
+          ],
+          "type": "string"
+        },
+        "scenario": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pad": {
+          "default": 0,
+          "type": "integer"
+        },
+        "step": {
+          "default": "",
+          "description": "what starting is doing now, or why it failed",
+          "type": "string"
+        },
+        "video": {
+          "default": "analog",
+          "enum": [
+            "analog",
+            "digital"
+          ],
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array",
+              "items": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "additionalItems": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the pad: lat, lon, ground m above sea level"
+        },
+        "heading_deg": {
+          "default": 0.0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "ch",
+        "state",
+        "scenario",
+        "vehicle",
+        "pad",
+        "step",
+        "video",
+        "origin",
+        "heading_deg"
+      ],
+      "title": "StatusMsg",
+      "type": "object"
+    },
+    "TelemetryMsg": {
+      "additionalProperties": false,
+      "description": "What a ground station sees, from MAVLink (ArduPilot) or MSP (INAV): the map and the dials\nread this, never the physics (DESIGN.md \u00a72.2).",
+      "properties": {
+        "ch": {
+          "const": "telemetry",
+          "default": "telemetry",
+          "type": "string"
+        },
+        "armed": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "lat": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lon": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "alt_amsl": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "alt_rel": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "above home, m"
+        },
+        "roll_deg": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "pitch_deg": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "yaw_deg": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "groundspeed": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "airspeed": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "climb": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "throttle_pct": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "battery_v": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "battery_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gps_sats": {
+          "default": 0,
+          "type": "integer"
+        },
+        "blockers": {
+          "description": "what stops it arming",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ch",
+        "armed",
+        "mode",
+        "lat",
+        "lon",
+        "alt_amsl",
+        "alt_rel",
+        "roll_deg",
+        "pitch_deg",
+        "yaw_deg",
+        "groundspeed",
+        "airspeed",
+        "climb",
+        "throttle_pct",
+        "battery_v",
+        "battery_pct",
+        "gps_sats",
+        "blockers"
+      ],
+      "title": "TelemetryMsg",
+      "type": "object"
+    },
+    "OsdMsg": {
+      "additionalProperties": false,
+      "description": "The firmware's own OSD screen, as MSP DisplayPort drew it: character codes row by row.",
+      "properties": {
+        "ch": {
+          "const": "osd",
+          "default": "osd",
+          "type": "string"
+        },
+        "font": {
+          "description": "the font's name, served at /osd/font/{font}.png",
+          "type": "string"
+        },
+        "cols": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "codes": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ch",
+        "font",
+        "cols",
+        "rows",
+        "codes"
+      ],
+      "title": "OsdMsg",
+      "type": "object"
+    },
+    "PlanItem": {
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "command": {
+          "type": "integer"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "alt": {
+          "type": "number"
+        },
+        "frame": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "command",
+        "lat",
+        "lon",
+        "alt",
+        "frame"
+      ],
+      "title": "PlanItem",
+      "type": "object"
+    },
+    "PlanMsg": {
+      "additionalProperties": false,
+      "description": "The vehicle's uploaded mission, fence and rally points (ArduPilot).",
+      "properties": {
+        "ch": {
+          "const": "plan",
+          "default": "plan",
+          "type": "string"
+        },
+        "mission": {
+          "items": {
+            "$ref": "#/$defs/PlanItem"
+          },
+          "type": "array"
+        },
+        "fence": {
+          "items": {
+            "$ref": "#/$defs/PlanItem"
+          },
+          "type": "array"
+        },
+        "rally": {
+          "items": {
+            "$ref": "#/$defs/PlanItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ch",
+        "mission",
+        "fence",
+        "rally"
+      ],
+      "title": "PlanMsg",
+      "type": "object"
+    },
+    "DynamicsData": {
+      "additionalProperties": false,
+      "properties": {
+        "ch": {
+          "const": "dynamics",
+          "default": "dynamics",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "ch",
+        "data"
+      ],
+      "title": "DynamicsData",
+      "type": "object"
+    },
+    "LogMsg": {
+      "additionalProperties": false,
+      "description": "A line from the firmware (STATUSTEXT) or the session.",
+      "properties": {
+        "ch": {
+          "const": "log",
+          "default": "log",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ch",
+        "level",
+        "source",
+        "text"
+      ],
+      "title": "LogMsg",
+      "type": "object"
+    },
+    "RadioMsg": {
+      "additionalProperties": false,
+      "description": "The radio as the server reads it: every axis, -1..1, nothing reversed; name None with no\nradio. At the radio's rate while a page asks (RadioSourceMsg).",
+      "properties": {
+        "ch": {
+          "const": "radio",
+          "default": "radio",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "axes": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ch",
+        "name",
+        "axes"
+      ],
+      "title": "RadioMsg",
+      "type": "object"
+    },
+    "PhysicsMsg": {
+      "additionalProperties": false,
+      "description": "What the physics says the vehicle is doing, on each change: \"ground\", \"hand\", \"flying\",\n\"crashed\"; and whether its firmware is stepping it.",
+      "properties": {
+        "ch": {
+          "const": "physics",
+          "default": "physics",
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "connected": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ch",
+        "phase",
+        "connected"
+      ],
+      "title": "PhysicsMsg",
+      "type": "object"
+    },
+    "AuxSpec": {
+      "additionalProperties": false,
+      "description": "What the firmware does on each AUX channel (channel numbers 5-16).",
+      "properties": {
+        "arm": {
+          "maximum": 16,
+          "minimum": 5,
+          "type": "integer"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "maximum": 16,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "modes": {
+          "description": "the mode switch's positions, low to high",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "launch": {
+          "anyOf": [
+            {
+              "maximum": 16,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "arm",
+        "mode",
+        "modes",
+        "launch"
+      ],
+      "title": "AuxSpec",
+      "type": "object"
+    },
+    "AxisMap": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "description": "Gamepad API axis index",
+          "maximum": 15,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reverse": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "axis",
+        "reverse"
+      ],
+      "title": "AxisMap",
+      "type": "object"
+    },
+    "ButtonMap": {
+      "additionalProperties": false,
+      "properties": {
+        "button": {
+          "maximum": 31,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "button"
+      ],
+      "title": "ButtonMap",
+      "type": "object"
+    },
+    "CameraSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "tilt_deg": {
+          "description": "up from the nose",
+          "maximum": 80,
+          "minimum": -30,
+          "type": "number"
+        },
+        "hfov_deg": {
+          "description": "the FPV camera's horizontal view",
+          "exclusiveMaximum": 170,
+          "exclusiveMinimum": 30,
+          "type": "number"
+        },
+        "offset_m": {
+          "description": "forward, right, down of the CG",
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        }
+      },
+      "required": [
+        "tilt_deg",
+        "hfov_deg",
+        "offset_m"
+      ],
+      "title": "CameraSpec",
+      "type": "object"
+    },
+    "Controller": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "match": {
+          "description": "substrings of the Gamepad API id ('Vendor: 1209 Product: 4f54') that pick this profile",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "channels": {
+          "description": "channel 1, 2, 3 ... in AETR order",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AxisMap"
+              },
+              {
+                "$ref": "#/$defs/ButtonMap"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "minItems": 4,
+          "type": "array"
+        },
+        "notes": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "match",
+        "channels",
+        "notes"
+      ],
+      "title": "Controller",
+      "type": "object"
+    },
+    "Course": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "laps": {
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "alt_ref": {
+          "enum": [
+            "agl",
+            "amsl"
+          ],
+          "type": "string"
+        },
+        "gates": {
+          "items": {
+            "$ref": "#/$defs/Gate"
+          },
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "location",
+        "laps",
+        "alt_ref",
+        "gates"
+      ],
+      "title": "Course",
+      "type": "object"
+    },
+    "FirmwareSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "ardupilot-copter",
+            "inav",
+            "none"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "description": "parameter / CLI files, relative to firmware/",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "params"
+      ],
+      "title": "FirmwareSpec",
+      "type": "object"
+    },
+    "Gate": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "description": "[latitude, longitude], degrees",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "alt_m": {
+          "type": "number"
+        },
+        "ypr_deg": {
+          "description": "yaw true, pitch, roll",
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "size_m": {
+          "description": "width, height (inside the frame)",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        }
+      },
+      "required": [
+        "at",
+        "alt_m",
+        "ypr_deg",
+        "size_m"
+      ],
+      "title": "Gate",
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "description": "[latitude, longitude], degrees",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "ground_alt_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "const": "auto",
+              "type": "string"
+            }
+          ],
+          "description": "ground height at the origin above sea level, or \"auto\" to look it up"
+        },
+        "heading_deg": {
+          "description": "the way the start pads face",
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        },
+        "pads": {
+          "description": "where vehicles start; the first is player 1's",
+          "items": {
+            "$ref": "#/$defs/StartPad"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "wind": {
+          "$ref": "#/$defs/Wind"
+        },
+        "blurb": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "origin",
+        "ground_alt_m",
+        "heading_deg",
+        "pads",
+        "wind",
+        "blurb"
+      ],
+      "title": "Location",
+      "type": "object"
+    },
+    "PhysicsSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "quad",
+            "wing",
+            "browser-truck"
+          ],
+          "type": "string"
+        },
+        "airframe": {
+          "description": "the model's airframe id (racer5in, chupito, truck)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "airframe"
+      ],
+      "title": "PhysicsSpec",
+      "type": "object"
+    },
+    "Scenario": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "freefly",
+            "duel",
+            "race"
+          ],
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "vehicles": {
+          "description": "what the vehicle picker offers",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "default_vehicle": {
+          "type": "string"
+        },
+        "course": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "race: the course id"
+        },
+        "blurb": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "mode",
+        "location",
+        "vehicles",
+        "default_vehicle",
+        "course",
+        "blurb"
+      ],
+      "title": "Scenario",
+      "type": "object"
+    },
+    "StartPad": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "description": "[latitude, longitude], degrees",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "heading_deg": {
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "heading_deg"
+      ],
+      "title": "StartPad",
+      "type": "object"
+    },
+    "Vehicle": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "multirotor",
+            "fixedwing",
+            "ground"
+          ],
+          "type": "string"
+        },
+        "firmware": {
+          "$ref": "#/$defs/FirmwareSpec"
+        },
+        "physics": {
+          "$ref": "#/$defs/PhysicsSpec"
+        },
+        "model": {
+          "description": "the 3D model, under web/public/models or a /vendor path",
+          "type": "string"
+        },
+        "camera": {
+          "$ref": "#/$defs/CameraSpec"
+        },
+        "launch": {
+          "enum": [
+            "ground",
+            "hand",
+            "drive"
+          ],
+          "type": "string"
+        },
+        "aux": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuxSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dynamics_overlay": {
+          "default": false,
+          "type": "boolean"
+        },
+        "blurb": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "firmware",
+        "physics",
+        "model",
+        "camera",
+        "launch",
+        "aux",
+        "dynamics_overlay",
+        "blurb"
+      ],
+      "title": "Vehicle",
+      "type": "object"
+    },
+    "Wind": {
+      "additionalProperties": false,
+      "properties": {
+        "speed_ms": {
+          "description": "mean wind at 6 m, m/s",
+          "maximum": 30,
+          "minimum": 0,
+          "type": "number"
+        },
+        "from_deg": {
+          "description": "where it blows from, degrees true",
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        },
+        "turbulence": {
+          "description": "MIL-F-8785C intensity",
+          "enum": [
+            "none",
+            "light",
+            "moderate",
+            "severe"
+          ],
+          "type": "string"
+        },
+        "gusts": {
+          "description": "random 1-cos gusts on top",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "speed_ms",
+        "from_deg",
+        "turbulence",
+        "gusts"
+      ],
+      "title": "Wind",
+      "type": "object"
+    },
+    "ContentMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "locations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Location"
+          },
+          "type": "object"
+        },
+        "scenarios": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Scenario"
+          },
+          "type": "object"
+        },
+        "vehicles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Vehicle"
+          },
+          "type": "object"
+        },
+        "courses": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Course"
+          },
+          "type": "object"
+        },
+        "controllers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Controller"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "locations",
+        "scenarios",
+        "vehicles",
+        "courses",
+        "controllers"
+      ],
+      "title": "ContentMsg",
+      "type": "object"
+    },
+    "MapKeys": {
+      "additionalProperties": false,
+      "properties": {
+        "google_maps_api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cesium_ion_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "google_maps_api_key",
+        "cesium_ion_token"
+      ],
+      "title": "MapKeys",
+      "type": "object"
+    },
+    "ConfigMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "map_keys": {
+          "$ref": "#/$defs/MapKeys"
+        },
+        "qgc_port": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "map_keys",
+        "qgc_port",
+        "version"
+      ],
+      "title": "ConfigMsg",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "AuxSpec": {
+      "$ref": "#/$defs/AuxSpec"
+    },
+    "AxisMap": {
+      "$ref": "#/$defs/AxisMap"
+    },
+    "ButtonMap": {
+      "$ref": "#/$defs/ButtonMap"
+    },
+    "CameraSpec": {
+      "$ref": "#/$defs/CameraSpec"
+    },
+    "ConfigMsg": {
+      "$ref": "#/$defs/ConfigMsg"
+    },
+    "ContentMsg": {
+      "$ref": "#/$defs/ContentMsg"
+    },
+    "Controller": {
+      "$ref": "#/$defs/Controller"
+    },
+    "Course": {
+      "$ref": "#/$defs/Course"
+    },
+    "DynamicsData": {
+      "$ref": "#/$defs/DynamicsData"
+    },
+    "DynamicsMsg": {
+      "$ref": "#/$defs/DynamicsMsg"
+    },
+    "FirmwareSpec": {
+      "$ref": "#/$defs/FirmwareSpec"
+    },
+    "Gate": {
+      "$ref": "#/$defs/Gate"
+    },
+    "GroundMsg": {
+      "$ref": "#/$defs/GroundMsg"
+    },
+    "Location": {
+      "$ref": "#/$defs/Location"
+    },
+    "LogMsg": {
+      "$ref": "#/$defs/LogMsg"
+    },
+    "MapKeys": {
+      "$ref": "#/$defs/MapKeys"
+    },
+    "OsdMsg": {
+      "$ref": "#/$defs/OsdMsg"
+    },
+    "PhysicsMsg": {
+      "$ref": "#/$defs/PhysicsMsg"
+    },
+    "PhysicsSpec": {
+      "$ref": "#/$defs/PhysicsSpec"
+    },
+    "PlanItem": {
+      "$ref": "#/$defs/PlanItem"
+    },
+    "PlanMsg": {
+      "$ref": "#/$defs/PlanMsg"
+    },
+    "RadioMsg": {
+      "$ref": "#/$defs/RadioMsg"
+    },
+    "RadioSourceMsg": {
+      "$ref": "#/$defs/RadioSourceMsg"
+    },
+    "RcMsg": {
+      "$ref": "#/$defs/RcMsg"
+    },
+    "Scenario": {
+      "$ref": "#/$defs/Scenario"
+    },
+    "SessionMsg": {
+      "$ref": "#/$defs/SessionMsg"
+    },
+    "StartPad": {
+      "$ref": "#/$defs/StartPad"
+    },
+    "StatusMsg": {
+      "$ref": "#/$defs/StatusMsg"
+    },
+    "TelemetryMsg": {
+      "$ref": "#/$defs/TelemetryMsg"
+    },
+    "Vehicle": {
+      "$ref": "#/$defs/Vehicle"
+    },
+    "VideoMsg": {
+      "$ref": "#/$defs/VideoMsg"
+    },
+    "Wind": {
+      "$ref": "#/$defs/Wind"
+    },
+    "WindMsg": {
+      "$ref": "#/$defs/WindMsg"
+    }
+  },
+  "poseFields": [
+    "t",
+    "lat",
+    "lon",
+    "alt",
+    "qw",
+    "qx",
+    "qy",
+    "qz",
+    "vn",
+    "ve",
+    "vd",
+    "p",
+    "q",
+    "r",
+    "a0",
+    "a1",
+    "a2",
+    "a3"
+  ]
+}

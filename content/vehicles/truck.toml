@@ -1,0 +1,17 @@
+name = "Military truck"
+blurb = "Drive it on the map itself: it collides with the buildings."
+kind = "ground"
+model = "models/military-truck.glb"
+launch = "drive"
+
+[firmware]
+kind = "none"
+
+[physics]
+kind = "browser-truck"
+airframe = "truck"
+
+[camera]
+tilt_deg = 0.0
+hfov_deg = 90.0
+offset_m = [1.6, 0.0, -2.2]

@@ -1,17 +1,11 @@
-"""ArduPilot's OSD over MSP DisplayPort: frames in, drawn screens out, the viewer's /osd."""
+"""ArduPilot's OSD over MSP DisplayPort: frames in, drawn screens out."""
 
-import json
-import socket
-import time
-import urllib.request
 from io import BytesIO
-from pathlib import Path
 
 import pytest
 from PIL import Image
 
-from swarm.geo import LocalFrame
-from swarm.osd import (
+from drone_duels.video.osd import (
     CLEAR,
     DRAW,
     FONT_DIR,
@@ -22,14 +16,8 @@ from swarm.osd import (
     WRITE,
     DisplayPort,
     MspReader,
-    OsdFeed,
     font_png,
-    osd_port,
 )
-from swarm.view import ViewConfig, ViewServer
-
-SYSID = 3000
-"""High enough that its port is clear of a sim stack running beside the tests."""
 
 
 def frame(payload: bytes, cmd: int = MSP_DISPLAYPORT) -> bytes:
@@ -107,42 +95,3 @@ def test_writes_past_the_edge_are_cut_and_options_set_the_grid() -> None:
     assert port.screen is not None
     assert (port.screen.cols, port.screen.rows, port.screen.font) == (50, 18, 1)
     assert port.screen.text[17][48:] == "XY"
-
-
-def test_feed_and_osd_stream(tmp_path: Path) -> None:
-    log = tmp_path / "run.jsonl"
-    log.write_text("")
-    s = ViewServer(ViewConfig(markers=[], http_port=0), LocalFrame(45.0, -75.0), replay=log)
-    feed = OsdFeed([SYSID])
-    feed.start()
-    s.osd = feed
-    s.start()
-    assert s._httpd is not None  # pyright: ignore[reportPrivateUsage]
-    url = f"http://127.0.0.1:{s._httpd.server_address[1]}"  # pyright: ignore[reportPrivateUsage]
-    try:
-        with urllib.request.urlopen(f"{url}/osd", timeout=5) as r:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as out:
-                out.sendto(osd_frame(write(0, 0, b"LOIT")), ("127.0.0.1", osd_port(SYSID)))
-            line = r.readline().decode()
-            screen = json.loads(line.removeprefix("data: "))[str(SYSID)]
-            assert screen["text"][0].startswith("LOIT")
-    finally:
-        s.stop()
-        feed.stop()
-
-
-def test_feed_counts_each_drawn_screen() -> None:
-    feed = OsdFeed([SYSID])
-    feed.start()
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as out:
-            for _ in range(2):
-                out.sendto(osd_frame(), ("127.0.0.1", osd_port(SYSID)))
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            if feed.latest().get(SYSID, (0, None))[0] == 2:
-                return
-            time.sleep(0.01)
-        pytest.fail(f"screens not counted: {feed.latest()}")
-    finally:
-        feed.stop()
