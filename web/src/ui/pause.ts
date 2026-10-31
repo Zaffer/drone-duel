@@ -1,5 +1,5 @@
 // The pause and options menu (Esc; DESIGN.md §11), in tabs: Vehicle, View, Video, Wind,
-// Controls, Graphics, Audio and Session. From the main menu (no flight) it holds only the
+// Controls, Inputs, Graphics, Audio and Session. From the main menu (no flight) it holds only the
 // options. The sim keeps running while it is open: the firmware and physics are real time.
 
 import { effect } from "alien-signals";
@@ -13,6 +13,7 @@ import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { vehicleCard } from "./app.ts";
 import { calibrationWizard, forgetCalibration } from "./calibrate.ts";
 import { h } from "./h.ts";
+import { inputsTab } from "./inputs.ts";
 
 type Tab = { id: string; name: string; body: () => HTMLElement; flight?: boolean };
 
@@ -364,6 +365,7 @@ export function openPause(
         );
       },
     },
+    { id: "inputs", name: "Inputs", body: inputsTab },
     {
       id: "graphics",
       name: "Graphics",

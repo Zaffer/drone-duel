@@ -108,7 +108,7 @@ const cesium = (key: ColorKey): C.Color => C.Color.fromCssColorString(COLORS[key
 type LayerKey = "forces" | "air" | "lift" | "rotation" | "path";
 
 /** The layers, in key order: what each shows, and its legend. */
-const LAYERS: { key: LayerKey; name: string; legend: [string, string][] }[] = [
+export const LAYERS: { key: LayerKey; name: string; legend: [string, string][] }[] = [
   {
     key: "forces",
     name: "Forces",

@@ -129,7 +129,7 @@ export function mountApp(root: HTMLElement, world: World): void {
         "span",
         null,
         h("div", { class: "title" }, "Options"),
-        h("div", { class: "desc" }, "Controls, video, wind, graphics, audio."),
+        h("div", { class: "desc" }, "Controls, keys and how to fly, video, wind, graphics, audio."),
       ),
       h("span", { class: "kbd" }, "O"),
     );

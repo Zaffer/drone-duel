@@ -25,6 +25,7 @@ import { prefs, updatePrefs } from "../state/prefs.ts";
 import { phase, status, telemetry } from "../state/session.ts";
 import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { h } from "./h.ts";
+import { flightKeys } from "./inputs.ts";
 import { openPause } from "./pause.ts";
 
 const MODE_NAMES = { freefly: "Free Fly", duel: "Duel", race: "Race" } as const;
@@ -98,16 +99,9 @@ export function mountHud(
   const keysHelp = h(
     "div",
     { class: "keys-help" },
-    ...[
-      ["Esc", "menu"],
-      ["V", "view"],
-      ["R", "reset"],
-      ["B", "vehicle"],
-      ["T", "throw"],
-      ["D", "dynamics"],
-      ["N", "minimap"],
-      ["H", "help"],
-    ].map(([k, t]) => h("span", null, h("span", { class: "kbd" }, k!), " ", t!)),
+    ...flightKeys()
+      .filter((k) => k.strip)
+      .map((k) => h("span", null, h("span", { class: "kbd" }, k.keys[0]!), " ", k.strip!)),
   );
   const hud = h(
     "div",

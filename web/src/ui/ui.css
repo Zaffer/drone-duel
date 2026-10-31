@@ -629,6 +629,65 @@
   font-weight: 600;
 }
 
+.inputs h4.section {
+  margin-top: 26px;
+}
+
+.inputs h5 {
+  margin: 18px 0 6px;
+  font-size: 14px;
+}
+
+.inputs p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.inputs .how {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.keys-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.keys-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 4px 8px 4px 0;
+}
+
+.keys-table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid rgb(44 48 73 / 0.5);
+  vertical-align: top;
+}
+
+.keys-table td.keys {
+  width: 150px;
+  white-space: nowrap;
+}
+
+.controls-table td:first-child {
+  color: var(--muted);
+  width: 130px;
+}
+
+.controls-table td.keys {
+  width: auto;
+}
+
+.controls-table td:nth-child(3) {
+  white-space: nowrap;
+}
+
 .vehicle-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
