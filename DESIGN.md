@@ -126,8 +126,8 @@ drone-duels/
   router/sitl.conf
   scripts/setup.sh          ArduPilot, INAV, mavlink-router, bun, web deps, Chupito GLB
   tools/                    gen_protocol_ts.py (pydantic → web/src/net/protocol.ts),
-                            models/ (fpvmodel, truckmodel, operatormodel, gltf, fbx: GLB
-                            asset builders)
+                            models/ (fpvmodel, truckmodel, operatormodel, operatortextures,
+                            gltf, fbx: GLB asset builders)
   src/drone_duels/
     cli.py                  `duels` (serve, doctor, physics, record)
     ports.py
@@ -289,12 +289,13 @@ aircraft's would.
 
 ### 6.5 The operator
 
-The pilot stands 3 m behind the start pad and 1.5 m to its left (clear of the chase camera),
-facing the vehicle's heading: Fab's "Quantum Modular Character" posed by
-`tools/models/operatormodel.py` (goggles on, radio in both hands) and baked into a static GLB.
-Drawn only, for the aircraft (the truck's driver is in it). The spotter view is their eye, so
-they are hidden in it; ground sampling looks through them, and the analog link's far end is
-their goggles.
+The pilot stands 3 m behind the start pad and 1.5 m to its left (clear of the chase camera), facing
+the vehicle's heading: Fab's "Quantum Modular Character" posed by `tools/models/operatormodel.py`
+(goggles on, a radio with two long-range antennas in both hands) and baked into a static GLB,
+textured from the listing's maps (shrunk into `assets/quantum_textures/` by
+`tools/models/operatortextures.py`). Drawn only, for the aircraft (the truck's driver is in it). The
+spotter view is their eye, so they are hidden in it; ground sampling looks through them, and the
+analog link's far end is their goggles.
 
 ## 7. Modes
 

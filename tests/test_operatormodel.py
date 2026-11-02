@@ -1,14 +1,17 @@
 """The pilot behind the pad: tools.models.operatormodel's posing of the committed Fab character."""
 
+import io
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from tools.models.fbx import Scene, SkinnedMesh
 from tools.models.gltf import read_accessor, read_glb
 from tools.models.operatormodel import (
+    ANTENNA_LENGTH,
     RADIO_CENTRE,
     WRIST_OUT,
     Pose,
@@ -18,9 +21,11 @@ from tools.models.operatormodel import (
     hold_radio,
     twist_about,
 )
+from tools.models.operatortextures import BASE_PX, DETAIL_PX, SOURCES
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets" / "quantum_character.fbx"
+TEXTURES = ROOT / "assets" / "quantum_textures"
 SERVED = ROOT / "web" / "public" / "models" / "operator.glb"
 
 
@@ -93,7 +98,7 @@ def test_hands_hold_the_radio_and_bones_keep_their_lengths(scene: Scene) -> None
 
 @pytest.fixture(scope="module")
 def rebuilt() -> tuple[dict[str, Any], bytes]:
-    return read_glb(build_glb(SOURCE.read_bytes()))
+    return read_glb(build_glb(SOURCE.read_bytes(), TEXTURES))
 
 
 def _points(doc: dict[str, Any], buffer: bytes, name: str | None = None) -> np.ndarray:
@@ -133,10 +138,43 @@ def test_every_mesh_has_a_material_of_its_own(rebuilt: tuple[dict[str, Any], byt
     assert not {"M_Teeth", "M_Eyeball", "M_Sclera"} & set(names)
 
 
+def test_radio_has_two_long_antennas_standing_up(rebuilt: tuple[dict[str, Any], bytes]) -> None:
+    doc, buffer = rebuilt
+    antennas = _points(doc, buffer, "antennas")
+    radio = _points(doc, buffer, "radio")
+    assert antennas[:, 1].max() - radio[:, 1].max() > ANTENNA_LENGTH / 100 * 0.9
+    tops = antennas[antennas[:, 1] > antennas[:, 1].max() - 0.01]
+    assert tops[:, 0].min() < -0.05 and tops[:, 0].max() > 0.05  # one each side, in a V
+
+
+def test_the_characters_materials_are_textured(rebuilt: tuple[dict[str, Any], bytes]) -> None:
+    doc, buffer = rebuilt
+    for material in doc["materials"]:
+        textured = "baseColorTexture" in material["pbrMetallicRoughness"]
+        assert textured == (material["name"] in SOURCES), material["name"]
+        if textured:
+            assert {"normalTexture", "occlusionTexture"} <= material.keys()
+    for mesh in doc["meshes"]:
+        attributes = mesh["primitives"][0]["attributes"]
+        assert ("TEXCOORD_0" in attributes) == (mesh["name"] in SOURCES), mesh["name"]
+    for image in doc["images"]:
+        view = doc["bufferViews"][image["bufferView"]]
+        start = view["byteOffset"]
+        size = Image.open(io.BytesIO(buffer[start : start + view["byteLength"]])).size
+        assert max(size) <= BASE_PX
+
+
+def test_committed_textures_are_every_map_at_its_size() -> None:
+    for material in SOURCES:
+        for kind, side in (("base", BASE_PX), ("normal", DETAIL_PX), ("orm", DETAIL_PX)):
+            image = Image.open(TEXTURES / f"{material}_{kind}.jpg")
+            assert image.size == (side, side), (material, kind)
+
+
 def test_served_model_is_the_converted_source(rebuilt: tuple[dict[str, Any], bytes]) -> None:
     """The committed model matches the converter (rebuild it after changing either)."""
     doc, buffer = rebuilt
     served, served_buffer = read_glb(SERVED.read_bytes())
-    for key in ("nodes", "meshes", "materials"):
+    for key in ("nodes", "meshes", "materials", "textures"):
         assert served[key] == doc[key], key
     np.testing.assert_array_equal(_points(served, served_buffer), _points(doc, buffer))

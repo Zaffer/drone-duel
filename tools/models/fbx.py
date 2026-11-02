@@ -123,6 +123,8 @@ class SkinnedMesh:
     """(m, 3) control point indices; polygons are fanned into triangles."""
     normals: np.ndarray
     """(m, 3, 3) each triangle corner's normal in the bind pose."""
+    uvs: np.ndarray
+    """(m, 3, 2) each triangle corner's texture coordinates, FBX's way up (v from the bottom)."""
     materials: list[str]
     """Each triangle's material name."""
     weights: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
@@ -141,7 +143,7 @@ def _name(record: Record) -> str:
 
 
 def _corner_index(layer: Record, index: str, corners: np.ndarray) -> np.ndarray:
-    """Where each polygon corner's value is in a layer element's data (normals). `corners` are
+    """Where each polygon corner's value is in a layer element's data (normals, UVs). `corners` are
     the corners' control points; `index` names the element's index array, if it has one."""
     mapping = layer.text("MappingInformationType")
     if mapping == "ByPolygonVertex":
@@ -214,6 +216,9 @@ class Scene:
         normal_layer = geometry.child("LayerElementNormal")
         normals = normal_layer.array("Normals").reshape(-1, 3)
         normal_at = _corner_index(normal_layer, "NormalsIndex", corners)
+        uv_layer = geometry.child("LayerElementUV")
+        uvs = uv_layer.array("UV").reshape(-1, 2)
+        uv_at = _corner_index(uv_layer, "UVIndex", corners)
         material_layer = geometry.child("LayerElementMaterial")
         slots = material_layer.array("Materials").astype(np.int64)
         by_polygon = material_layer.text("MappingInformationType") != "AllSame"
@@ -249,6 +254,7 @@ class Scene:
             points @ linear.T + bind[:3, 3],
             corners[fan],
             _unit(normals[normal_at][fan] @ np.linalg.inv(linear)),
+            uvs[uv_at][fan].astype(np.float64),
             [materials[s] for s in slot],
             weights,
         )

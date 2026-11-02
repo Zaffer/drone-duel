@@ -9,13 +9,16 @@ model the page serves with
     uv run python -m tools.models.operatormodel assets/quantum_character.fbx \\
         web/public/models/operator.glb
 
+It reads the textures from assets/quantum_textures/, beside the source
+(tools.models.operatortextures).
+
 The arms reach the radio by two-bone IK, the wrists' roll is shared out along the forearms'
 twist bones, and the fingers curl round the radio's sides. The skin is baked in that pose into a
 static mesh, one per material, in metres with the feet on y = 0. The cap is turned back to front
 to clear the goggles. The eyes, lashes and teeth are left out: the goggles cover the eyes.
 
-The listing's textures (pbr_textures.zip, 1.1 GB) are not used: each material is a flat colour
-picked to match its texture's name (the shirt's and jeans' blue, the pouches' green).
+Each of the character's materials gets its base colour, normal and occlusion-roughness-metal
+maps; the gear (goggles, radio, antennas) is flat colours.
 """
 
 import sys
@@ -25,6 +28,7 @@ import numpy as np
 
 from tools.models.fbx import Bone, FbxFormatError, Scene, SkinnedMesh
 from tools.models.gltf import GltfWriter, Primitive, unit
+from tools.models.operatortextures import SOURCES as TEXTURED
 
 SOURCE_URL = "https://www.fab.com/listings/8e200050-3158-4762-b297-f785b5b1533d"
 LEFT_OUT = {"Eye", "Eyelashes", "Teeth_UP", "Teeth_Down"}
@@ -32,21 +36,12 @@ LEFT_OUT = {"Eye", "Eyelashes", "Teeth_UP", "Teeth_Down"}
 BACK_TO_FRONT = {"Cap", "SKM_Patch_Flag_Cap"}
 """Turned about the crown: the brim would cut through the goggles."""
 COLOURS: dict[str, tuple[str, float]] = {
-    # material: sRGB colour, roughness
-    "M_Head": ("#c49a7c", 0.7),
-    "M_Quantum_Arms": ("#c49a7c", 0.7),
-    "M_Shirt_RolledUp": ("#4a5a72", 0.95),
-    "M_Jeans": ("#36425a", 0.95),
-    "M_Bulletproof_Light": ("#7d7259", 0.9),
-    "M_Drops_Tactical": ("#565c3c", 0.9),
-    "M_Cap": ("#2e3236", 0.9),
-    "M_Patches": ("#76776e", 0.9),
-    "M_Holster_Hard": ("#262729", 0.6),
-    "M_Pistol": ("#1d1e20", 0.5),
+    # the gear's materials: sRGB colour, roughness
     "goggles": ("#1a1b1f", 0.4),
     "strap": ("#25262b", 0.9),
     "radio": ("#2c2e33", 0.5),
     "sticks": ("#111214", 0.4),
+    "antennas": ("#1b1c1f", 0.7),
 }
 
 # The pose, in the source's centimetres. The radio is held at the belly, its face tilted up
@@ -62,6 +57,10 @@ ELBOW_POLE = np.array([0.5, -1.0, -0.2])
 """Where the elbows point, the left's (+X); the right mirrors it."""
 FINGER_CURL_DEG = (50.0, 60.0, 30.0)
 """Each finger's three joints, knuckle first."""
+ANTENNA_LENGTH = 22.0
+"""Each of the radio's two long-range antennas, standing up from hinges on its top corners."""
+ANTENNA_SPLAY_DEG = 12.0
+"""Each leans out from upright by this much, in a V."""
 GOGGLES_SIZE = np.array([17.0, 7.5, 7.0])
 GOGGLES_GAP = 0.6
 """Between the goggles' back and the face, and the strap and the head."""
@@ -204,16 +203,21 @@ def bake(mesh: SkinnedMesh, skinning: dict[str, np.ndarray]) -> tuple[np.ndarray
     return points, unit(normals.reshape(-1, 3)).reshape(normals.shape)
 
 
-def indexed(points: np.ndarray, triangles: np.ndarray, normals: np.ndarray, name: str) -> Primitive:
-    """Triangles whose corners share a point and a normal share a vertex."""
+def indexed(
+    points: np.ndarray, triangles: np.ndarray, normals: np.ndarray, uvs: np.ndarray, name: str
+) -> Primitive:
+    """Triangles whose corners share a point, a normal and a UV share a vertex. glTF's v runs
+    down the image, FBX's up."""
     corners = triangles.reshape(-1)
-    key = np.column_stack([corners, np.round(normals.reshape(-1, 3), 3)])
+    normals, uvs = normals.reshape(-1, 3), uvs.reshape(-1, 2)
+    key = np.column_stack([corners, np.round(normals, 3), np.round(uvs, 5)])
     _, first, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
     return Primitive(
         name,
         {
             "POSITION": points[corners[first]].astype(np.float32),
-            "NORMAL": normals.reshape(-1, 3)[first].astype(np.float32),
+            "NORMAL": normals[first].astype(np.float32),
+            "TEXCOORD_0": (uvs[first] * [1.0, -1.0] + [0.0, 1.0]).astype(np.float32),
         },
         inverse.reshape(-1).astype(np.uint32),
         None,
@@ -243,6 +247,35 @@ def box(centre: np.ndarray, axes: np.ndarray, size: np.ndarray, name: str) -> Pr
     )
 
 
+def rod(start: np.ndarray, end: np.ndarray, radius: float, name: str, sides: int = 10) -> Primitive:
+    """A round rod from `start` to `end`, smooth sided, its far end capped."""
+    axis = unit((end - start)[None])[0]
+    u = unit(np.cross(axis, [1.0, 0.0, 0.0] if abs(axis[0]) < 0.9 else [0.0, 1.0, 0.0])[None])[0]
+    v = np.cross(axis, u)
+    positions, normals, indices = [], [], []
+    for i in range(sides):
+        a = 2 * np.pi * i / sides
+        out = np.cos(a) * u + np.sin(a) * v
+        positions.extend([start + radius * out, end + radius * out])
+        normals.extend([out, out])
+        j, k = 2 * i, 2 * ((i + 1) % sides)
+        indices.extend([j, k, k + 1, j, k + 1, j + 1])
+    tip = len(positions)
+    positions.append(end)
+    normals.append(axis)
+    for i in range(sides):
+        a = 2 * np.pi * i / sides
+        positions.append(end + radius * (np.cos(a) * u + np.sin(a) * v))
+        normals.append(axis)
+        indices.extend([tip, tip + 1 + i, tip + 1 + (i + 1) % sides])
+    return Primitive(
+        name,
+        {"POSITION": np.array(positions, np.float32), "NORMAL": np.array(normals, np.float32)},
+        np.array(indices, np.uint32),
+        None,
+    )
+
+
 def strap(head: np.ndarray, low: float, high: float, segments: int = 48) -> Primitive:
     """A band round the head's points between heights `low` and `high`, just clear of them."""
     band = head[(head[:, 1] > low) & (head[:, 1] < high)]
@@ -260,7 +293,7 @@ def strap(head: np.ndarray, low: float, high: float, segments: int = 48) -> Prim
             positions.append([centre[0] + r * direction[0], y, centre[1] + r * direction[2]])
             normals.append(direction)
         j, k = 2 * i, 2 * ((i + 1) % segments)
-        indices.extend([j, k, k + 1, j, k + 1, j + 1])
+        indices.extend([j, k + 1, k, j, j + 1, k + 1])
     return Primitive(
         "strap",
         {"POSITION": np.array(positions, np.float32), "NORMAL": np.array(normals, np.float32)},
@@ -270,8 +303,8 @@ def strap(head: np.ndarray, low: float, high: float, segments: int = 48) -> Prim
 
 
 def gear(eyes: np.ndarray, head: np.ndarray) -> list[Primitive]:
-    """The goggles, their strap and the radio. `eyes`: the eyeballs' points; `head`: the posed
-    head's. The goggles sit on the bridge of the nose, just in front of the eyes."""
+    """The goggles, their strap, the radio and its antennas. `eyes`: the eyeballs' points;
+    `head`: the posed head's. The goggles sit on the bridge of the nose, in front of the eyes."""
     eye_y = float(eyes[:, 1].mean())
     eye_front = float(eyes[:, 2].max())
     centre = np.array([0.0, eye_y, eye_front + GOGGLES_GAP + GOGGLES_SIZE[2] / 2])
@@ -284,16 +317,23 @@ def gear(eyes: np.ndarray, head: np.ndarray) -> list[Primitive]:
     for across in (-5.0, 5.0):
         at = RADIO_CENTRE + axes[:, 0] * across + axes[:, 1] * 1.5 + axes[:, 2] * 3.5
         sticks.append(box(at, axes, np.array([0.8, 0.8, 2.0]), "sticks"))
-    antenna = RADIO_CENTRE + axes[:, 1] * (RADIO_SIZE[1] / 2 + 3.0) + axes[:, 0] * 5.0
-    sticks.append(box(antenna, axes, np.array([1.4, 6.0, 1.4]), "sticks"))
-    return [goggles, band, radio, *sticks]
+    antennas = []
+    splay = np.radians(ANTENNA_SPLAY_DEG)
+    for side in (-1.0, 1.0):
+        hinge = RADIO_CENTRE + axes[:, 0] * side * 6.5 + axes[:, 1] * (RADIO_SIZE[1] / 2 + 1.0)
+        antennas.append(box(hinge, axes, np.array([2.2, 2.0, 2.2]), "antennas"))
+        # Upright in the world, not along the tilted radio, leaning outward.
+        direction = np.cos(splay) * np.array([0.0, 1.0, 0.0]) + np.sin(splay) * side * axes[:, 0]
+        start = hinge + direction * 0.5
+        antennas.append(rod(start, start + direction * ANTENNA_LENGTH, 0.6, "antennas"))
+    return [goggles, band, radio, *sticks, *antennas]
 
 
 def merge(parts: list[Primitive], name: str) -> Primitive:
     offsets = np.cumsum([0] + [len(p.attributes["POSITION"]) for p in parts[:-1]])
     return Primitive(
         name,
-        {k: np.concatenate([p.attributes[k] for p in parts]) for k in ("POSITION", "NORMAL")},
+        {k: np.concatenate([p.attributes[k] for p in parts]) for k in parts[0].attributes},
         np.concatenate([p.indices + o for p, o in zip(parts, offsets, strict=True)]).astype(
             np.uint32
         ),
@@ -332,10 +372,10 @@ def operator_parts(source: bytes) -> list[Primitive]:
             head = points
         materials = np.array(mesh.materials)
         for material in np.unique(materials):
-            if material not in COLOURS:
-                raise FbxFormatError(f"{mesh.name}: no colour for {material}")
+            if material not in TEXTURED:
+                raise FbxFormatError(f"{mesh.name}: no textures for {material}")
             keep = materials == material
-            part = indexed(points, mesh.triangles[keep], normals[keep], material)
+            part = indexed(points, mesh.triangles[keep], normals[keep], mesh.uvs[keep], material)
             groups.setdefault(material, []).append(part)
     assert head is not None
 
@@ -353,22 +393,38 @@ def operator_parts(source: bytes) -> list[Primitive]:
     return out
 
 
-def build_glb(source: bytes) -> bytes:
+def build_glb(source: bytes, textures: Path) -> bytes:
+    """The operator's GLB, with the maps in `textures` (tools.models.operatortextures)."""
     gltf = GltfWriter()
+    images: list[dict[str, object]] = []
+
+    def texture(material: str, kind: str) -> dict[str, int]:
+        data = (textures / f"{material}_{kind}.jpg").read_bytes()
+        images.append({"bufferView": gltf.view(data, None), "mimeType": "image/jpeg"})
+        return {"index": len(images) - 1}
+
     children = []
     for part in operator_parts(source):
-        colour, roughness = COLOURS[part.name]
-        gltf.materials.append(
-            {
-                "name": part.name,
+        if part.name in TEXTURED:
+            orm = texture(part.name, "orm")
+            material: dict[str, object] = {
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": texture(part.name, "base"),
+                    "metallicRoughnessTexture": orm,
+                },
+                "normalTexture": texture(part.name, "normal"),
+                "occlusionTexture": orm,
+            }
+        else:
+            colour, roughness = COLOURS[part.name]
+            material = {
                 "pbrMetallicRoughness": {
                     "baseColorFactor": [*linear_rgb(colour), 1.0],
                     "metallicFactor": 0.0,
                     "roughnessFactor": roughness,
                 },
-                **({"doubleSided": True} if part.name == "strap" else {}),
             }
-        )
+        gltf.materials.append({"name": part.name, **material})
         part.material = len(gltf.materials) - 1
         children.append(gltf.mesh_node(part))
     root = len(gltf.nodes)
@@ -377,7 +433,12 @@ def build_glb(source: bytes) -> bytes:
         "generator": "tools.models.operatormodel",
         "copyright": f'"Quantum Modular Character Free Sample", Fab Standard License, {SOURCE_URL}',
     }
-    return gltf.to_glb(root, asset)
+    extra = {
+        "images": images,
+        "textures": [{"source": i, "sampler": 0} for i in range(len(images))],
+        "samplers": [{"magFilter": 9729, "minFilter": 9987}],  # linear, trilinear
+    }
+    return gltf.to_glb(root, asset, **extra)
 
 
 def main() -> None:
@@ -387,7 +448,8 @@ def main() -> None:
         )
     out = Path(sys.argv[2])
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(build_glb(Path(sys.argv[1]).read_bytes()))
+    source = Path(sys.argv[1])
+    out.write_bytes(build_glb(source.read_bytes(), source.parent / "quantum_textures"))
     print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)")
 
 
