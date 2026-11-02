@@ -1,6 +1,0 @@
-name = "Duel: Toronto"
-blurb = "Strike the truck among the towers."
-mode = "duel"
-location = "billy-bishop"
-vehicles = ["quad5", "chupito", "truck"]
-default_vehicle = "quad5"

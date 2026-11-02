@@ -33,7 +33,8 @@ def test_router_conf_for_a_slot() -> None:
     conf = router_conf(1)
     assert "TcpServerPort = 0" in conf  # its own TCP server would take SITL's 5760
     assert f"Port = {ports.slot(1).ardupilot_mavlink}" in conf
-    assert f"Port = {ports.ROUTER_QGC}" in conf and f"Port = {ports.ROUTER_GAME}" in conf
+    assert f"Port = {ports.ROUTER_QGC}" in conf and f"Port = {ports.slot(1).router_game}" in conf
+    assert f"Port = {ports.slot(0).router_game}" not in conf  # slots never share a bound port
     assert "Mode = Server" in conf and "Mode = Normal" in conf
 
 
@@ -80,8 +81,10 @@ def test_link_state_from_messages() -> None:
     publish = Collect()
     link = VehicleLink("udpout:127.0.0.1:1", publish)
     hb = VEHICLE.heartbeat_encode(
-        apm.MAV_TYPE_QUADROTOR, apm.MAV_AUTOPILOT_ARDUPILOTMEGA,
-        apm.MAV_MODE_FLAG_SAFETY_ARMED | apm.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, 5,
+        apm.MAV_TYPE_QUADROTOR,
+        apm.MAV_AUTOPILOT_ARDUPILOTMEGA,
+        apm.MAV_MODE_FLAG_SAFETY_ARMED | apm.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+        5,
         apm.MAV_STATE_ACTIVE,
     )
     link.handle(heard(hb), 1.0)
@@ -92,24 +95,30 @@ def test_link_state_from_messages() -> None:
     assert link.state.mode == "LOITER"
 
     link.handle(heard(VEHICLE.gps_raw_int_encode(0, 3, 0, 0, 0, 0, 0, 0, 0, 12)), 1.0)
-    flags = (apm.EKF_ATTITUDE | apm.EKF_VELOCITY_HORIZ | apm.EKF_VELOCITY_VERT
-             | apm.EKF_POS_HORIZ_ABS | apm.EKF_POS_VERT_ABS)
+    flags = (
+        apm.EKF_ATTITUDE
+        | apm.EKF_VELOCITY_HORIZ
+        | apm.EKF_VELOCITY_VERT
+        | apm.EKF_POS_HORIZ_ABS
+        | apm.EKF_POS_VERT_ABS
+    )
     link.handle(heard(VEHICLE.ekf_status_report_encode(flags, 0, 0, 0, 0, 0)), 1.0)
     text = VEHICLE.statustext_encode(apm.MAV_SEVERITY_CRITICAL, b"PreArm: Throttle too high")
     link.handle(heard(text), 1.0)
     assert not link.ready()
     assert link.state.blocker_list(2.0) == ["Throttle too high"]
     assert publish.of("log") == [
-        {"ch": "log", "level": "error", "source": "ardupilot",
-         "text": "PreArm: Throttle too high"}
+        {"ch": "log", "level": "error", "source": "ardupilot", "text": "PreArm: Throttle too high"}
     ]
     healthy = apm.MAV_SYS_STATUS_PREARM_CHECK
-    status = VEHICLE.sys_status_encode(healthy, healthy, healthy, 0, 24800, 600, 87,
-                                       0, 0, 0, 0, 0, 0)
+    status = VEHICLE.sys_status_encode(
+        healthy, healthy, healthy, 0, 24800, 600, 87, 0, 0, 0, 0, 0, 0
+    )
     link.handle(heard(status), 2.0)
     assert link.ready() and link.state.blocker_list(2.0) == []
-    pos = VEHICLE.global_position_int_encode(0, 436309300, -793894500, 87000, 10000,
-                                             300, -400, -150, 27000)
+    pos = VEHICLE.global_position_int_encode(
+        0, 436309300, -793894500, 87000, 10000, 300, -400, -150, 27000
+    )
     link.handle(heard(pos), 2.0)
     link.handle(heard(VEHICLE.attitude_encode(0, 0.1, -0.2, -0.5, 0, 0, 0)), 2.0)
     link.handle(heard(VEHICLE.vfr_hud_encode(0.0, 5.0, 270, 21, 87.0, 1.5)), 2.0)
@@ -133,9 +142,25 @@ def test_link_reads_the_plans() -> None:
     assert sent == [("list", apm.MAV_MISSION_TYPE_MISSION, -1)]
 
     def item(seq: int, cmd: int, kind: int) -> apm.MAVLink_message:
-        return heard(VEHICLE.mission_item_int_encode(
-            GAME_SYSID, 190, seq, apm.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, cmd, 0, 1,
-            0, 0, 0, 0, 436309300 + seq, -793894500, 10.0 * seq, kind))
+        return heard(
+            VEHICLE.mission_item_int_encode(
+                GAME_SYSID,
+                190,
+                seq,
+                apm.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                cmd,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                436309300 + seq,
+                -793894500,
+                10.0 * seq,
+                kind,
+            )
+        )
 
     mission = apm.MAV_MISSION_TYPE_MISSION
     link.handle(heard(VEHICLE.mission_count_encode(GAME_SYSID, 190, 2, mission)), 0.1)
@@ -149,6 +174,5 @@ def test_link_reads_the_plans() -> None:
     from drone_duels.telemetry.plans import plan_msg
 
     plan = PlanMsg.model_validate(plan_msg(link._plans.plans))  # pyright: ignore[reportPrivateUsage]
-    assert [i.command for i in plan.mission] == [apm.MAV_CMD_NAV_WAYPOINT,
-                                                 apm.MAV_CMD_NAV_TAKEOFF]
+    assert [i.command for i in plan.mission] == [apm.MAV_CMD_NAV_WAYPOINT, apm.MAV_CMD_NAV_TAKEOFF]
     assert plan.mission[1].alt == 10.0 and plan.fence == [] and plan.rally == []

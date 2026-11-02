@@ -1,6 +1,7 @@
-// The Cesium viewer and its ground: Google Photorealistic 3D Tiles when a Google key is set,
-// Cesium World Terrain + Bing imagery + OSM buildings when a Cesium ion token is set, and Esri
-// World Imagery on Esri World Elevation otherwise (no key needed).
+// The Cesium viewer and its ground: a globe of Cesium World Terrain + Bing imagery + OSM
+// buildings when a Cesium ion token is set, else Esri World Imagery on Esri World Elevation (no
+// key needed); and, while flying, Google Photorealistic 3D Tiles over it when a Google key is
+// set. The menus' backdrop stays on the globe: Google bills each 3D Tiles session.
 
 import * as C from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
@@ -10,6 +11,10 @@ const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const ESRI_TERRAIN =
   "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer";
+/** Where the globe is flattened to under Google's tiles, m above the ellipsoid: below any sea on
+ * Earth (the geoid is at most 106 m under the ellipsoid), so it never rises through them. */
+const BACKSTOP_M = -120;
+
 const MODEL_CREDITS = [
   'Drone model: "FPV Drone" by PinaPipe (CC BY 4.0)',
   'Truck model: "Military Truck" by Raphael Escamilla (CC BY 4.0)',
@@ -21,11 +26,31 @@ export type GroundSource = "google" | "ion" | "esri";
 export class World {
   readonly viewer: C.Viewer;
   readonly scene: C.Scene;
+  /** The 3D tileset when it is the ground now (flying, with a Google key), else null. */
   tileset: C.Cesium3DTileset | null = null;
+  /** The ground now. */
   source: GroundSource;
+  /** The globe's source, under the tiles. */
+  globeSource: "ion" | "esri";
   /** Why a configured source was not used, for the page to show. */
   fallbackReason: string | null = null;
-  readonly ready: Promise<void>;
+  /** Settles once the ground now (globe or tiles) can be sampled. */
+  ready: Promise<void>;
+  private readonly globeReady: Promise<void>;
+  private google: Promise<C.Cesium3DTileset | null> | null = null;
+  private readonly googleKey: string | null;
+  /** Counts useTiles calls, so a late tileset is not shown after a later "off". */
+  private tilesAsked = 0;
+  /** The globe's own terrain (the menus), kept while the backstop stands in for it. */
+  private globeTerrain: C.TerrainProvider | null = null;
+  /** Google's tiles have no skirts: where neighbouring tiles differ in detail (flat water most of
+   * all) a slit opens between them. Flying, the globe stays drawn under them, flattened to
+   * BACKSTOP_M, so a slit shows the imagery far below rather than space. */
+  private readonly backstop = new C.CustomHeightmapTerrainProvider({
+    width: 2,
+    height: 2,
+    callback: () => new Float32Array(4).fill(BACKSTOP_M),
+  });
 
   constructor(container: HTMLElement, keys: MapKeys) {
     C.Ion.defaultAccessToken = keys.cesium_ion_token ?? "";
@@ -61,8 +86,38 @@ export class World {
     viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(
       C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK,
     );
-    this.source = keys.google_maps_api_key ? "google" : keys.cesium_ion_token ? "ion" : "esri";
-    this.ready = this.load(keys);
+    this.googleKey = keys.google_maps_api_key ?? null;
+    this.globeSource = keys.cesium_ion_token ? "ion" : "esri";
+    this.source = this.globeSource;
+    this.globeReady = this.load();
+    this.ready = this.globeReady;
+  }
+
+  /** The Google 3D tiles as the ground (flying) or the globe (the menus). The tileset is loaded
+   * the first time it is wanted and kept, hidden, after. No-op without a Google key. */
+  useTiles(on: boolean): Promise<void> {
+    if (!this.googleKey) return this.ready;
+    const asked = ++this.tilesAsked;
+    if (!on) {
+      if (this.tileset) this.tileset.show = false;
+      this.tileset = null;
+      if (this.globeTerrain) this.scene.terrainProvider = this.globeTerrain;
+      this.source = this.globeSource;
+      this.ready = this.globeReady;
+      return this.ready;
+    }
+    this.google ??= this.loadGoogle(this.googleKey);
+    const loading = this.google;
+    this.ready = Promise.all([this.globeReady, loading]).then(([, tiles]) => {
+      // Back in the menus before the tiles came: leave them hidden.
+      if (!tiles || asked !== this.tilesAsked) return;
+      tiles.show = true;
+      this.tileset = tiles;
+      this.globeTerrain ??= this.scene.terrainProvider;
+      this.scene.terrainProvider = this.backstop;
+      this.source = "google";
+    });
+    return this.ready;
   }
 
   /** The sun at `hour` (0–24) of local solar time at longitude `lon`, today, and held there; or,
@@ -80,6 +135,11 @@ export class World {
     clock.currentTime = C.JulianDate.fromDate(new Date(midnight + (hour - lon / 15) * 3_600_000));
   }
 
+  /** True with a Google key: flights draw the ground in 3D tiles. */
+  get hasTiles(): boolean {
+    return this.googleKey !== null;
+  }
+
   /** True when the ground is a 3D tileset rather than the globe surface. */
   get groundIsTiles(): boolean {
     return this.tileset !== null;
@@ -91,29 +151,31 @@ export class World {
     ctl.enableInputs = on;
   }
 
-  private async load(keys: MapKeys): Promise<void> {
-    if (this.source === "google") {
-      try {
-        C.GoogleMaps.defaultApiKey = keys.google_maps_api_key ?? undefined;
-        // No geocoder is used at all, which is within Google's terms for these tiles.
-        this.tileset = await C.createGooglePhotorealistic3DTileset({
-          onlyUsingWithGoogleGeocoder: true,
-        });
-        this.scene.primitives.add(this.tileset);
-        this.scene.globe.show = false;
-        return;
-      } catch (err) {
-        console.error("Google Photorealistic 3D Tiles failed", err);
-        this.fallbackReason = "Google 3D Tiles failed: check GOOGLE_MAPS_API_KEY";
-        this.source = keys.cesium_ion_token ? "ion" : "esri";
-      }
+  private async loadGoogle(key: string): Promise<C.Cesium3DTileset | null> {
+    try {
+      C.GoogleMaps.defaultApiKey = key;
+      // No geocoder is used at all, which is within Google's terms for these tiles.
+      const tiles = await C.createGooglePhotorealistic3DTileset({
+        onlyUsingWithGoogleGeocoder: true,
+      });
+      tiles.show = false;
+      this.scene.primitives.add(tiles);
+      return tiles;
+    } catch (err) {
+      console.error("Google Photorealistic 3D Tiles failed", err);
+      this.fallbackReason = "Google 3D Tiles failed: check GOOGLE_MAPS_API_KEY";
+      return null;
     }
+  }
+
+  private async load(): Promise<void> {
     if (this.source === "ion") {
       try {
         await C.IonResource.fromAssetId(1);
       } catch (err) {
         console.error("Cesium ion failed", err);
         this.fallbackReason = "Cesium ion failed: check CESIUM_ION_TOKEN";
+        this.globeSource = "esri";
         this.source = "esri";
       }
     }
@@ -162,7 +224,8 @@ export class World {
     try {
       if (this.groundIsTiles) {
         const [hit] = await this.scene.sampleHeightMostDetailed([carto], exclude);
-        return hit?.height;
+        // Through a slit between tiles, down to the backstop: no ground there, as before it.
+        return hit?.height !== undefined && hit.height > BACKSTOP_M + 1 ? hit.height : undefined;
       }
       const provider = this.viewer.terrainProvider;
       if (provider instanceof C.EllipsoidTerrainProvider) return 0;

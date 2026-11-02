@@ -1,7 +1,0 @@
-name = "Race: Billy Bishop"
-blurb = "Round the island airport's apron."
-mode = "race"
-location = "billy-bishop"
-course = "billy-bishop-apron"
-vehicles = ["quad5", "chupito"]
-default_vehicle = "quad5"

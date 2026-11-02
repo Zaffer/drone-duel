@@ -46,7 +46,7 @@ def doctor() -> int:
     try:
         c = load()
         print(
-            f"  ok  content: {len(c.locations)} locations, {len(c.scenarios)} scenarios, "
+            f"  ok  content: {len(c.locations)} locations, "
             f"{len(c.vehicles)} vehicles, {len(c.courses)} courses, "
             f"{len(c.controllers)} controllers"
         )

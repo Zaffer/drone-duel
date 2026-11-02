@@ -11,7 +11,7 @@ def test_content_and_config() -> None:
     with TestClient(create_app()) as client:
         content = client.get("/api/content").json()
         assert "quad5" in content["vehicles"]
-        assert content["scenarios"]["race-areaxo"]["course"] == "areaxo-loop"
+        assert content["courses"]["areaxo-loop"]["location"] == "area-xo"
         config = client.get("/api/config").json()
         assert config["qgc_port"] == 14550
 
@@ -36,19 +36,34 @@ def test_a_page_starts_the_truck_over_ws() -> None:
     with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
         first = json.loads(ws.receive_text())
         assert first["ch"] == "status" and first["state"] == "idle"
-        ws.send_text(json.dumps({"ch": "session", "action": "start",
-                                 "scenario": "freefly-toronto", "vehicle": "truck", "pad": 0}))
-        ws.send_text('{"ch": "nonsense"}')  # ignored, logged
-        states = []
+        ws.send_text(
+            json.dumps(
+                {
+                    "ch": "session",
+                    "action": "start",
+                    "location": "billy-bishop",
+                    "vehicle": "truck",
+                    "pad": 0,
+                }
+            )
+        )
+        ws.send_text('{"ch": "nonsense"}')  # ignored, and said on the page
+        states, said = [], []
         for _ in range(20):
             msg = json.loads(ws.receive_text())
+            if msg["ch"] == "log" and msg["source"] == "server":
+                said.append(msg["text"])
             if msg["ch"] == "status":
                 states.append(msg["state"])
-                if msg["state"] == "ready":
-                    break
+            if said and states and states[-1] == "ready":
+                break
         assert states[-1] == "ready"
-        ws.send_text(json.dumps({"ch": "session", "action": "stop", "scenario": None,
-                                 "vehicle": None, "pad": 0}))
+        assert said and "restart" in said[0]
+        ws.send_text(
+            json.dumps(
+                {"ch": "session", "action": "stop", "location": None, "vehicle": None, "pad": 0}
+            )
+        )
 
 
 def test_another_sites_page_cannot_open_the_socket() -> None:

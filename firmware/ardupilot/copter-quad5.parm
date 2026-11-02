@@ -103,7 +103,8 @@ WP_SPD           10
 # The OSD. An analog quad's flight controller has an OSD chip (OSD_TYPE 1, MAX7456) lay
 # ArduPilot's OSD into the camera's video; SITL has none, so it sends the same screen over MSP
 # DisplayPort on SERIAL5 (OSD_TYPE 5, SERIAL5_PROTOCOL 42), which the server draws into the
-# camera feed (drone_duels.video.osd). OSD1_TXT_RES (the grid) follows the video system and is
-# set after this file. Not for a real analog drone: set OSD_TYPE 1 there.
+# camera feed (drone_duels.video.osd). The layout (copter-quad5.analog.parm or .digital.parm)
+# and OSD1_TXT_RES (the grid) follow the video system and are set after this file. Not for a
+# real analog drone: set OSD_TYPE 1 there.
 OSD_TYPE         5
 SERIAL5_PROTOCOL 42

@@ -91,6 +91,7 @@ class Dynamics:
     wind_mean: tuple[float, ...]
     """The mean wind there, after the shear."""
     turbulence: tuple[float, ...]
+    """As the wing feels it: over its span."""
     gust: tuple[float, ...]
     turbulence_rates: tuple[float, ...]
     """The turbulence's rotation, deg/s, body frame."""
@@ -178,7 +179,7 @@ class Dynamics:
         k = 1 / qs if qs > 1e-3 else 0.0
         weather = ac.weather
         if weather is not None:
-            turbulence, gust, eddy_rates = weather.eddies, weather.gust, weather.rates
+            turbulence, gust, eddy_rates = weather.felt, weather.gust, weather.rates
         else:
             turbulence = gust = eddy_rates = (0.0, 0.0, 0.0)
         flex = 1 / (1 + air.dynamic_pressure / wing.flex_pa) if wing.flex_pa > 0 else 1.0

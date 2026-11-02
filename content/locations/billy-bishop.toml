@@ -15,5 +15,7 @@ heading_deg = 270.0
 [wind]
 speed_ms = 3.0
 from_deg = 250.0
-turbulence = "light"
-gusts = false
+turbulence = 1.0
+eddy_scale = 1.0
+gust_factor = 1.0
+gust_every_s = 10.0

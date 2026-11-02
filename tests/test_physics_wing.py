@@ -13,7 +13,7 @@ import pytest
 from drone_duels.physics.core.rigidbody import from_euler, rotate, to_euler, unrotate
 from drone_duels.physics.core.weather import FOOT, Weather
 from drone_duels.physics.wing.aircraft import Aircraft, Controls, Phase
-from drone_duels.physics.wing.airframe import CHUPITO
+from drone_duels.physics.wing.airframe import CHUPITO, SECTION
 from drone_duels.physics.wing.dynamics import Dynamics
 from drone_duels.physics.wing.propulsion import PowerTrainState
 from drone_duels.physics.wing.strips import (
@@ -27,8 +27,10 @@ from drone_duels.physics.wing.strips import (
 )
 
 DT = 0.001
-ROLL_MIX = 0.95
-"""The logging pilot's roll mix: full roll stick drives each servo to 95 % of its travel."""
+ROLL_TRAVEL = 585 / 500
+"""LOG's full rolls: the servo 585 µs off its centre, past the 500 µs of full travel."""
+PULL_TRAVEL = 203 / 500
+"""LOG's full pitch command near 29 m/s: 203 µs of pitch on the servo."""
 
 
 def hold_level(ac: Aircraft, throttle: float, seconds: float, roll: float = 0.0) -> None:
@@ -129,6 +131,16 @@ def test_top_speed_and_power_match_the_log() -> None:
     assert ac.air.airspeed == pytest.approx(42, abs=3)
 
 
+def test_its_launch_draws_the_logs_current() -> None:
+    """LOG's launch, at 65 % throttle (1650 µs): 16 A slow, 14 A at 25 m/s, on a full pack."""
+    pt = CHUPITO.power_train
+    for speed, logged in ((5.0, 16.0), (25.0, 14.0)):
+        power = PowerTrainState()
+        for _ in range(1500):
+            power.step(pt, 0.65, speed, 1.225, DT)
+        assert power.pack_current == pytest.approx(logged, rel=0.15)
+
+
 def test_the_pack_sags_at_once_then_slowly_and_recovers() -> None:
     """LOG's pack: 0.050-0.062 ohm at once, then 0.07 more over 5 to 10 s, back as it eases."""
     pt = CHUPITO.power_train
@@ -204,7 +216,7 @@ def test_full_elevon_roll_rate_matches_the_log(speed: float, logged: float) -> N
     ac = flying(speed)
     peak = 0.0
     for _ in range(400):
-        ac.step(Controls(0.6, ROLL_MIX, -ROLL_MIX), DT, ground_down=1e6)
+        ac.step(Controls(0.6, ROLL_TRAVEL, -ROLL_TRAVEL), DT, ground_down=1e6)
         peak = max(peak, math.degrees(ac.body.rates[0]))
     assert peak == pytest.approx(logged, rel=0.15)
 
@@ -274,13 +286,13 @@ def test_the_vortex_lattice_agrees_with_lifting_surface_theory() -> None:
 
 
 def test_a_full_pitch_pull_matches_the_log() -> None:
-    """LOG: at full pitch command (65 % of the elevons' travel) near 29 m/s, 7.5 g (6.1 to 9.1)
-    at a CL of 0.66 (0.47 to 0.81), the wing still flying."""
+    """LOG: at full pitch command (203 µs on the servo) near 29 m/s, 7.3 g (6.1 to 9.1) at a CL
+    of 0.66 (0.47 to 0.81), the wing still flying."""
     ac = flying(29)
     trim = sum(ac.elevons) / 2 / CHUPITO.elevon_max
     g, cl, alpha = [], [], []
     for i in range(500):
-        ac.step(Controls(0.7, trim - 0.65, trim - 0.65), DT, ground_down=1e6)
+        ac.step(Controls(0.7, trim - PULL_TRAVEL, trim - PULL_TRAVEL), DT, ground_down=1e6)
         if i >= 100:
             q = 0.5 * 1.225 * ac.air.airspeed**2 * CHUPITO.wing.reference.area
             g.append(-ac.specific_force[2] / 9.80665)
@@ -289,6 +301,21 @@ def test_a_full_pitch_pull_matches_the_log() -> None:
     assert 6.0 < sorted(g)[len(g) // 2] < 9.1
     assert 0.47 < sorted(cl)[len(cl) // 2] < 0.81
     assert max(alpha) < 20, "pulls hard, short of the stall"
+
+
+def test_a_steady_pull_takes_the_logs_elevon_a_g() -> None:
+    """LOG: moderate pulls take 1.0 to 1.4 deg of elevon a g (at TBS's throws): what a static
+    margin over the elevons' power comes to."""
+    ac = flying(29)
+    trim = sum(ac.elevons) / 2
+    pull = (trim - math.radians(3)) / CHUPITO.elevon_max
+    g = []
+    for i in range(400):
+        aileron = -1.5 * to_euler(ac.body.attitude)[0] - 0.1 * ac.body.rates[0]
+        ac.step(Controls(0.6, pull + aileron, pull - aileron), DT, ground_down=1e6)
+        if i >= 200:
+            g.append(-ac.specific_force[2] / 9.80665)
+    assert 1.0 < 3 / (sum(g) / len(g) - 1) < 1.5
 
 
 def test_let_go_in_a_stall_it_recovers() -> None:
@@ -382,7 +409,8 @@ def test_the_stall_has_hysteresis() -> None:
     flow = Flow()
     up = _sweep([0.0, 30.0], 2.0, flow)
     down = _sweep([30.0, 0.0], 2.0, flow)
-    assert up[20.0] - down[20.0] > 0.15
+    past = round(math.degrees(SECTION.alpha_stall)) + 5.0  # the whole wing's loop, past its root's
+    assert up[past] - down[past] > 0.15
     assert up[10.0] == pytest.approx(down[10.0], abs=0.02)
     assert up[10.0] == pytest.approx(_lift(math.radians(10))[0], abs=0.02), "slowly: static"
 
@@ -443,6 +471,60 @@ def test_turbulence_is_mil_spec_dryden() -> None:
     assert sd(p_) == pytest.approx(sigma_p, rel=0.1)
     assert sd(q_) == pytest.approx(0.215, rel=0.1)
     assert sd(r_) == pytest.approx(0.193, rel=0.1)
+
+
+def _zero_crossings_hz(x: list[float], seconds: float) -> float:
+    m = sum(x) / len(x)
+    return sum(1 for a, b in zip(x, x[1:], strict=False) if (a - m) * (b - m) < 0) / 2 / seconds
+
+
+def test_the_wing_feels_the_turbulence_over_its_span() -> None:
+    """At the physics' 1 kHz, 8785C's point turbulence crosses its mean several times a second;
+    over the span, a wing of 0.8 m feels it as air, not a buzz: under 2 Hz, and nearly as
+    strong."""
+    weather = Weather(speed=5.0, span=0.8, seed=4)
+    point, felt = [], []
+    for _ in range(60_000):
+        weather.step(0.001, 20.0, 15.0, (1.0, 0.0, 0.0, 0.0))
+        point.append(weather.eddies[2])
+        felt.append(weather.felt[2])
+    assert _zero_crossings_hz(point, 60) > 4
+    assert _zero_crossings_hz(felt, 60) < 2
+    m = sum(felt) / len(felt)
+    sd = math.sqrt(sum((a - m) ** 2 for a in felt) / len(felt))
+    assert 0.3 < sd < 0.5, "σ_w 0.5: the span takes off only the smallest eddies"
+
+
+def test_larger_eddies_are_slower() -> None:
+    crossings = []
+    for scale in (0.5, 1.0, 4.0):
+        weather = Weather(speed=5.0, span=0.8, scale=scale, seed=4)
+        w = []
+        for _ in range(40_000):
+            weather.step(0.005, 20.0, 15.0, (1.0, 0.0, 0.0, 0.0))
+            w.append(weather.felt[2])
+        crossings.append(_zero_crossings_hz(w, 200))
+    assert crossings[0] > crossings[1] > crossings[2]
+
+
+def test_no_turbulence_is_still_air_at_once() -> None:
+    weather = Weather(speed=8.0, span=0.8, seed=1)
+    weather.step(0.01, 20.0, 15.0, (1.0, 0.0, 0.0, 0.0))
+    assert weather.felt != (0.0, 0.0, 0.0)
+    weather.turbulence = 0.0
+    weather.step(0.01, 20.0, 15.0, (1.0, 0.0, 0.0, 0.0))
+    assert weather.felt == weather.rates == (0.0, 0.0, 0.0)
+
+
+def test_a_gust_asked_for_comes_once() -> None:
+    weather = Weather(speed=5.0, turbulence=0.0, seed=3)
+    weather.gust_now(3.0)
+    peaks = []
+    for _ in range(6_000):  # a minute
+        weather.step(0.01, 20 * FOOT, 15.0, (1.0, 0.0, 0.0, 0.0))
+        peaks.append(math.hypot(*weather.gust))
+    assert 2.5 < max(peaks) <= 3.0
+    assert peaks[600:] == [0.0] * len(peaks[600:]), "gusts off: one, and no more"
 
 
 def test_the_wind_falls_off_toward_the_ground() -> None:
@@ -513,7 +595,7 @@ def test_the_dynamics_show_its_balance_wake_and_energy() -> None:
     ac = flying(25)
     ac.step(Controls(0.4), DT, ground_down=1e6, detail=True)
     d = Dynamics.of(ac)
-    assert d.static_margin == pytest.approx(0.086, abs=0.01)
+    assert d.static_margin == pytest.approx(0.031, abs=0.01)
     assert d.centre_of_pressure is not None and abs(d.centre_of_pressure) < 0.01
     strengths = [w[1] for w in d.wake]
     assert sum(strengths) == pytest.approx(0.0, abs=1e-3)

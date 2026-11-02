@@ -16,7 +16,7 @@ in `web/` (bun). ArduPilot, INAV SITL and mavlink-router live in `external/` via
 - The server ⇄ page protocol lives in `src/drone_duels/server/protocol.py` (pydantic). After
   changing it run `uv run duels gen-protocol`, which writes `web/src/net/protocol.schema.json` and
   the generated `web/src/net/protocol.ts` (never edit that by hand).
-- Places, scenarios, vehicles, race courses and radio profiles are TOML in `content/`
+- Places, vehicles, race courses and radio profiles are TOML in `content/`
   (`drone_duels.content`), not code. Every key is checked; add a file to add one.
 - Every port is in `src/drone_duels/ports.py`. INAV must stay off 5760 (mavlink-router connects
   there for ArduPilot).

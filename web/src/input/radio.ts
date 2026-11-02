@@ -3,11 +3,12 @@
 // gamepad, or the keyboard. Sampled at RATE_HZ; `samples()` is that stream, and the `channels`
 // signal (state/input.ts) its latest value for the UI.
 //
-// The source with the most axes wins; on a tie, Chrome's (it is a hop shorter). A radio is any
-// pad without the standard mapping that has four axes or more.
+// The source with the most axes wins; on a tie, the server's: Chrome can list an axis and never
+// move it (the LiteRadio 2's CH5 and CH8), which Linux reads fine. A radio is any pad without the
+// standard mapping that has four axes or more.
 
 import { link } from "../net/server.ts";
-import { content } from "../state/app.ts";
+import { content, paused } from "../state/app.ts";
 import { channels, controllerName, inputSource } from "../state/input.ts";
 import { prefs } from "../state/prefs.ts";
 import {
@@ -49,7 +50,7 @@ class Radio extends EventTarget {
     });
     window.addEventListener("keydown", (e) => {
       this.keys.add(e.code);
-      if (inputSource() !== "keyboard") return;
+      if (inputSource() !== "keyboard" || paused()) return;
       if (e.code === "Enter") this.keyState.armed = !this.keyState.armed;
       if (e.code === "KeyM") this.keyState.modePos = (this.keyState.modePos + 1) % 3;
     });
@@ -75,6 +76,10 @@ class Radio extends EventTarget {
   /** The best controller there is now. */
   pick(): RawController | null {
     const candidates: RawController[] = [];
+    const s = this.server;
+    if (s?.name && performance.now() - s.at < 500) {
+      candidates.push({ id: s.name, axes: s.axes, buttons: [], standard: false, source: "server" });
+    }
     for (const pad of navigator.getGamepads()) {
       if (!pad || !pad.connected) continue;
       const standard = pad.mapping === "standard";
@@ -86,10 +91,6 @@ class Radio extends EventTarget {
         standard,
         source: standard ? "gamepad" : "radio",
       });
-    }
-    const s = this.server;
-    if (s?.name && performance.now() - s.at < 500) {
-      candidates.push({ id: s.name, axes: s.axes, buttons: [], standard: false, source: "server" });
     }
     const radios = candidates.filter((c) => !c.standard);
     if (radios.length > 0) {

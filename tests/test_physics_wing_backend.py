@@ -20,7 +20,14 @@ from drone_duels.physics.wing.recorder import FlightRecorder
 from drone_duels.server.protocol import POSE, POSE_FIELDS
 
 ORIGIN = (43.630930, -79.389450, 77.0)
-WIND = {"speed_ms": 3.0, "from_deg": 250.0, "turbulence": "light", "gusts": False}
+WIND = {
+    "speed_ms": 3.0,
+    "from_deg": 250.0,
+    "turbulence": 1.0,
+    "eddy_scale": 1.0,
+    "gust_factor": 1.0,
+    "gust_every_s": 10.0,
+}
 SLOT = ports.slot(7)
 """Clear of every slot the SITL tests use."""
 
@@ -109,17 +116,32 @@ def test_the_wind_changes_live(backend: WingBackend) -> None:
     w = backend.weather
     assert (w.speed, w.from_deg, w.turbulence, w.gusts) == (3.0, 250.0, 1.0, 0.0)
     assert w.span == CHUPITO.wing.reference.span
-    backend.wind(8.0, 90.0, "moderate", True, False)
-    assert (w.speed, w.from_deg, w.turbulence, w.gusts) == (8.0, 90.0, 2.0, 4.0)
-    backend.wind(8.0, 90.0, "none", False, True)  # gust now, gusts off
-    assert w.gusts > 0
+    gusty = {
+        "speed_ms": 8.0,
+        "from_deg": 90.0,
+        "turbulence": 2.0,
+        "eddy_scale": 2.0,
+        "gust_factor": 1.5,
+        "gust_every_s": 20.0,
+    }
+    backend.wind(gusty, False)
+    assert (w.speed, w.from_deg, w.turbulence, w.scale, w.gusts, w.gust_every) == (
+        8.0,
+        90.0,
+        2.0,
+        2.0,
+        4.0,
+        20.0,
+    )
+    backend.wind({**gusty, "turbulence": 0.0, "gust_factor": 1.0}, True)  # gust now, gusts off
+    assert w.gusts == 0
     _wait(lambda: w.gust != (0.0, 0.0, 0.0))
     assert w is backend.aircraft.weather
 
 
 def test_still_air_by_default() -> None:
     b = WingBackend("chupito", SLOT, ORIGIN, 0.0, {}, record=None)
-    assert (b.weather.speed, b.weather.turbulence, b.weather.gusts) == (0.0, 0.0, 0.0)
+    assert (b.weather.speed, b.weather.gusts) == (0.0, 0.0)  # no wind: no turbulence either
     assert b.recorder is None
     with pytest.raises(SystemExit):
         WingBackend("nanawing", SLOT, ORIGIN, 0.0, {}, record=None)

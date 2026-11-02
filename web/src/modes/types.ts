@@ -1,13 +1,13 @@
-// A game mode (DESIGN.md §7): how the player gets from a chosen scenario to flying, and what the
+// A game mode (DESIGN.md §7): how the player gets from a chosen location to flying, and what the
 // mode adds while they fly. Free Fly flies straight away; Duel and Race meet the other player in
-// a lobby first. Registered in modes/registry.ts.
+// a lobby first, where the vehicle is picked. Registered in modes/registry.ts.
 
 import type { Flight, ModeRuntime } from "../flight.ts";
-import type { Scenario, Vehicle } from "../net/protocol.ts";
+import type { Location, Vehicle } from "../net/protocol.ts";
 import type { ModeId } from "../state/app.ts";
 
 export interface ModeContext {
-  scenario: Scenario;
+  location: Location;
   /** The vehicles the player may fly in this mode. */
   vehicles: Vehicle[];
   /** Start flying: the flight is created and handed to `attach`. */
@@ -20,13 +20,12 @@ export interface ModeDef {
   id: ModeId;
   name: string;
   desc: string;
-  /** Which of a scenario's vehicles the player can pick. */
+  /** Which vehicles the player can fly in this mode. */
   vehicles(all: Vehicle[]): Vehicle[];
-  /** Whether the vehicle step comes before the lobby (Free Fly, Race) or the lobby picks it
-   * (Duel, by role). */
-  pickVehicle: boolean;
+  /** Where this mode can be played (Race: where there is a course); default everywhere. */
+  places?(all: Location[]): Location[];
   /** Free Fly: fly at once. Duel and Race: draw the lobby into `host`; returns its teardown. */
-  lobby?(host: HTMLElement, ctx: ModeContext, vehicle: string | null): () => void;
+  lobby?(host: HTMLElement, ctx: ModeContext): () => void;
   /** Free Fly: the runtime for a flight. */
   run?(flight: Flight): ModeRuntime;
 }

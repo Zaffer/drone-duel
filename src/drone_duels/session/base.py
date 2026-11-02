@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -48,6 +48,18 @@ class Cancelled(Exception):  # noqa: N818 - a signal to stop, not an error
 
 class FirmwareError(RuntimeError):
     """The firmware did not start, or stopped. The message says what to look at."""
+
+
+def settings_files(files: Iterable[Path], video: VideoSystem) -> list[Path]:
+    """Each settings file, then its video system's beside it, if there is one: chupito.cli,
+    then chupito.analog.cli (the OSD for an analog picture) or chupito.digital.cli."""
+    out: list[Path] = []
+    for path in files:
+        out.append(path)
+        extra = path.with_name(f"{path.stem}.{video}{path.suffix}")
+        if extra.exists():
+            out.append(extra)
+    return out
 
 
 @dataclass(frozen=True)
@@ -211,6 +223,9 @@ class Firmware(ABC):
     feed it the pilot's sticks, and read what a ground station would."""
 
     name: str = "firmware"
+    resets_in_place: bool = False
+    """A reset moves only the physics back to the start and leaves this firmware running. Not
+    for ArduPilot: its EKF does not take the vehicle jumping, so it boots again."""
 
     def __init__(self, ctx: SpawnContext, events: Events, physics: PhysicsProcess) -> None:
         self.ctx = ctx
@@ -233,6 +248,11 @@ class Firmware(ABC):
     @abstractmethod
     def rc_lost(self) -> None:
         """The radio went quiet (the page is gone): behave as a receiver that lost its link."""
+
+    def set_video(self, video: VideoSystem) -> bool:
+        """Take another video system's OSD grid while running. False when this firmware takes it
+        only at boot: the session then respawns the vehicle."""
+        return False
 
     @abstractmethod
     def alive(self) -> bool: ...
@@ -258,6 +278,9 @@ class NoFirmware(Firmware):
 
     def rc_lost(self) -> None:
         pass
+
+    def set_video(self, video: VideoSystem) -> bool:
+        return True  # no OSD
 
     def alive(self) -> bool:
         return True

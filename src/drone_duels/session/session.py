@@ -1,4 +1,4 @@
-"""The session: one vehicle in one slot, spawned at a scenario's start pad (DESIGN.md §6.4).
+"""The session: one vehicle in one slot, spawned at a location's start pad (DESIGN.md §6.4).
 
 Commands (start, switch, reset, destroy, throw, stop) run one at a time on the session's own
 thread, in order. A new start or switch cancels a spawn still in progress. The pilot's sticks,
@@ -52,7 +52,7 @@ def make_firmware(ctx: SpawnContext, events: Events, physics: PhysicsProcess) ->
 @dataclass
 class _Command:
     action: str
-    scenario: str | None = None
+    location: str | None = None
     vehicle: str | None = None
     pad: int = 0
     reason: str = ""
@@ -75,7 +75,7 @@ class Session:
         self.firmware_factory = firmware_factory
         self.state: SessionState = "idle"
         self.step = ""
-        self.scenario: str | None = None
+        self.location: str | None = None
         self.vehicle: str | None = None
         self.pad = 0
         self.video: VideoSystem = "analog"
@@ -113,13 +113,13 @@ class Session:
     def command(
         self,
         action: str,
-        scenario: str | None = None,
+        location: str | None = None,
         vehicle: str | None = None,
         pad: int = 0,
     ) -> None:
         if action in ("start", "switch", "stop"):
             self._cancel.set()  # overtake a spawn in progress
-        self._commands.put(_Command(action, scenario, vehicle, pad))
+        self._commands.put(_Command(action, location, vehicle, pad))
 
     def send_rc(self, us: Sequence[int]) -> None:
         self._last_rc = time.monotonic()
@@ -135,15 +135,18 @@ class Session:
     def set_wind(self, wind: Wind, gust_now: bool = False) -> None:
         self.wind = wind
         if self._physics:
-            self._physics.send({"t": "wind", **wind.model_dump(), "gust_now": gust_now})
+            self._physics.send({"t": "wind", "wind": wind.model_dump(), "gust_now": gust_now})
 
     def set_video(self, system: VideoSystem) -> None:
-        """The OSD grid follows the video system, and the firmware takes it only at boot, so a
-        flying vehicle respawns at its start (DESIGN.md §10)."""
+        """The OSD grid follows the video system: in flight where the firmware can (ArduPilot),
+        else the vehicle respawns at its start, the firmware taking it at boot (DESIGN.md §10)."""
         if system == self.video:
             return
         self.video = system
-        if self.vehicle and self.state in ("ready", "destroyed", "failed"):
+        firmware = self._firmware
+        if self.state == "ready" and firmware is not None and firmware.set_video(system):
+            self._status()
+        elif self.vehicle and self.state in ("ready", "destroyed", "failed"):
             self.command("switch", vehicle=self.vehicle)
         else:
             self._status()
@@ -157,7 +160,7 @@ class Session:
         return {
             "ch": "status",
             "state": self.state,
-            "scenario": self.scenario,
+            "location": self.location,
             "vehicle": self.vehicle,
             "pad": self.pad,
             "step": self.step,
@@ -181,23 +184,28 @@ class Session:
 
     def _do(self, cmd: _Command) -> None:
         if cmd.action == "start":
-            scenario = self.content.scenario(cmd.scenario or "")
-            vehicle = cmd.vehicle or scenario.default_vehicle
-            if vehicle not in scenario.vehicles:
-                raise ValueError(f"{scenario.id} does not offer {vehicle}")
-            self.scenario, self.pad = scenario.id, cmd.pad
-            self.wind = self.content.locations[scenario.location].wind
+            location = self.content.location(cmd.location or "")
+            vehicle = self.content.vehicle(cmd.vehicle or "").id
+            self.location, self.pad = location.id, cmd.pad
+            self.wind = location.wind
             self._spawn(vehicle)
         elif cmd.action == "switch":
-            if self.scenario is None:
-                raise ValueError("no scenario started")
-            vehicle = cmd.vehicle or self.vehicle
-            scenario = self.content.scenario(self.scenario)
-            if vehicle not in scenario.vehicles:
-                raise ValueError(f"{scenario.id} does not offer {vehicle}")
-            self._spawn(vehicle)
+            if self.location is None:
+                raise ValueError("nothing started")
+            self._spawn(self.content.vehicle(cmd.vehicle or self.vehicle or "").id)
         elif cmd.action == "reset":
-            if self.vehicle is not None:
+            firmware, physics = self._firmware, self._physics
+            if (
+                self.state == "ready"
+                and firmware is not None
+                and firmware.resets_in_place
+                and physics is not None
+            ):
+                physics.send({"t": "reset"})
+                # Still ready, but said again: a page waiting on the reset (a race back on its
+                # grid) hears that it is done.
+                self._status()
+            elif self.vehicle is not None:
                 self._spawn(self.vehicle)
         elif cmd.action == "destroy":
             self._teardown()
@@ -211,7 +219,7 @@ class Session:
                 self._fail(cmd.reason)
         elif cmd.action == "stop":
             self._teardown()
-            self.state, self.step, self.scenario, self.vehicle = "idle", "", None, None
+            self.state, self.step, self.location, self.vehicle = "idle", "", None, None
             self.origin = None
             self._status()
 
@@ -219,9 +227,8 @@ class Session:
         self._teardown()
         self._cancel = threading.Event()
         cancel = self._cancel
-        assert self.scenario is not None
-        scenario = self.content.scenario(self.scenario)
-        location = self.content.locations[scenario.location]
+        assert self.location is not None
+        location = self.content.location(self.location)
         vehicle: Vehicle = self.content.vehicle(vehicle_id)
         pad = location.pads[min(self.pad, len(location.pads) - 1)]
         self.vehicle = vehicle_id

@@ -12,15 +12,22 @@ have it), from the wind at 20 ft (6.1 m), W20:
     span): about x, the spanwise slope of w, a process of its own; about y and z, how w and v
     change along the flight path, met as the wing flies on, -(s / V) w and (s / V) v, each through
     1 / (1 + (4b / πV) s) (y) and 1 / (1 + (3b / πV) s) (z);
-  - gusts on top, as a weather report gives them: now and then the wind rises along its own
-    direction (within 30°) by up to `gusts` and falls back, in 8785C's 1 - cos shape, over about
-    3 s (the WMO's gust is a 3 s mean).
+  - the turbulence's velocity as the airframe feels it (`felt`): averaged over its span, through
+    1 / (1 + (4b / πV) s), 8785C's own form for the span's averaging (its q filter). 8785C's
+    spectra are a point's, and the physics steps at 1 kHz: unfiltered, eddies far smaller than
+    the wing shook it at tens of Hz, a buzz no wing of this size feels;
+  - `scale` stretches the scale lengths (larger, slower and smoother air; 1 is 8785C's);
+  - gusts on top, as a weather report gives them: now and then (every `gust_every` s on
+    average) the wind rises along its own direction (within 30°) by up to `gusts` and falls
+    back, in 8785C's 1 - cos shape, over about 3 s (the WMO's gust is a 3 s mean).
 Each filter is stepped exactly for its time constant, so the variances hold at any airspeed and
 step (tests/test_physics_wing.py).
 """
 
 import math
 import random
+from collections.abc import Mapping
+from typing import Any
 
 from drone_duels.physics.core.rigidbody import Quat, Vec, add, scale, sub, unrotate
 
@@ -43,7 +50,8 @@ GUST_LEAST = 0.4
 
 class Weather:
     """The wind of `speed` m/s at 20 ft from `from_deg` (true), its MIL-F-8785C turbulence times
-    `turbulence`, and gusts up to `gusts` m/s above it, met by a wing of `span` m.
+    `turbulence` with scale lengths times `scale`, and gusts up to `gusts` m/s above it every
+    `gust_every` s or so, met by a wing of `span` m.
 
     `step` advances it; then `wind` is the air's velocity at the wing (NED, m/s), and `rates` the
     turbulence's rotation in the body frame, rad/s: the aircraft's rates through the air are its
@@ -56,6 +64,8 @@ class Weather:
         gusts: float = 0.0,
         span: float = 1.0,
         turbulence: float = 1.0,
+        scale: float = 1.0,
+        gust_every: float = GUST_EVERY,
         seed: int | None = None,
     ) -> None:
         self.speed = speed
@@ -63,17 +73,23 @@ class Weather:
         self.gusts = gusts
         self.span = span
         self.turbulence = turbulence
+        self.scale = scale
+        self.gust_every = gust_every
         self.rng = random.Random(seed)
         self.wind: Vec = (0.0, 0.0, 0.0)
         self.rates: Vec = (0.0, 0.0, 0.0)
         self.gust: Vec = (0.0, 0.0, 0.0)
         self.eddies: Vec = (0.0, 0.0, 0.0)
-        """The turbulence alone, NED, m/s."""
+        """The turbulence at a point, 8785C's, NED, m/s."""
+        self.felt: Vec = (0.0, 0.0, 0.0)
+        """The turbulence over the span, as the airframe feels it, NED, m/s."""
+        self._gust_next: float | None = None
+        """A gust asked for now (`gust_now`), m/s above the wind."""
         self._u = 0.0
         self._v = (0.0, 0.0)
         self._w = (0.0, 0.0)
         self._p = 0.0
-        self._gust_in = self.rng.expovariate(1 / GUST_EVERY)
+        self._gust_in = self.rng.expovariate(1 / gust_every)
         self._gust: tuple[float, float, Vec] | None = None
         """The gust under way: for how long so far, how long in all, its peak (NED)."""
 
@@ -101,8 +117,22 @@ class Weather:
             before = self.eddies
             self.eddies = self._turbulence(dt, h, sigma_w, airspeed, along, across)
             self.rates = self._rotation(dt, h, sigma_w, airspeed, attitude, before)
+            e = math.exp(-dt * math.pi * airspeed / (4 * self.span))
+            self.felt = add(scale(self.felt, e), scale(self.eddies, 1 - e))
+        else:
+            self.eddies = self.felt = self.rates = (0.0, 0.0, 0.0)
         self.gust = self._gusts(dt, height)
-        self.wind = add(add(mean, self.eddies), self.gust)
+        self.wind = add(add(mean, self.felt), self.gust)
+
+    def reschedule(self, gust_every: float) -> None:
+        """Gusts every `gust_every` s on average from now: a shorter wait comes sooner."""
+        self.gust_every = gust_every
+        self._gust_in = min(self._gust_in, self.rng.expovariate(1 / gust_every))
+
+    def gust_now(self, peak: float) -> None:
+        """A gust of up to `peak` m/s starts at the next step (the one under way ends)."""
+        self._gust = None
+        self._gust_next = peak
 
     def _turbulence(
         self, dt: float, h: float, sigma_w: float, airspeed: float, along: Vec, across: Vec
@@ -110,10 +140,10 @@ class Weather:
         """The turbulence's velocity, NED, `h` ft above the ground."""
         k = 0.177 + 0.000823 * h
         sigma_u = sigma_w / k**0.4
-        long_scale = h / k**1.2 * FOOT
+        long_scale = h / k**1.2 * FOOT * self.scale
         self._u = self._lag(self._u, long_scale / airspeed, dt)
         self._v = self._lag2(self._v, long_scale / airspeed, dt)
-        self._w = self._lag2(self._w, h * FOOT / airspeed, dt)
+        self._w = self._lag2(self._w, h * FOOT * self.scale / airspeed, dt)
         u = sigma_u * self._u
         v = sigma_u * _shaped(self._v)
         w = sigma_w * _shaped(self._w)
@@ -136,7 +166,7 @@ class Weather:
         """The turbulence's rotation, body frame, the turbulence having been `before` a step
         ago. σ_p is 8785C's spectrum of p integrated: σ_w² 0.1 π² (π L_w / 4b)^⅓ / (b L_w)."""
         b = self.span
-        long_w = h * FOOT
+        long_w = h * FOOT * self.scale
         sigma_p = sigma_w * math.sqrt(
             0.1 * math.pi**2 * (math.pi * long_w / (4 * b)) ** (1 / 3) / (b * long_w)
         )
@@ -150,24 +180,27 @@ class Weather:
         return sigma_p * self._p, q, r
 
     def _gusts(self, dt: float, height: float) -> Vec:
-        if self.gusts <= 0:
+        if self.gusts <= 0 and self._gust is None and self._gust_next is None:
             return (0.0, 0.0, 0.0)
         if self._gust is None:
             self._gust_in -= dt
-            if self._gust_in > 0:
+            if self._gust_in > 0 and self._gust_next is None:
                 return (0.0, 0.0, 0.0)
             if self.speed > 0:
                 heading = math.radians(self.from_deg + 180)
                 heading += self.rng.uniform(-GUST_SPREAD, GUST_SPREAD)
             else:
                 heading = self.rng.uniform(-math.pi, math.pi)
-            peak = self.gusts * self.rng.uniform(GUST_LEAST, 1.0)
+            if self._gust_next is not None:
+                peak, self._gust_next = self._gust_next, None
+            else:
+                peak = self.gusts * self.rng.uniform(GUST_LEAST, 1.0)
             self._gust = (
                 0.0,
                 self.rng.uniform(*GUST_TIME),
                 (peak * math.cos(heading), peak * math.sin(heading), 0.0),
             )
-            self._gust_in = self.rng.expovariate(1 / GUST_EVERY)
+            self._gust_in = self.rng.expovariate(1 / self.gust_every)
         t, duration, peak = self._gust
         t += dt
         if t >= duration:
@@ -183,46 +216,55 @@ def _shaped(z: tuple[float, float]) -> float:
     return (z[1] + math.sqrt(3) * (z[0] - z[1])) / math.sqrt(2)
 
 
-TURBULENCE_SCALE = {"none": 0.0, "light": 1.0, "moderate": 2.0, "severe": 3.0}
-"""The game's turbulence levels as multiples of MIL-F-8785C's σ_w = 0.1 W20 (Weather's
-`turbulence`): light is the standard's own, moderate and severe two and three times it, as its
-15, 30 and 45 kt W20 are to one another."""
-GUST_FRACTION = 0.5
-"""Gusts on: they rise up to this much of the mean wind above it..."""
+CALM = {
+    "speed_ms": 0.0,
+    "from_deg": 0.0,
+    "turbulence": 1.0,
+    "eddy_scale": 1.0,
+    "gust_factor": 1.0,
+    "gust_every_s": GUST_EVERY,
+}
+"""The game's wind settings (content.schema.Wind; the Wind options tab) for a key left out:
+still air, and MIL-F-8785C's turbulence for whatever wind is set."""
+GUST_NOW_LEAST = 0.5
+"""A gust asked for (G) rises at least this share of the mean wind above it..."""
 GUST_LEAST_MS = 2.0
 """...and at least this much, so a light wind still gusts."""
 
 
-def gust_peak(speed: float, gusts: bool) -> float:
-    """The `gusts` (m/s) a Weather gets for the game's gusts switch at mean wind `speed`."""
-    return max(GUST_FRACTION * speed, GUST_LEAST_MS) if gusts else 0.0
+def gust_peak(speed: float, gust_factor: float) -> float:
+    """The `gusts` (m/s above the mean) a Weather gets for a gust factor (the strongest gust
+    over the mean wind, as a weather report's) at mean wind `speed`."""
+    return max(0.0, gust_factor - 1.0) * speed
 
 
 def from_settings(
-    speed_ms: float,
-    from_deg: float,
-    turbulence: str,
-    gusts: bool,
-    span: float = 1.0,
-    seed: int | None = None,
+    wind: Mapping[str, Any], span: float = 1.0, seed: int | None = None
 ) -> Weather:
-    """A Weather from the game's wind settings (content.schema.Wind, the Wind options tab)."""
+    """A Weather from the game's wind settings (content.schema.Wind, as a dict)."""
+    w = {**CALM, **wind}
     return Weather(
-        speed=speed_ms,
-        from_deg=from_deg,
-        gusts=gust_peak(speed_ms, gusts),
+        speed=float(w["speed_ms"]),
+        from_deg=float(w["from_deg"]),
+        gusts=gust_peak(float(w["speed_ms"]), float(w["gust_factor"])),
         span=span,
-        turbulence=TURBULENCE_SCALE[turbulence],
+        turbulence=float(w["turbulence"]),
+        scale=float(w["eddy_scale"]),
+        gust_every=float(w["gust_every_s"]),
         seed=seed,
     )
 
 
-def update(weather: Weather, speed_ms: float, from_deg: float, turbulence: str, gusts: bool,
-           gust_now: bool = False) -> None:
+def update(weather: Weather, wind: Mapping[str, Any], gust_now: bool = False) -> None:
     """Change `weather` live, keeping its turbulence's state; `gust_now` starts a gust at once."""
-    weather.speed = speed_ms
-    weather.from_deg = from_deg
-    weather.turbulence = TURBULENCE_SCALE[turbulence]
-    weather.gusts = gust_peak(speed_ms, gusts or gust_now)
+    w = {**CALM, **wind}
+    speed = float(w["speed_ms"])
+    weather.speed = speed
+    weather.from_deg = float(w["from_deg"])
+    weather.turbulence = float(w["turbulence"])
+    weather.scale = float(w["eddy_scale"])
+    weather.gusts = gust_peak(speed, float(w["gust_factor"]))
+    if float(w["gust_every_s"]) != weather.gust_every:
+        weather.reschedule(float(w["gust_every_s"]))
     if gust_now:
-        weather._gust_in = 0.0  # noqa: SLF001 - the next step starts one
+        weather.gust_now(max(weather.gusts, GUST_NOW_LEAST * speed, GUST_LEAST_MS))

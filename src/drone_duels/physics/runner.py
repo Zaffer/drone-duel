@@ -63,8 +63,9 @@ class Backend(Protocol):
         """The ground's height above sea level at a point, from the map."""
         ...
 
-    def wind(self, speed_ms: float, from_deg: float, turbulence: str, gusts: bool,
-             gust_now: bool) -> None: ...
+    def wind(self, wind: dict[str, Any], gust_now: bool) -> None:
+        """The wind now: content's Wind, as a dict; `gust_now` starts a gust at once."""
+        ...
 
     def reset(self) -> None:
         """Back to the start, at rest."""
@@ -137,8 +138,7 @@ def run(backend: Backend, slot: int) -> None:
                 elif kind == "ground":
                     backend.ground(msg["lat"], msg["lon"], msg["alt"])
                 elif kind == "wind":
-                    backend.wind(msg["speed_ms"], msg["from_deg"], msg["turbulence"],
-                                 msg["gusts"], msg.get("gust_now", False))
+                    backend.wind(msg["wind"], bool(msg.get("gust_now", False)))
                 elif kind == "reset":
                     backend.reset()
                 elif kind == "throw":

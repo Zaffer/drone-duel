@@ -1,4 +1,4 @@
-// A flight: one scenario flown, from the menu's Fly to Quit (DESIGN.md §6.4, §11). It asks the
+// A flight: one place flown, from the menu's Fly to Quit (DESIGN.md §6.4, §11). It asks the
 // server for the vehicle, measures where the map's ground meets the sim's, draws the vehicle,
 // runs the view's camera, the camera feed, the HUD's minimap and dials, and the dynamics overlay
 // each frame, sends the pilot's sticks to the firmware and the map's ground to the physics.
@@ -19,7 +19,6 @@ import {
   vehicle as currentVehicle,
   dynamicsOn,
   paused,
-  scenario,
   toast,
   vehicleId,
   view,
@@ -27,7 +26,7 @@ import {
 } from "./state/app.ts";
 import { toUs } from "./state/input.ts";
 import { prefs, type ViewId } from "./state/prefs.ts";
-import { phase, status } from "./state/session.ts";
+import { phase, sessionStarting, status } from "./state/session.ts";
 import { every, frames } from "./streams/time.ts";
 import { makeBody } from "./vehicles/make.ts";
 import { truckControls } from "./vehicles/truck/controls.ts";
@@ -124,16 +123,19 @@ export class Flight {
 
   private dynamicsData: () => Record<string, unknown> | null;
 
-  /** Start the scenario with a vehicle on a pad (0 player 1, 1 player 2). */
-  start(scenarioId: string, vehicle: string, pad = 0): void {
+  /** Start a vehicle at a location, on a pad (0 player 1, 1 player 2). */
+  start(locationId: string, vehicle: string, pad = 0): void {
     vehicleId(vehicle);
     link.send({ ch: "video", system: prefs().video.system });
-    link.send({ ch: "session", action: "start", scenario: scenarioId, vehicle, pad });
+    link.send({ ch: "session", action: "start", location: locationId, vehicle, pad });
+    sessionStarting(locationId, vehicle, pad);
   }
 
   switchVehicle(vehicle: string): void {
     vehicleId(vehicle);
-    link.send({ ch: "session", action: "switch", scenario: null, vehicle, pad: status().pad });
+    const s = status();
+    link.send({ ch: "session", action: "switch", location: null, vehicle, pad: s.pad });
+    sessionStarting(s.location, vehicle, s.pad);
   }
 
   reset(): void {
@@ -143,19 +145,19 @@ export class Flight {
       link.send({
         ch: "session",
         action: "reset",
-        scenario: null,
+        location: null,
         vehicle: null,
         pad: status().pad,
       });
   }
 
   throw(): void {
-    link.send({ ch: "session", action: "throw", scenario: null, vehicle: null, pad: 0 });
+    link.send({ ch: "session", action: "throw", location: null, vehicle: null, pad: 0 });
   }
 
   /** The vehicle is destroyed (a crash or a strike in a duel): its physics stops dead. */
   destroy(): void {
-    link.send({ ch: "session", action: "destroy", scenario: null, vehicle: null, pad: 0 });
+    link.send({ ch: "session", action: "destroy", location: null, vehicle: null, pad: 0 });
   }
 
   pose(now = performance.now()): Pose | null {
@@ -179,7 +181,7 @@ export class Flight {
     sounds.stopMotor();
     this.world.mouseCamera = true;
     link.send({ ch: "dynamics", on: false });
-    link.send({ ch: "session", action: "stop", scenario: null, vehicle: null, pad: 0 });
+    link.send({ ch: "session", action: "stop", location: null, vehicle: null, pad: 0 });
   }
 
   // The vehicle's body follows the session: a new one for a new vehicle, once the pad's ground
@@ -188,7 +190,7 @@ export class Flight {
   private onStatus(): void {
     const s = status();
     if (!s.vehicle || !s.origin || s.state === "idle") return;
-    const key = `${s.scenario}/${s.vehicle}/${s.pad}`;
+    const key = `${s.location}/${s.vehicle}/${s.pad}`;
     if (key === this.bodyKey) return;
     this.bodyKey = key;
     const spec = content()?.vehicles[s.vehicle];
@@ -212,7 +214,7 @@ export class Flight {
     this.body(null);
     this.operator?.dispose();
     this.operator = null;
-    // Where the map's ground meets the sim's: the scenario's pad.
+    // Where the map's ground meets the sim's: the location's pad.
     const h = await this.world.groundHeightSettled(origin[0], origin[1]);
     if (this.bodyKey !== key || this.abort.signal.aborted) return;
     mapOffset(h - origin[2]);
@@ -280,7 +282,6 @@ export class Flight {
   private frame(now: number): void {
     const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
     this.lastFrame = now;
-    radio.publish();
     const body = this.body();
     body?.draw(now);
     const pose = body?.poseAt(now) ?? null;
@@ -326,14 +327,17 @@ export class Flight {
   private sticks(ch: number[]): void {
     const v = currentVehicle();
     const body = this.body();
-    if (!v || paused()) return;
+    if (!v) return;
     if (body instanceof Truck) {
+      if (paused()) return;
       const pads = navigator
         .getGamepads()
         .filter((p): p is Gamepad => !!p && p.mapping === "standard");
       body.setControls(truckControls(ch, radio.held, pads[0] ?? null));
       return;
     }
+    // Pausing cannot stop the firmware, so the radio keeps flying it: going quiet here would be a
+    // lost link, and the firmware's failsafe would disarm it.
     if (v.firmware.kind === "none" || status().state !== "ready") return;
     link.send({ ch: "rc", seq: ++this.seq, us: toFirmware(ch, v) as RcMsg["us"] });
     // A hand-launched wing is thrown on its launch switch's flick up.
@@ -375,14 +379,5 @@ export class Flight {
 export function sendWind(gustNow = false): void {
   const w = wind();
   if (!w) return;
-  link.send({
-    ch: "wind",
-    speed_ms: w.speed_ms,
-    from_deg: w.from_deg,
-    turbulence: w.turbulence,
-    gusts: w.gusts,
-    gust_now: gustNow,
-  });
+  link.send({ ch: "wind", wind: w, gust_now: gustNow });
 }
-
-export { scenario };

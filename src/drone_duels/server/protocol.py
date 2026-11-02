@@ -16,9 +16,8 @@ from drone_duels.content.schema import (
     Controller,
     Course,
     Location,
-    Scenario,
-    Turbulence,
     Vehicle,
+    Wind,
 )
 
 
@@ -32,12 +31,12 @@ VideoSystem = Literal["analog", "digital"]
 
 
 class SessionMsg(Msg):
-    """Start a scenario with a vehicle, switch vehicle (back at the start), reset, destroy (a
+    """Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a
     crash: the physics stops dead), throw (a hand-launched wing), or stop."""
 
     ch: Literal["session"] = "session"
     action: Literal["start", "switch", "reset", "destroy", "throw", "stop"]
-    scenario: str | None = None
+    location: str | None = None
     vehicle: str | None = None
     pad: int = Field(default=0, ge=0, description="the start pad: 0 player 1, 1 player 2")
 
@@ -60,11 +59,10 @@ class GroundMsg(Msg):
 
 
 class WindMsg(Msg):
+    """The wind now (the Wind options tab); `gust_now` starts a gust at once (G)."""
+
     ch: Literal["wind"] = "wind"
-    speed_ms: float = Field(ge=0, le=30)
-    from_deg: float = Field(ge=0, lt=360)
-    turbulence: Turbulence
-    gusts: bool
+    wind: Wind
     gust_now: bool = False
 
 
@@ -102,7 +100,7 @@ SessionState = Literal["idle", "starting", "ready", "failed", "destroyed"]
 class StatusMsg(Msg):
     ch: Literal["status"] = "status"
     state: SessionState
-    scenario: str | None = None
+    location: str | None = None
     vehicle: str | None = None
     pad: int = 0
     step: str = Field(default="", description="what starting is doing now, or why it failed")
@@ -208,7 +206,6 @@ ServerMsg = Annotated[
 
 class ContentMsg(Msg):
     locations: dict[str, Location]
-    scenarios: dict[str, Scenario]
     vehicles: dict[str, Vehicle]
     courses: dict[str, Course]
     controllers: dict[str, Controller]

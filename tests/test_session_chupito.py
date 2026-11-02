@@ -118,7 +118,7 @@ def _flying(video: VideoSystem) -> Iterator[tuple[Session, Recorded, Radio, floa
     session.start()
     radio: Radio | None = None
     try:
-        session.command("start", scenario="freefly-toronto", vehicle="chupito", pad=0)
+        session.command("start", location="billy-bishop", vehicle="chupito", pad=0)
         _wait(
             lambda: session.state in ("ready", "failed"),
             90,

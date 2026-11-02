@@ -17,11 +17,13 @@ Sources
           numbers, 1 to 3 x 10^5, from laminar separation bubbles (Mueller; Selig's low
           Reynolds number aerofoil tests: loops of 1 to 4 deg).
   LOG     One pilot's INAV 8.0.1 blackbox log of a 6S Chupito (RCGroups, Nov 2025), 6.9 min, no
-          pitot: full-elevon rolls at 600-715 deg/s from 22 to 46 m/s; full pitch command at about
-          29 m/s pulling a CL of 0.66 (median) at 7 g; about 42 m/s level at full throttle on
-          540 W. Its cruise, about 29 m/s at 45 % throttle on 127 W, is beyond a stock 5x3 prop's
-          pitch speed at that throttle: a higher pitch prop, or its GPS-derived airspeed reading
-          high. Not used.
+          pitot: full-elevon rolls at 600-715 deg/s from 22 to 46 m/s, the servo 585 µs off its
+          centre; full pitch command at about 29 m/s, 203 µs of pitch on the servo, pulling 7.3 g
+          (median) at a CL of 0.66; moderate pulls at 1.0-1.4 deg of elevon a g; the trim flat
+          within 0.3 deg from 20 to 36 m/s; about 42 m/s level at full throttle on 540 W; its
+          launch at 65 % throttle drawing 16 A slow and 14 A at 25 m/s. Its cruise, about 29 m/s
+          at 45 % throttle on 127 W, is beyond a stock 5x3 prop's pitch speed at that throttle:
+          a higher pitch prop, or its GPS-derived airspeed reading high. Not used.
   PACK    The pack flown: Tattu's R-Line V6.0 1300 mAh 6S 160C, a standard LiPo (22.2 V
           nominal, 4.2 V a cell full), 197-203 g by its listings. Tattu gives no resistance.
   EST     Estimated, and to be measured.
@@ -30,22 +32,35 @@ Calibrated (tests/test_physics_wing.py holds the model to these)
   the prop's static coefficients and no-thrust advance ratio, the motor's resistance
                 LOG's 42 m/s level on 540 W at full throttle (TBS's listing: 160 km/h); TBS's
                 cruise at its 35 % cruise throttle, 55 km/h in its manual, 70 km/h in its
-                listing (the model: about 70); a static thrust near 1.2 kgf
+                listing (the model: about 70). LOG's launch currents then agree (tests); its
+                static thrust, about 1.65 kgf on 43 A, nothing measures
   the elevons' effectiveness, the wing's twist under them (FLEX_PA)
-                LOG's steady full-elevon rolls, 600 deg/s at 23 m/s and 700 at 45 m/s, fitted
-                in the full nonlinear model: 1.05 times a plain flap's thin-aerofoil effectiveness.
-                LOG's pulls then agree (tests), with no fitting of their own
+                LOG's steady full-elevon rolls, 650 deg/s at 23 m/s and 700 at 45 m/s, at the
+                servo travel logged, fitted in the full nonlinear model: a plain flap's
+                thin-aerofoil effectiveness, halved by the twist at 34 m/s
+  the centre of mass
+                LOG's pulls, through the elevons so fitted: 7.3 g on 203 µs at 29 m/s, and
+                1.35 deg a g (1.0-1.4): a static margin of 3.1 %, 21 mm behind the leading edge
+                beside the body. TBS's manual marks it at that edge, in a picture, so a little
+                ahead; their builds' differ, and the log's pulls are measured
   zero lift, cm0
                 CL 0.09 at zero angle of attack (the X8's, a reflexed foam wing), trimming at
                 28 m/s with the elevons neutral (LOG)
-  the stall, the centre of mass
-                TBS's 35 km/h, a stall the elevons hold (13 deg up): CL max 0.75 so trimmed
+  the stall     TBS's 35 km/h through the section's stall angle (12.5 deg): CL max 0.74, the
+                elevons holding it with 5 deg up
 
 Guesses (EST here and where they live), most felt first. Of how it stalls, nothing is known
 beyond TBS's 35 km/h and that it is "stable at low speeds and forgiving in stalls" (TBS's
 dealers); no pilot's account of a wing drop, tip stall or bobbing has been found, nor a log.
   inertia       summed from parts (INERTIA): how fast it starts and stops rolling and pitching,
-                the pitch bounce on letting go. A swing test would measure it.
+                the pitch bounce on letting go. A swing test would measure it. LOG's pitch
+                bounces (23 rad/s at 26 m/s, the model's 17) were flown with INAV's rate loop
+                closed, so they don't measure the airframe's: with that loop around this model,
+                they would.
+  the trim against speed
+                LOG's is flat within 0.3 deg from 20 to 36 m/s; the model's moves 0.7 deg from
+                22 to 28 and 1.8 to 40. LOG's airspeed is GPS less a wind estimate, whose noise
+                flattens a slope, so how flat the real one is is uncertain
   the stall's shape
                 how sharply each strip stalls (30 /rad, Beard and McLain's generic value); that
                 the stall starts at the root and spreads out (no washout or stall spread is
@@ -57,7 +72,7 @@ dealers); no pilot's account of a wing drop, tip stall or bobbing has been found
                 stall's bobbing), the hysteresis (2 deg, in a 1 to 4 range), the lag (3.75, a
                 two-dimensional section's), DYNAMIC_STALL_MAX (10 deg, strips.py): how high a
                 quick pull peaks, how long a stall lingers once the stick is eased.
-  the centre of mass's height, and its x but through TBS's stall speed: the static margin
+  the centre of mass's height
   torque roll   LOG's wing rolls right with power, so the motor is taken to turn the way that
                 does; but LOG's needs 15 times the elevon the motor's torque explains, and the
                 rest, its cause unknown, is left out (see POWER_TRAIN)
@@ -71,7 +86,8 @@ dealers); no pilot's account of a wing drop, tip stall or bobbing has been found
                 floats, how hard a low tip is pushed up
   the gusts     how often (10 s), how long (2 to 5 s), how far off the wind (30 deg), how weak
                 (40 % of the strongest, weather.py); the turbulence's least airspeed (2 m/s).
-                The turbulence itself is MIL-F-8785C's, made for full-size aircraft
+                The turbulence itself is MIL-F-8785C's, made for full-size aircraft, felt
+                through its own span filter (weather.py)
   the rest      the servo's speed (600 deg/s), the belly's height, what counts as flying into
                 something, a landing's limits and the grass's friction (aircraft.py, GROUND);
                 the throw (LAUNCH); the section's profile drag (the rest of CD0 goes to the
@@ -118,18 +134,17 @@ PLANFORM = Planform(
     ),
     cuts=(0.0, 0.057, 0.12, 0.2, 0.275, 0.34, 0.40),  # strip edges at the elevons' ends
 )
-CENTRE_OF_MASS = (-0.012, 0.0)
-"""GLB x, and its height in the wing's plane (EST), m. Calibrated: TBS's stall speed, which puts
-it 10 mm behind the wing's leading edge beside the body, where TBS's manual marks it (in a
-picture): a static margin of 8.6 %."""
+CENTRE_OF_MASS = (-0.022, 0.0)
+"""GLB x, and its height in the wing's plane (EST), m. Calibrated: LOG's pulls (see the header),
+21 mm behind the wing's leading edge beside the body: a static margin of 3.1 %."""
 ELEVON = (0.057, 0.275, 0.045)  # GLB: inner and outer edge, chord, m
 
 ELEVON_MAX = math.radians(25)
 """Each elevon's deflection at full servo travel (500 µs). TBS's throws, 15 mm roll at 80 % and
 12 mm pitch at 60 % mix, both come to about 19 mm at full travel on a 45 mm elevon chord (GLB)."""
-ELEVON_EFFECTIVENESS = 1.05
+ELEVON_EFFECTIVENESS = 1.0
 """Times thin-aerofoil theory's plain flap: LOG's rolls (see the header)."""
-FLEX_PA = 997.0
+FLEX_PA = 700.0
 """LOG's rolls: the foam wing's twist halves the elevons' effect at this dynamic pressure."""
 
 SEPARATION_LAG = 3.75  # LIT: Goman and Khrabrov's τ1, in chord times
@@ -141,9 +156,9 @@ a few degrees: the gentle stall TBS describes."""
 SECTION = Section(
     lift_slope=0.9 * 2 * math.pi,  # LIT: a thick foam section's, 90 % of thin aerofoil's
     zero_lift=math.radians(-1.64),  # calibrated
-    cm0=0.0121,  # calibrated: the reflex
+    cm0=0.008,  # calibrated: the reflex, trimming at 28 m/s
     cd0=0.012,  # EST: the section's profile drag
-    alpha_stall=math.radians(15),  # calibrated: TBS's 35 km/h, CL max 0.75 held by the elevons
+    alpha_stall=math.radians(12.5),  # calibrated: TBS's 35 km/h, CL max 0.74
     alpha_stall_neg=math.radians(14),  # EST: 12 deg below zero lift, short of upright's 17
     stall_sharpness=30.0,  # Beard and McLain's typical value
     cd90=2.2 * (1 - 0.41 * (1 - math.exp(-17 / REFERENCE.aspect_ratio))),  # LIT: Lindenburg
@@ -232,7 +247,7 @@ POWER_TRAIN = PowerTrain(
     no_load_current=1.0,  # EST
     rotor_inertia=6.0e-6,  # EST: 5 in tri-blade and a 20xx bell
     prop_diameter=5 * 0.0254,  # TBS: 5x3x3
-    ct0=0.118,  # fitted: 12.7 N static
+    ct0=0.118,  # fitted: 16 N static on a full pack
     cp0=0.0651,  # fitted
     j_zero=0.661,  # fitted: about a 3.3 in pitch
     cells=6,  # TBS, PACK

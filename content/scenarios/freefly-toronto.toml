@@ -1,6 +1,0 @@
-name = "Free Fly: Toronto"
-blurb = "Fly or drive anywhere from Billy Bishop."
-mode = "freefly"
-location = "billy-bishop"
-vehicles = ["quad5", "chupito", "truck"]
-default_vehicle = "quad5"

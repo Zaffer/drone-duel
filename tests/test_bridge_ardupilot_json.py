@@ -109,8 +109,16 @@ class FakeModel:
     def step(self, dt: float, pwm: tuple[int, ...]) -> Fdm:
         self.t += dt
         self.steps.append((dt, pwm))
-        return Fdm(self.t, (0.0, 0.0, 0.0), (0.0, 0.0, -9.81), (0.0, 0.0, 0.0),
-                   (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 25.2, 0.5)
+        return Fdm(
+            self.t,
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, -9.81),
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+            25.2,
+            0.5,
+        )
 
     def reset(self) -> None:
         self.resets += 1

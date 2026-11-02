@@ -9,7 +9,7 @@ from drone_duels.content.store import CONTENT, ContentError, load
 
 def test_the_shipped_content_loads() -> None:
     c = load()
-    assert {"freefly-toronto", "duel-areaxo", "race-areaxo"} <= set(c.scenarios)
+    assert {"billy-bishop", "area-xo"} <= set(c.locations)
     assert {"quad5", "chupito", "truck"} <= set(c.vehicles)
     assert c.vehicles["quad5"].firmware.kind == "ardupilot-copter"
     assert c.vehicles["chupito"].firmware.kind == "inav"
@@ -36,15 +36,7 @@ def test_an_unknown_key_names_the_file_and_key(tmp_path: Path) -> None:
 
 def test_a_missing_reference_is_an_error(tmp_path: Path) -> None:
     root = _copy(tmp_path)
-    f = root / "scenarios" / "freefly-toronto.toml"
-    f.write_text(f.read_text().replace('"truck"]', '"tank"]'))
-    with pytest.raises(ContentError, match="no vehicle 'tank'"):
-        load(root)
-
-
-def test_a_race_needs_a_course(tmp_path: Path) -> None:
-    root = _copy(tmp_path)
-    f = root / "scenarios" / "race-areaxo.toml"
-    f.write_text(f.read_text().replace('course = "areaxo-loop"\n', ""))
-    with pytest.raises(ContentError, match="course"):
+    f = root / "courses" / "areaxo-loop.toml"
+    f.write_text(f.read_text().replace('location = "area-xo"', 'location = "atlantis"'))
+    with pytest.raises(ContentError, match="no location 'atlantis'"):
         load(root)

@@ -33,9 +33,10 @@ map is Esri imagery on Esri terrain. A Cesium ion token (`CESIUM_ION_TOKEN`) is 
 uv run duels              # serves the game on http://localhost:8600 and opens Chrome
 ```
 
-Main menu: **Free Fly**, **Duel**, **Race**, then a scenario (a place and its rules), then a
-vehicle. Duel and Race meet the other player in a room: one hosts and reads out the code, the
-other joins (WebRTC, peer to peer).
+Main menu: **Free Fly**, **Duel**, **Race**, then a place. Free Fly starts at once, in the
+vehicle you flew last; switch vehicles in flight from the pause menu's Vehicle tab. Duel and Race
+pick the vehicle in their lobby and meet the other player in a room: one hosts and reads out the
+code, the other joins (WebRTC, peer to peer).
 
 **Controllers.** A drone radio in USB joystick mode, through Chrome's Gamepad API or, when Chrome
 can't see all its axes, read by the server through Linux. Profiles for the BETAFPV LiteRadio 2,
@@ -51,7 +52,7 @@ in AUTO, and watch it in the Map view.
 
 ## Content
 
-Places, scenarios, vehicles, race courses and radio profiles are TOML files in `content/`; add a
+Places, vehicles, race courses and radio profiles are TOML files in `content/`; add a
 file to add one. Every key is checked, so a typo stops the game with its name.
 `content/courses/*.toml` lists each gate's position, height, yaw/pitch/roll and size.
 

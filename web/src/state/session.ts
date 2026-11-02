@@ -5,11 +5,12 @@
 import { computed, signal } from "alien-signals";
 import type { LogMsg, OsdMsg, PlanMsg, StatusMsg, TelemetryMsg } from "../net/protocol.ts";
 import { link } from "../net/server.ts";
+import { toast } from "./app.ts";
 
 const IDLE: StatusMsg = {
   ch: "status",
   state: "idle",
-  scenario: null,
+  location: null,
   vehicle: null,
   pad: 0,
   step: "",
@@ -29,6 +30,16 @@ export const ready = computed(() => status().state === "ready");
 
 const LOG_KEPT = 50;
 
+/** A new session asked for: until the server says otherwise it is starting, and the last one's
+ * "ready", telemetry, OSD and plan are not this one's (a race would count down while the new
+ * firmware boots). */
+export function sessionStarting(location: string | null, vehicle: string, pad: number): void {
+  status({ ...status(), state: "starting", step: "", location, vehicle, pad, origin: null });
+  telemetry(null);
+  osd(null);
+  plan(null);
+}
+
 /** Feed the signals from the server link. Once, at start. */
 export function wireSession(): void {
   link.on("status").subscribe((s) => {
@@ -43,5 +54,8 @@ export function wireSession(): void {
   link.on("osd").subscribe((o) => osd(o));
   link.on("plan").subscribe((p) => plan(p));
   link.on("physics").subscribe((p) => phase(p.phase));
-  link.on("log").subscribe((l) => log([...log().slice(-(LOG_KEPT - 1)), l]));
+  link.on("log").subscribe((l) => {
+    log([...log().slice(-(LOG_KEPT - 1)), l]);
+    if (l.source === "server" && l.level === "error") toast(l.text, "bad", 10000);
+  });
 }

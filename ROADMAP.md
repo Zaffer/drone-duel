@@ -18,7 +18,7 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 - **Bring back the drone swarm** from Synetic-Labs/airmetal-swarm, branch `airmetal` (strip the
   AirMetal branding): the leader-follower launcher, ArduPilot FOLLOW, the geofence upload, the
   Logitech switch panel, the terminal panel and `rehearse`. It returns as a mode ("Swarm") with
-  an AreaXO scenario, using the vehicle slots (DESIGN.md §3).
+  AreaXO as its place, using the vehicle slots (DESIGN.md §3).
 - Swarm strike in Duel: the pilot flies the swarm against the truck, as on `main`.
 
 ## Visualisation
@@ -35,12 +35,12 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 - Ghost of your best lap in a solo time trial.
 - More than two players; spectators.
 - More modes: tag, capture the flag, payload drop.
-- More scenarios and locations.
+- More locations.
 
 ## ArduPilot practice
 
 - In-game mission planner: draw waypoints and upload them over MAVLink.
-- Scenario scripts: failures to practise (GPS loss, failsafe, low battery, wind shear).
+- Failure scripts: failures to practise (GPS loss, failsafe, low battery, wind shear).
 - INAV missions over MSP, drawn like ArduPilot's.
 
 ## Controllers and platforms
@@ -65,6 +65,7 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 - Plans: send each item's params (`PlanItem`), so fence circles have their radius, and the
   mission's current item, so the Map view can tell flown, active and next legs apart.
 - Radio profiles for the TX15 and T8L are EdgeTX's and ELRS's defaults, untested on the real
-  radios; the LiteRadio 2's was checked through Linux.
+  radios; the LiteRadio 2's was checked in Chrome and through Linux. Chrome lists its CH5 and CH8
+  axes but never moves them, so the page flies it on the server's reading (`rc/evdev.py`).
 - A ghost's model is drawn without the silhouette for now (it broke Cesium's frustums when
   combined with a model loaded before its first pose).

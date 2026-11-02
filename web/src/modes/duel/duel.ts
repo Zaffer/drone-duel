@@ -40,7 +40,6 @@ export const duel: ModeDef = {
   id: "duel",
   name: "Duel",
   desc: "Strike the truck from the air, or drive it out of reach. Then swap.",
-  pickVehicle: false,
   vehicles: (all) => all,
   lobby(host, ctx) {
     return duelLobby(host, ctx);
@@ -195,7 +194,11 @@ function duelLobby(host: HTMLElement, ctx: ModeContext): () => void {
 
   render(
     host,
-    h("h2", null, `${ctx.scenario.name}: your aircraft for your turns as the pilot`),
+    h(
+      "h2",
+      null,
+      `${ctx.location.name.split(": ").at(-1)}: your aircraft for your turns as the pilot`,
+    ),
     h("div", { class: "cards" }, cards),
     h(
       "div",

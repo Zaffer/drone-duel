@@ -34,8 +34,13 @@ from drone_duels.server.protocol import POSE_FIELDS
 
 FIXTURES = Path(__file__).parent / "fixtures" / "skyflow"
 GOLDEN = ["rotorpy_base_no_aero", "rotorpy_aero_default_wind", "skydreamer_forces"]
-BLOCKS = {"xdot": slice(0, 3), "vdot": slice(3, 6), "qdot_wxyz": slice(6, 10),
-          "wdot": slice(10, 13), "Wdot": slice(13, 17)}
+BLOCKS = {
+    "xdot": slice(0, 3),
+    "vdot": slice(3, 6),
+    "qdot_wxyz": slice(6, 10),
+    "wdot": slice(10, 13),
+    "Wdot": slice(13, 17),
+}
 ORIGIN = (43.63093, -79.38945, 77.0)
 HZ = 1200
 DT = 1 / HZ
@@ -80,8 +85,12 @@ def test_statedot_matches_golden(name: str, golden_plants: dict[str, Plant]) -> 
         s, u = case_arrays(case)
         out = plant.statedot(s, u)
         for block in doc.get("compare", list(BLOCKS)):
-            check(out[BLOCKS[block]], np.asarray(case["expected"][block]), tol,
-                  f"{name} case {k} {block}")
+            check(
+                out[BLOCKS[block]],
+                np.asarray(case["expected"][block]),
+                tol,
+                f"{name} case {k} {block}",
+            )
 
 
 @pytest.mark.parametrize("name", GOLDEN)
@@ -97,8 +106,12 @@ def test_jitted_step_follows_golden_derivative(name: str, golden_plants: dict[st
         rate = (nxt - s) / h
         for block in doc.get("compare", list(BLOCKS)):
             expected = np.asarray(case["expected"][block])
-            check(rate[BLOCKS[block]], expected, max(1e-4, doc.get("tolerance", 0.0)),
-                  f"{name} case {k} {block}")
+            check(
+                rate[BLOCKS[block]],
+                expected,
+                max(1e-4, doc.get("tolerance", 0.0)),
+                f"{name} case {k} {block}",
+            )
 
 
 def test_racer5in_is_neurobems_identified_quad() -> None:
@@ -236,12 +249,12 @@ def test_full_throttle_climbs_and_motors_stop_at_1000(plant: Plant) -> None:
 
 
 def test_wind_blows_the_quad_downwind(plant: Plant) -> None:
-    from_north = {"speed_ms": 6.0, "from_deg": 0.0, "turbulence": "none", "gusts": False}
+    from_north = {"speed_ms": 6.0, "from_deg": 0.0, "turbulence": 0.0}
     model = airborne(plant, from_north)
     out = fly(model, [hover_pwm(model)] * 4, 2.0)[-1]
     assert out.velocity[0] < -0.5
     assert abs(out.velocity[1]) < 0.1 * abs(out.velocity[0])
-    from_west = {"speed_ms": 6.0, "from_deg": 270.0, "turbulence": "none", "gusts": False}
+    from_west = {"speed_ms": 6.0, "from_deg": 270.0, "turbulence": 0.0}
     model = airborne(plant, from_west)
     out = fly(model, [hover_pwm(model)] * 4, 2.0)[-1]
     assert out.velocity[1] > 0.5
@@ -285,7 +298,7 @@ def test_at_rest_on_the_ground_nothing_moves(plant: Plant, pwm: int) -> None:
 
 
 def test_at_rest_in_turbulence_barely_moves(plant: Plant) -> None:
-    wind = {"speed_ms": 3.0, "from_deg": 250.0, "turbulence": "light", "gusts": True}
+    wind = {"speed_ms": 3.0, "from_deg": 250.0, "turbulence": 1.0, "gust_factor": 1.5}
     model = QuadModel(plant.frame, ORIGIN, 0.0, wind, plant=plant, seed=3)
     outs = settle(model, 1000, 10.0)
     accel = np.array([o.accel for o in outs[HZ:]])

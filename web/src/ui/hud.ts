@@ -10,9 +10,9 @@ import { mountDials } from "../hud/dials.ts";
 import { link } from "../net/server.ts";
 import {
   dynamicsOn,
+  location,
   mode,
   paused,
-  scenario,
   toast,
   toasts,
   vehicle,
@@ -160,7 +160,7 @@ export function mountHud(
       const m = mode();
       modeSeg.el.replaceChildren(
         h("b", null, m ? MODE_NAMES[m] : ""),
-        h("span", null, ` · ${scenario()?.name.split(": ")[1] ?? ""}`),
+        h("span", null, ` · ${location()?.name.split(": ").at(-1) ?? ""}`),
       );
     }),
     effect(() => {
@@ -178,7 +178,7 @@ export function mountHud(
     effect(() => {
       const w = wind();
       windSeg.value.textContent = w
-        ? `${w.speed_ms.toFixed(0)} m/s ${COMPASS[Math.round(w.from_deg / 45) % 8]}${w.gusts ? " gusty" : ""}`
+        ? `${w.speed_ms.toFixed(0)} m/s ${COMPASS[Math.round(w.from_deg / 45) % 8]}${w.gust_factor > 1 ? " gusty" : ""}`
         : "calm";
     }),
     effect(() => {

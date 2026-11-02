@@ -60,9 +60,8 @@ class QuadBackend:
     def ground(self, lat: float, lon: float, alt: float) -> None:
         self.model.set_ground(alt)
 
-    def wind(self, speed_ms: float, from_deg: float, turbulence: str, gusts: bool,
-             gust_now: bool) -> None:
-        self.model.set_wind(speed_ms, from_deg, turbulence, gusts, gust_now)
+    def wind(self, wind: dict[str, Any], gust_now: bool) -> None:
+        self.model.set_wind(wind, gust_now)
 
     def reset(self) -> None:
         self.model.reset()

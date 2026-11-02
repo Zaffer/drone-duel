@@ -4,11 +4,14 @@ OSD and its telemetry, as the session's Firmware (DESIGN.md §6.2, §6.4).
 ArduCopter flies `--model JSON` against our physics (drone_duels.physics.quad over
 bridges/ardupilot_json.py): SITL instance = the slot, so its ports are ports.SlotPorts's. It
 starts from its parameter files every spawn (the eeprom is wiped): ArduPilot's SITL copter
-defaults, the vehicle's files (firmware/ardupilot/*.parm) and the video system's OSD grid
-(OSD1_TXT_RES: 0 the analog chip's 30 x 16, 1 HD's 50 x 18). Its SERIAL0 is MAVLink on TCP,
-which mavlink-router connects to and shares out: UDP 14550 to QGroundControl (system 255) and
-UDP 14570 for the game (system 254, telemetry.mavlink.VehicleLink). SERIAL5 sends its OSD over
-MSP DisplayPort to the server (video.osd), standing in for the OSD chip.
+defaults, the vehicle's files (firmware/ardupilot/*.parm, each followed by its video system's,
+copter-quad5.analog.parm or .digital.parm: the OSD's layout) and the video system's OSD grid
+(OSD1_TXT_RES: 0 the analog chip's 30 x 16, 1 HD's 50 x 18). A switch of video system sets the
+grid and the layout in flight: ArduPilot reads them each time it draws the screen. Its SERIAL0
+is MAVLink on TCP, which mavlink-router connects to and shares out: UDP 14550 to QGroundControl
+(system 255) and UDP 14570 + slot for the game (system 254, telemetry.mavlink.VehicleLink).
+SERIAL5 sends its OSD over MSP DisplayPort to the server (video.osd), standing in for the OSD
+chip.
 
 RC: SITL reads packets of 16 little-endian pulse widths on its RC port and keeps the last values
 it got for ever. Until the page sends sticks, a receiver sitting idle is played (throttle low,
@@ -25,9 +28,11 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from drone_duels import ports
+from drone_duels.server.protocol import VideoSystem
 from drone_duels.session.base import (
     EXTERNAL,
     ROOT,
@@ -36,6 +41,7 @@ from drone_duels.session.base import (
     FirmwareError,
     PhysicsProcess,
     SpawnContext,
+    settings_files,
 )
 from drone_duels.telemetry.mavlink import VehicleLink
 from drone_duels.video.osd import MSP_DISPLAYPORT, DisplayPort, MspReader, OsdScreen
@@ -79,19 +85,39 @@ def osd_message(screen: OsdScreen) -> dict[str, Any]:
 
 
 def router_conf(slot: int) -> str:
-    """router/sitl.conf for `slot`: its copter endpoint on that slot's SITL. The endpoints for
-    QGroundControl and the game are the same for every slot (ports.ROUTER_QGC, ROUTER_GAME)."""
+    """router/sitl.conf for `slot`: its copter endpoint on that slot's SITL and the game's on the
+    slot's own port. QGroundControl's is the same for every slot (ports.ROUTER_QGC)."""
     text = ROUTER_CONF.read_text()
-    base = f"Port = {ports.slot(0).ardupilot_mavlink}\n"
-    if text.count(base) != 1:
-        raise FirmwareError(f"{ROUTER_CONF}: no single copter endpoint on {base.strip()}")
-    return text.replace(base, f"Port = {ports.slot(slot).ardupilot_mavlink}\n")
+    base, mine = ports.slot(0), ports.slot(slot)
+    for was, now in ((base.ardupilot_mavlink, mine.ardupilot_mavlink),
+                     (base.router_game, mine.router_game)):
+        line = f"Port = {was}\n"
+        if text.count(line) != 1:
+            raise FirmwareError(f"{ROUTER_CONF}: no single endpoint on {line.strip()}")
+        text = text.replace(line, f"Port = {now}\n")
+    return text
+
+
+def txt_res(video: str) -> int:
+    """The OSD grid for the video system: the analog chip's SD, or HD for a digital goggle."""
+    return 0 if video == "analog" else 1
+
+
+def read_params(path: Path) -> dict[str, float]:
+    """A parameter file's values: `NAME value` lines, # comments."""
+    out: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        words = line.split("#", 1)[0].split()
+        if len(words) >= 2:
+            out[words[0]] = float(words[1])
+    return out
 
 
 def video_params(video: str) -> str:
-    """The OSD grid for the video system: the analog chip's SD, or HD for a digital goggle."""
-    res = 0 if video == "analog" else 1
-    return f"# The video system's OSD grid (drone_duels.firmware.ardupilot).\nOSD1_TXT_RES {res}\n"
+    return (
+        "# The video system's OSD grid (drone_duels.firmware.ardupilot).\n"
+        f"OSD1_TXT_RES {txt_res(video)}\n"
+    )
 
 
 def _stop_process(proc: subprocess.Popen[bytes] | None, name: str) -> None:
@@ -124,6 +150,7 @@ class ArduCopter(Firmware):
         self._rc_source = "idle"
         """Who feeds SITL's receiver: "idle" (nobody yet), "page", or "lost"."""
         self._stopped = False
+        self._display = DisplayPort(analog=ctx.video == "analog")
         self.osd_screens = 0
 
     # Start.
@@ -140,13 +167,7 @@ class ArduCopter(Firmware):
         video.write_text(video_params(ctx.video))
         conf = work / "router.conf"
         conf.write_text(router_conf(ctx.ports.slot))
-        defaults = [COPTER_DEFAULTS]
-        for name in ctx.vehicle.firmware.params:
-            path = ctx.firmware_file(name)
-            if not path.exists():
-                raise FirmwareError(f"{ctx.vehicle.id}'s parameter file {path} is missing")
-            defaults.append(path)
-        defaults.append(video)
+        defaults = [COPTER_DEFAULTS, *self._param_files(ctx.video), video]
 
         self._osd_sock = self._bind_udp(ctx.ports.ardupilot_osd, "the OSD")
         self._rc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -180,7 +201,7 @@ class ArduCopter(Firmware):
                 [str(ROUTER), "-c", str(conf)], stdout=out, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
             )
-        self.link = VehicleLink(f"udpout:127.0.0.1:{ports.ROUTER_GAME}", self.events.publish,
+        self.link = VehicleLink(f"udpout:127.0.0.1:{ctx.ports.router_game}", self.events.publish,
                                 sysid=SYSID)
         self.link.start()
 
@@ -283,11 +304,31 @@ class ArduCopter(Firmware):
 
     # OSD.
 
+    def _param_files(self, video: VideoSystem) -> list[Path]:
+        paths = [self.ctx.firmware_file(name) for name in self.ctx.vehicle.firmware.params]
+        for path in paths:
+            if not path.exists():
+                raise FirmwareError(f"{self.ctx.vehicle.id}'s parameter file {path} is missing")
+        return settings_files(paths, video)
+
+    def set_video(self, video: VideoSystem) -> bool:
+        link = self.link
+        if link is None:
+            return False
+        common = set(self._param_files("analog")) & set(self._param_files("digital"))
+        for path in self._param_files(video):
+            if path not in common:
+                for name, value in read_params(path).items():
+                    link.set_param(name, value)
+        link.set_param("OSD1_TXT_RES", txt_res(video))
+        self._display.analog = video == "analog"
+        return True
+
     def _osd_loop(self) -> None:
         sock = self._osd_sock
         assert sock is not None
         reader = MspReader()
-        display = DisplayPort(analog=self.ctx.video == "analog")
+        display = self._display
         sent = 0.0
         while not self._stop.is_set():
             try:

@@ -1,4 +1,4 @@
-"""What content/*.toml holds: places, scenarios, vehicles, race courses and radio profiles.
+"""What content/*.toml holds: places, vehicles, race courses and radio profiles.
 
 Each file is one model. Every key is checked: an unknown key or a missing one is an error naming
 the file and the key, so a typo never becomes a silent default (DESIGN.md §5).
@@ -17,14 +17,28 @@ class Strict(BaseModel):
     )
 
 
-Turbulence = Literal["none", "light", "moderate", "severe"]
-
-
 class Wind(Strict):
     speed_ms: float = Field(ge=0, le=30, description="mean wind at 6 m, m/s")
     from_deg: float = Field(ge=0, lt=360, description="where it blows from, degrees true")
-    turbulence: Turbulence = Field(description="MIL-F-8785C intensity")
-    gusts: bool = Field(description="random 1-cos gusts on top")
+    turbulence: float = Field(
+        ge=0,
+        le=3,
+        description="MIL-F-8785C's turbulence for this wind (σ_w 0.1 × the wind at 6 m) times "
+        "this: 0 smooth air, 1 the standard's, 2 and 3 as rough as its moderate and severe",
+    )
+    eddy_scale: float = Field(
+        ge=0.25,
+        le=4,
+        description="the turbulence's scale lengths times this: larger is slower, rolling air; "
+        "1 is MIL-F-8785C's",
+    )
+    gust_factor: float = Field(
+        ge=1,
+        le=2.5,
+        description="the strongest gust over the mean wind, as a weather report gives it; "
+        "1: no gusts on top of the turbulence",
+    )
+    gust_every_s: float = Field(ge=2, le=120, description="mean time between gusts, s")
 
 
 class StartPad(Strict):
@@ -45,28 +59,6 @@ class Location(Strict):
     )
     wind: Wind
     blurb: str = ""
-
-
-Mode = Literal["freefly", "duel", "race"]
-
-
-class Scenario(Strict):
-    id: str
-    name: str
-    mode: Mode
-    location: str
-    vehicles: list[str] = Field(min_length=1, description="what the vehicle picker offers")
-    default_vehicle: str
-    course: str | None = Field(default=None, description="race: the course id")
-    blurb: str = ""
-
-    @model_validator(mode="after")
-    def _check(self) -> "Scenario":
-        if self.default_vehicle not in self.vehicles:
-            raise ValueError(f"default_vehicle {self.default_vehicle!r} is not in vehicles")
-        if (self.mode == "race") != (self.course is not None):
-            raise ValueError("a race scenario names a course; no other mode does")
-        return self
 
 
 FirmwareKind = Literal["ardupilot-copter", "inav", "none"]
@@ -118,11 +110,24 @@ class Vehicle(Strict):
     blurb: str = ""
 
 
+class GateFrame(Strict):
+    """The course's gate: a square frame round the inside that is flown through."""
+
+    inside_m: tuple[float, float] = Field(description="width, height of the way through")
+    outside_m: tuple[float, float] = Field(description="width, height of the whole frame")
+    depth_m: float = Field(gt=0, description="the frame's thickness along the way through")
+
+    @model_validator(mode="after")
+    def _frame_round_inside(self) -> "GateFrame":
+        if not all(0 < i < o for i, o in zip(self.inside_m, self.outside_m, strict=True)):
+            raise ValueError("the inside must be smaller than the outside, and both above 0")
+        return self
+
+
 class Gate(Strict):
     at: LatLon
-    alt_m: float
+    alt_m: float = Field(description="the gate's centre, m above the ground or sea (alt_ref)")
     ypr_deg: tuple[float, float, float] = Field(description="yaw true, pitch, roll")
-    size_m: tuple[float, float] = Field(description="width, height (inside the frame)")
 
 
 class Course(Strict):
@@ -131,6 +136,7 @@ class Course(Strict):
     location: str
     laps: int = Field(ge=1, le=20)
     alt_ref: Literal["agl", "amsl"]
+    gate: GateFrame
     gates: list[Gate] = Field(min_length=2)
 
 

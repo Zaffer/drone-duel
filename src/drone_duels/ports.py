@@ -12,9 +12,8 @@ HTTP = 8600
 """The game's page and API. The Google Maps key is restricted to this port."""
 
 ROUTER_QGC = 14550
-"""mavlink-router's QGroundControl endpoint (QGC is system 255)."""
-ROUTER_GAME = 14570
-"""mavlink-router's endpoint for the game's telemetry (system 254)."""
+"""mavlink-router's QGroundControl endpoint (QGC is system 255), the same for every slot: the
+router only sends there."""
 
 SLOT_STRIDE = 10
 
@@ -38,6 +37,12 @@ class SlotPorts:
     def ardupilot_json(self) -> int:
         """UDP: the JSON physics backend; the physics listens, ArduPilot sends servos here."""
         return 9002 + SLOT_STRIDE * self.slot
+
+    @property
+    def router_game(self) -> int:
+        """UDP: mavlink-router's endpoint for the game's telemetry (system 254); the router
+        listens, so each slot has its own."""
+        return 14570 + self.slot
 
     @property
     def ardupilot_osd(self) -> int:

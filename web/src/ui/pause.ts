@@ -5,7 +5,8 @@
 import { effect } from "alien-signals";
 import { type Flight, sendWind } from "../flight.ts";
 import { radio } from "../input/radio.ts";
-import { config, content, paused, scenario, vehicleId, view, wind } from "../state/app.ts";
+import { modeVehicles } from "../modes/registry.ts";
+import { config, location, paused, vehicleId, view, wind } from "../state/app.ts";
 import { channels, controllerName, inputSource } from "../state/input.ts";
 import { type Prefs, prefs, updatePrefs, type ViewId } from "../state/prefs.ts";
 import { log, status } from "../state/session.ts";
@@ -16,6 +17,16 @@ import { h } from "./h.ts";
 import { inputsTab } from "./inputs.ts";
 
 type Tab = { id: string; name: string; body: () => HTMLElement; flight?: boolean };
+
+/** Still air with the standard's turbulence, for the Wind tab before any place is chosen. */
+const CALM = {
+  speed_ms: 0,
+  from_deg: 0,
+  turbulence: 1,
+  eddy_scale: 1,
+  gust_factor: 1,
+  gust_every_s: 10,
+};
 
 const opt = (label: string, ...ctl: (Node | string)[]) =>
   h("div", { class: "opt" }, h("label", null, label), h("div", { class: "ctl" }, ...ctl));
@@ -92,17 +103,12 @@ export function openPause(
       name: "Vehicle",
       flight: true,
       body: () => {
-        const s = scenario();
-        const all = (s?.vehicles ?? []).map((id) => content()!.vehicles[id]!).filter(Boolean);
+        const all = modeVehicles();
         return h(
           "div",
           null,
           h("h4", null, "Vehicle"),
-          h(
-            "p",
-            { class: "muted" },
-            "Switching starts the new vehicle back at the scenario's start.",
-          ),
+          h("p", { class: "muted" }, "Switching starts the new vehicle back at the start."),
           h(
             "div",
             { class: "vehicle-list" },
@@ -244,12 +250,15 @@ export function openPause(
       id: "wind",
       name: "Wind",
       body: () => {
-        const w = () =>
-          wind() ?? { speed_ms: 0, from_deg: 0, turbulence: "none" as const, gusts: false };
+        const w = () => wind() ?? location()?.wind ?? CALM;
         const set = (c: Partial<ReturnType<typeof w>>) => {
           wind({ ...w(), ...c });
           sendWind();
         };
+        const turbulence = (v: number) =>
+          v === 0
+            ? "none"
+            : `×${v.toFixed(1)}, ${v < 1.5 ? "light" : v < 2.5 ? "moderate" : "severe"}`;
         return h(
           "div",
           null,
@@ -257,7 +266,7 @@ export function openPause(
           h(
             "p",
             { class: "muted" },
-            "MIL-F-8785C: the wind at 6 m, less near the ground, Dryden turbulence, 1−cos gusts. Changes reach the physics at once.",
+            "MIL-F-8785C: the wind at 6 m, less near the ground, Dryden turbulence felt over the airframe's span. At ×1 the turbulence alone gusts as a weather report has it for open country (1.3 to 1.5 times the mean), so extra gusts start off. Changes reach the physics at once.",
           ),
           opt(
             "Speed",
@@ -283,25 +292,64 @@ export function openPause(
           ),
           opt(
             "Turbulence",
-            segmented(
-              [
-                ["none", "None"],
-                ["light", "Light"],
-                ["moderate", "Moderate"],
-                ["severe", "Severe"],
-              ],
+            ...slider(
+              0,
+              3,
+              0.1,
               () => w().turbulence,
               (v) => set({ turbulence: v }),
+              turbulence,
+            ),
+          ),
+          opt(
+            "Eddy size",
+            ...slider(
+              0.25,
+              4,
+              0.25,
+              () => w().eddy_scale,
+              (v) => set({ eddy_scale: v }),
+              (v) => `×${v}${v > 1 ? ", rolling" : v < 1 ? ", choppy" : ""}`,
             ),
           ),
           opt(
             "Gusts",
-            check(
-              () => w().gusts,
-              (v) => set({ gusts: v }),
+            ...slider(
+              1,
+              2.5,
+              0.05,
+              () => w().gust_factor,
+              (v) => set({ gust_factor: v }),
+              (v) => (v <= 1 ? "off" : `${v.toFixed(2)}×, to ${(w().speed_ms * v).toFixed(1)} m/s`),
             ),
           ),
-          opt("", h("button", { onclick: () => sendWind(true) }, "Gust now (G)")),
+          opt(
+            "A gust every",
+            ...slider(
+              2,
+              120,
+              1,
+              () => w().gust_every_s,
+              (v) => set({ gust_every_s: v }),
+              (v) => `${v} s`,
+            ),
+          ),
+          h(
+            "div",
+            { class: "actions" },
+            h("button", { onclick: () => sendWind(true) }, "Gust now (G)"),
+            h(
+              "button",
+              {
+                onclick: () => {
+                  const here = location()?.wind;
+                  if (here) set(here);
+                  select(current);
+                },
+              },
+              "The place's own wind",
+            ),
+          ),
         );
       },
     },
@@ -387,7 +435,7 @@ export function openPause(
               "span",
               null,
               config()?.map_keys.google_maps_api_key
-                ? "Google Photorealistic 3D Tiles"
+                ? "Google Photorealistic 3D Tiles in flight; the free globe in the menus"
                 : config()?.map_keys.cesium_ion_token
                   ? "Cesium ion"
                   : "Esri imagery (set GOOGLE_MAPS_API_KEY in .env.local for 3D tiles)",
@@ -561,9 +609,7 @@ export function openPause(
     "div",
     { class: "bottom" },
     h("button", { class: "primary", onclick: close }, flight ? "Resume" : "Done"),
-    ...(flight && onQuit
-      ? [h("button", { onclick: () => (close(), onQuit()) }, "Quit to menu")]
-      : []),
+    ...(flight && onQuit ? [h("button", { onclick: () => (close(), onQuit()) }, "Quit")] : []),
   );
   const overlay = h(
     "div",

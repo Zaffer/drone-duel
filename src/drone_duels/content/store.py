@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from drone_duels.content.schema import Controller, Course, Location, Scenario, Vehicle
+from drone_duels.content.schema import Controller, Course, Location, Vehicle
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTENT = ROOT / "content"
@@ -40,16 +40,15 @@ def _load_dir[M: BaseModel](model: type[M], directory: Path) -> dict[str, M]:
 @dataclass(frozen=True)
 class Content:
     locations: dict[str, Location]
-    scenarios: dict[str, Scenario]
     vehicles: dict[str, Vehicle]
     courses: dict[str, Course]
     controllers: dict[str, Controller]
 
-    def scenario(self, scenario_id: str) -> Scenario:
+    def location(self, location_id: str) -> Location:
         try:
-            return self.scenarios[scenario_id]
+            return self.locations[location_id]
         except KeyError:
-            raise ContentError(f"no scenario {scenario_id!r}") from None
+            raise ContentError(f"no location {location_id!r}") from None
 
     def vehicle(self, vehicle_id: str) -> Vehicle:
         try:
@@ -61,7 +60,6 @@ class Content:
 def load(directory: Path = CONTENT) -> Content:
     content = Content(
         locations=_load_dir(Location, directory / "locations"),
-        scenarios=_load_dir(Scenario, directory / "scenarios"),
         vehicles=_load_dir(Vehicle, directory / "vehicles"),
         courses=_load_dir(Course, directory / "courses"),
         controllers=_load_dir(Controller, directory / "controllers"),
@@ -72,18 +70,6 @@ def load(directory: Path = CONTENT) -> Content:
 
 def _check_references(c: Content) -> None:
     problems: list[str] = []
-    for s in c.scenarios.values():
-        if s.location not in c.locations:
-            problems.append(f"scenario {s.id}: no location {s.location!r}")
-        problems += [
-            f"scenario {s.id}: no vehicle {v!r}" for v in s.vehicles if v not in c.vehicles
-        ]
-        if s.course is not None:
-            course = c.courses.get(s.course)
-            if course is None:
-                problems.append(f"scenario {s.id}: no course {s.course!r}")
-            elif course.location != s.location:
-                problems.append(f"scenario {s.id}: course {s.course} is at {course.location}")
     for course in c.courses.values():
         if course.location not in c.locations:
             problems.append(f"course {course.id}: no location {course.location!r}")

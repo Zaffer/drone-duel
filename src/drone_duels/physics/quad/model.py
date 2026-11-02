@@ -94,15 +94,7 @@ class QuadModel:
         self.local = LocalFrame(origin[0], origin[1])
         self.plant = plant or Plant(frame)
         self.esc = Esc(frame)
-        wind = wind or {}
-        self.weather = wx.from_settings(
-            float(wind.get("speed_ms", 0.0)),
-            float(wind.get("from_deg", 0.0)),
-            str(wind.get("turbulence", "none")),
-            bool(wind.get("gusts", False)),
-            span=WIND_SPAN,
-            seed=seed,
-        )
+        self.weather = wx.from_settings(wind or {}, span=WIND_SPAN, seed=seed)
         self._lock = threading.Lock()
         self.ground_alt = origin[2]
         """The ground under the quad, m above sea level."""
@@ -132,11 +124,9 @@ class QuadModel:
                 self.s[X.start + 2] += alt_amsl - self.ground_alt
             self.ground_alt = alt_amsl
 
-    def set_wind(
-        self, speed_ms: float, from_deg: float, turbulence: str, gusts: bool, gust_now: bool
-    ) -> None:
+    def set_wind(self, wind: dict[str, Any], gust_now: bool = False) -> None:
         with self._lock:
-            wx.update(self.weather, speed_ms, from_deg, turbulence, gusts, gust_now)
+            wx.update(self.weather, wind, gust_now)
 
     # State.
 

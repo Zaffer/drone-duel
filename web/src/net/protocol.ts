@@ -13,6 +13,7 @@ export interface Protocol {
   DynamicsMsg?: DynamicsMsg;
   FirmwareSpec?: FirmwareSpec;
   Gate?: Gate;
+  GateFrame?: GateFrame;
   GroundMsg?: GroundMsg;
   Location?: Location;
   LogMsg?: LogMsg;
@@ -25,7 +26,6 @@ export interface Protocol {
   RadioMsg?: RadioMsg;
   RadioSourceMsg?: RadioSourceMsg;
   RcMsg?: RcMsg;
-  Scenario?: Scenario;
   SessionMsg?: SessionMsg;
   StartPad?: StartPad;
   StatusMsg?: StatusMsg;
@@ -114,9 +114,6 @@ export interface ContentMsg {
   locations: {
     [k: string]: Location;
   };
-  scenarios: {
-    [k: string]: Scenario;
-  };
   vehicles: {
     [k: string]: Vehicle;
   };
@@ -186,35 +183,21 @@ export interface Wind {
    */
   from_deg: number;
   /**
-   * MIL-F-8785C intensity
+   * MIL-F-8785C's turbulence for this wind (σ_w 0.1 × the wind at 6 m) times this: 0 smooth air, 1 the standard's, 2 and 3 as rough as its moderate and severe
    */
-  turbulence: "none" | "light" | "moderate" | "severe";
+  turbulence: number;
   /**
-   * random 1-cos gusts on top
+   * the turbulence's scale lengths times this: larger is slower, rolling air; 1 is MIL-F-8785C's
    */
-  gusts: boolean;
-}
-/**
- * This interface was referenced by `Protocol`'s JSON-Schema
- * via the `definition` "Scenario".
- */
-export interface Scenario {
-  id: string;
-  name: string;
-  mode: "freefly" | "duel" | "race";
-  location: string;
+  eddy_scale: number;
   /**
-   * what the vehicle picker offers
-   *
-   * @minItems 1
+   * the strongest gust over the mean wind, as a weather report gives it; 1: no gusts on top of the turbulence
    */
-  vehicles: [string, ...string[]];
-  default_vehicle: string;
+  gust_factor: number;
   /**
-   * race: the course id
+   * mean time between gusts, s
    */
-  course: string | null;
-  blurb: string;
+  gust_every_s: number;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -268,10 +251,37 @@ export interface Course {
   location: string;
   laps: number;
   alt_ref: "agl" | "amsl";
+  gate: GateFrame;
   /**
    * @minItems 2
    */
   gates: [Gate, Gate, ...Gate[]];
+}
+/**
+ * The course's gate: a square frame round the inside that is flown through.
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "GateFrame".
+ */
+export interface GateFrame {
+  /**
+   * width, height of the way through
+   *
+   * @minItems 2
+   * @maxItems 2
+   */
+  inside_m: [number, number];
+  /**
+   * width, height of the whole frame
+   *
+   * @minItems 2
+   * @maxItems 2
+   */
+  outside_m: [number, number];
+  /**
+   * the frame's thickness along the way through
+   */
+  depth_m: number;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -285,6 +295,9 @@ export interface Gate {
    * @maxItems 2
    */
   at: [number, number];
+  /**
+   * the gate's centre, m above the ground or sea (alt_ref)
+   */
   alt_m: number;
   /**
    * yaw true, pitch, roll
@@ -293,13 +306,6 @@ export interface Gate {
    * @maxItems 3
    */
   ypr_deg: [number, number, number];
-  /**
-   * width, height (inside the frame)
-   *
-   * @minItems 2
-   * @maxItems 2
-   */
-  size_m: [number, number];
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -697,7 +703,7 @@ export interface RcMsg {
       ];
 }
 /**
- * Start a scenario with a vehicle, switch vehicle (back at the start), reset, destroy (a
+ * Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a
  * crash: the physics stops dead), throw (a hand-launched wing), or stop.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -706,7 +712,7 @@ export interface RcMsg {
 export interface SessionMsg {
   ch: "session";
   action: "start" | "switch" | "reset" | "destroy" | "throw" | "stop";
-  scenario: string | null;
+  location: string | null;
   vehicle: string | null;
   /**
    * the start pad: 0 player 1, 1 player 2
@@ -720,7 +726,7 @@ export interface SessionMsg {
 export interface StatusMsg {
   ch: "status";
   state: "idle" | "starting" | "ready" | "failed" | "destroyed";
-  scenario: string | null;
+  location: string | null;
   vehicle: string | null;
   pad: number;
   /**
@@ -776,14 +782,13 @@ export interface VideoMsg {
   system: "analog" | "digital";
 }
 /**
+ * The wind now (the Wind options tab); `gust_now` starts a gust at once (G).
+ *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "WindMsg".
  */
 export interface WindMsg {
   ch: "wind";
-  speed_ms: number;
-  from_deg: number;
-  turbulence: "none" | "light" | "moderate" | "severe";
-  gusts: boolean;
+  wind: Wind;
   gust_now: boolean;
 }

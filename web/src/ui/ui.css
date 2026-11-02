@@ -9,7 +9,7 @@
   grid-template-columns: minmax(340px, 420px) 1fr;
   background:
     radial-gradient(
-      120% 90% at 0% 50%,
+      120% 90% at 0% 0%,
       rgb(13 14 21 / 0.96) 30%,
       rgb(13 14 21 / 0.55) 60%,
       transparent 85%
@@ -377,8 +377,10 @@
   bottom: 16px;
 }
 
+/* The dials: above Cesium's logo and the keys line along the bottom. */
 .corner.left {
   left: 16px;
+  bottom: 56px;
 }
 
 .corner.right {
@@ -549,14 +551,15 @@
   color: var(--muted);
 }
 
-.tabs button {
+/* The tab list's own buttons; Resume and Quit (in .bottom) keep the usual button look. */
+.tabs > button {
   text-align: left;
   background: none;
   border: none;
   padding: 9px 12px;
 }
 
-.tabs button.active {
+.tabs > button.active {
   background: var(--ember-soft);
   color: var(--ember);
 }

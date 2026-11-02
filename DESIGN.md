@@ -21,10 +21,10 @@ for real.
   the Chupito, and SkyFlow-Dynamics' `racer5in` plant for the quad. One wind model drives both.
 - Modes: **Free Fly**, **Duel** (a drone or the Chupito against the truck) and **Race** (live
   head to head through gates). Modes are plugins, so more can follow.
-- Scenarios: a mode at a saved place, picked from a menu. For example "Free Fly: Toronto from
-  Billy Bishop" or "Race: AreaXO course 1".
-- Vehicle select: the 5" quad, the Chupito or the truck. Switching respawns you at the
-  scenario's start.
+- A mode, then a place, picked from a menu: Free Fly at Toronto's Billy Bishop, or a Race at
+  AreaXO (the race runs the place's course).
+- Vehicle select: the 5" quad, the Chupito or the truck, in flight (the pause menu) or in a Duel
+  or Race lobby. Switching respawns you at the place's start.
 - Views: FPV (the camera feed with the real OSD), chase near and far, a line-of-sight spotter,
   Map/COP, a free orbit camera, and a minimap PiP with the aviation dials.
 - Video: analog (analog-vision's NTSC chain, SD OSD) or digital (clean 16:9, HD OSD).
@@ -52,7 +52,7 @@ the truck, Windows/WSL and macOS, and flying real hardware.
 
    This is the rule today's code follows ("the map, the FPV view and the dials stay on
    MAVLink"). Keeping to it lets the Map/COP view later run against real aircraft unchanged.
-3. **Content is data, not code.** Locations, scenarios, vehicles, courses and controller
+3. **Content is data, not code.** Locations, vehicles, courses and controller
    profiles are TOML files in `content/`. Each loads into a typed schema that rejects unknown and
    missing keys, as `swarm.settings` does today. CLI flags only override a file.
 4. **Physics stays lean and borrowed models stay as they are.** `drone_duels.physics.core` and
@@ -76,7 +76,7 @@ the truck, Windows/WSL and macOS, and flying real hardware.
    └─────────────────────────────────────────────────────────────────────────┘
                                    │
  duels server (Python, FastAPI on uvicorn, pydantic)
-   ├─ Session          mode-agnostic: spawn / switch / reset / destroy a vehicle at a scenario
+   ├─ Session          mode-agnostic: spawn / switch / reset / destroy a vehicle at a location
    ├─ ContentStore     content/*.toml → typed specs
    ├─ Prefs            ~/.config/drone-duels/prefs.json (controls, video, graphics, audio)
    ├─ RadioStream      the radio read through Linux (evdev), for when Chrome can't see it all
@@ -89,7 +89,7 @@ the truck, Windows/WSL and macOS, and flying real hardware.
         INAV SITL         ⇄  X-Plane UDP      ⇄  wing (wingsim)
         (truck: no firmware; physics runs in the page)
 
- mavlink-router: SITL serial0 → UDP 14550 QGroundControl (255) · UDP 14570 duels (254)
+ mavlink-router: SITL serial0 → UDP 14550 QGroundControl (255) · UDP 14570 + slot duels (254)
 ```
 
 **Processes.** Each physics process is a child of the server, one per vehicle slot, so a slow
@@ -116,7 +116,6 @@ drone-duels/
   DESIGN.md  ROADMAP.md  CLAUDE.md  README.md
   content/
     locations/              billy-bishop.toml, area-xo.toml          (place, ground, start pads)
-    scenarios/              freefly-toronto.toml, duel-areaxo.toml…  (mode + location + rules)
     vehicles/               quad5.toml, chupito.toml, truck.toml
     courses/                areaxo-1.toml                            (race gates)
     controllers/            literadio2.toml, tx15.toml, t8l.toml     (default channel maps)
@@ -155,7 +154,7 @@ drone-duels/
       state/                alien-signals stores (§9)
       streams/              Observable sources: ws channels, gamepad, frames, timers
       net/                  server ws client, protocol types (generated, §8), peer link
-      ui/                   menu, scenario/vehicle pickers, pause menu, top bar, toasts
+      ui/                   menu, place picker, pause menu, top bar, toasts
       world/                Cesium viewer, basemap, tile colliders, ground sampling
       vehicles/             quad, wing, truck: models, animation; truck physics (Rapier)
       people/               the operator standing behind the pad
@@ -191,13 +190,6 @@ from_deg = 250
 turbulence = "light"                      # none | light | moderate | severe (MIL-F-8785C)
 gusts = false
 
-# content/scenarios/freefly-toronto.toml
-name = "Free Fly: Toronto"
-mode = "freefly"
-location = "billy-bishop"
-vehicles = ["quad5", "chupito", "truck"]  # what the picker offers
-default_vehicle = "quad5"
-
 # content/vehicles/quad5.toml
 name = "5\" FPV quad"
 kind = "multirotor"
@@ -225,7 +217,9 @@ matters). An unknown or missing key is an error naming the file and the key. `du
 every file, so a bad edit shows up before anyone flies. The same models feed the REST API, so the
 menu lists exactly what loaded.
 
-"Scenario" is the word in the code and in the menu. "Mission" means only an ArduPilot mission.
+A game is a mode at a place; there is no scenario file. Which vehicles a mode allows (Race: no
+truck) and where it can be played (Race: where a course is) are the mode's, in the page. "Mission"
+means only an ArduPilot mission.
 
 ## 6. Vehicles
 
@@ -275,7 +269,7 @@ in the page, with no firmware. It gets the same Vehicle interface in the page as
 
 ### 6.4 Vehicle lifecycle
 
-`Session.spawn(scenario, vehicle)`:
+`Session.spawn(location, vehicle)`:
 
 1. stop the slot's current firmware and physics, if any;
 2. start the physics at the location's start pad;
@@ -283,7 +277,7 @@ in the page, with no firmware. It gets the same Vehicle interface in the page as
    checks; INAV: no arming blockers on two polls in a row, a known quirk);
 4. report `ready`.
 
-Switching vehicle is a spawn at the scenario's start. Reset re-spawns the same vehicle. Destroy
+Switching vehicle is a spawn at the location's start. Reset re-spawns the same vehicle. Destroy
 (a crash in Duel or Race) cuts the physics, so the firmware's link goes quiet as a destroyed
 aircraft's would.
 
@@ -308,9 +302,9 @@ A mode is a pair of plugins with one lifecycle, `setup → running → finished`
 
 | Mode | Players | Rules |
 |---|---|---|
-| Free Fly | 1 | Any vehicle the scenario lists, switch at will, no score. Practice missions here with QGC. |
+| Free Fly | 1 | Any vehicle, switch at will (the pause menu), no score. Practice missions here with QGC. |
 | Duel | 2 (P2P) | Turns. The pilot (quad or Chupito) strikes the truck; the driver (truck) evades. A strike scores; a crash spends the aircraft. Swap each turn. Today's duelmatch rules carry over. |
-| Race | 2 (P2P) | Live, side by side. Each player flies their own sim and sees the other as a ghost (no collisions). Countdown start from the host. A gate counts when the segment between two true poses crosses its rectangle in the right direction. Lap and total times; first to finish wins. |
+| Race | 2 (P2P) | Live, side by side. Each player flies their own sim and sees the other as a ghost (no collisions). Countdown start from the host. A gate counts when the segment between two true poses crosses its rectangle in the right direction, from GO (the countdown waits for the session it started to be ready). The next gate wears a chevron on each side, the one after it dots; the next three shade from ember to the rest's pale. Lap and total times; first to finish wins. |
 
 The peer link stays Trystero over Nostr relays (WebRTC, no server), one room per match. Peers
 exchange poses at 20 Hz for the ghost or truck, events (strike, gate, crash, finish) with a
@@ -341,7 +335,7 @@ high-rate pose channel.
 The protocol is defined once, in `server/protocol.py`, as pydantic models: a discriminated union
 on `ch`, validated on the way in. `tools/gen_protocol_ts.py` writes their JSON Schema and
 generates `web/src/net/protocol.ts` from it, and a test fails if the generated file is out of
-date. The REST endpoints (`/api/scenarios`, `/api/vehicles`, `/api/prefs`, …) are FastAPI routes
+date. The REST endpoints (`/api/content`, `/api/config`, `/api/prefs`, …) are FastAPI routes
 on the same models, with OpenAPI docs at `/docs`.
 
 Why FastAPI rather than aiohttp: the pose stream is a few hundred small messages a second on one
@@ -360,7 +354,7 @@ browser cannot fly the sim.
 ## 9. Web app state
 
 - **alien-signals** holds every value the UI reads now: the screen (menu, flying, paused),
-  scenario, vehicle, view, video system, prefs, session status, match state, and the latest
+  mode, location, vehicle, view, video system, prefs, session status, match state, and the latest
   telemetry at 10 Hz. `computed` derives from them (for example, the dials are hidden when the
   view is FPV), and `effect` writes them to the DOM. Stores are plain modules in `state/`. No UI
   framework: a small `h()` helper plus effects.
@@ -390,20 +384,20 @@ Toolchain: bun builds and serves the bundle (`bun build`, with watch in dev). Ty
 - **Digital**: 16:9, no effect, and the HD OSD grid laid over the picture as a DJI/HDZero/Walksnail
   goggle does (ArduPilot `OSD1_TXT_RES 1`; INAV's HD DisplayPort). A later item models digital
   link breakup.
-- Switching the video system changes the firmware's OSD resolution. ArduPilot needs a reboot for
-  that, so the switch respawns the vehicle at the start, as a vehicle switch does, after a
-  confirmation.
+- Switching the video system changes the firmware's OSD resolution. ArduPilot takes it in flight
+  (it reads `OSD1_TXT_RES` each time it clears the screen), so its vehicle flies on. INAV takes
+  it only at boot, so the switch respawns that vehicle at the start, as a vehicle switch does.
 - The OSD fonts are the firmware's own (ArduPilot's OSD_FONT and INAV's), rendered from their
   .mcm files as `swarm.osd` does today.
 
 ## 11. UI
 
-**Flow.** Main menu: Free Fly · Duel · Race · Options. Then a scenario list for that mode, with
-location, a thumbnail and its vehicles. Then the vehicle (Duel: your role, then the vehicle; Race:
-the course, then the vehicle). Then Fly. Duel and Race also have a lobby: a room code, peer
-status and ready.
+**Flow.** Main menu: Free Fly · Duel · Race · Options. Then the places for that mode (Race: those
+with a course). Free Fly then flies at once, in the vehicle last flown; the pause menu's Vehicle
+tab switches it. Duel and Race go to a lobby, which picks the vehicle (Duel: for your turns as
+the pilot) and has a room code, peer status and ready.
 
-**In flight.** A thin top bar shows mode · scenario · vehicle · view · video · wind · timer/score.
+**In flight.** A thin top bar shows mode · place · vehicle · view · video · wind · timer/score.
 It fades after 3 s in FPV and comes back on mouse movement or a menu key. In the corners:
 
 - bottom right: the minimap PiP (M toggles it);
@@ -413,7 +407,8 @@ It fades after 3 s in FPV and comes back on mouse movement or a menu key. In the
 Both hide in FPV, where the OSD is the instrument panel. The quick keys: V cycles views, 1–6 jump
 to a view, R resets, B switches vehicle, D shows the dynamics overlay (Chupito), Esc pauses.
 
-**Pause/Options (Esc)**, in tabs:
+**Pause/Options (Esc)**, in tabs. Pausing stops the page's own world (the truck), not the
+firmware: the radio keeps flying the aircraft, as a lost link would otherwise trip its failsafe.
 
 | Tab | Holds |
 |---|---|
@@ -467,7 +462,8 @@ at runtime). The firmware OSD keeps its own fonts and colours, as real goggles s
   out.
 - Chrome on Linux may not expose a radio until a stick moves, or all its axes. So the server also
   reads it through Linux itself (`rc/evdev.py`) and streams its axes; the page takes whichever
-  source sees the most axes, through the same profiles and calibration.
+  source sees the most axes, the server's on a tie (Chrome lists the LiteRadio 2's CH5 and CH8 axes
+  but never moves them), through the same profiles and calibration.
 - A profile (`content/controllers/*.toml`) matches a gamepad by its USB vendor and product id,
   and maps axes and buttons to AETR plus AUX1–AUX8 with inversions. We ship LiteRadio 2 (from
   today's radio.py), TX15 and T8L. EdgeTX radios in USB joystick mode order the axes by their
@@ -503,7 +499,8 @@ speed and direction.
 
 ## 15. Decided in review (2026-10-29)
 
-1. The UI says "Scenarios"; "Mission" is kept for ArduPilot missions.
+1. "Mission" is kept for ArduPilot missions. (Scenarios, a mode at a place, were dropped on
+   2026-11-01: a game is a mode and a place, the vehicle picked in flight or in the lobby.)
 2. Synetic-Labs/Analog-Vision has a `package.json` (commit d5548dc), so it is a bun git
    dependency.
 3. racer5in is close enough to our 5" for now (a row for our own build is on the roadmap).

@@ -221,7 +221,6 @@ def create_app(
     def get_content() -> ContentMsg:
         return ContentMsg(
             locations=content.locations,
-            scenarios=content.scenarios,
             vehicles=content.vehicles,
             courses=content.courses,
             controllers=content.controllers,
@@ -303,6 +302,16 @@ def handle(session: Session, text: str) -> object:
         msg = client_msg.validate_json(text)
     except ValidationError as exc:
         log.warning("bad message from the page: %s", exc.errors()[:1])
+        # Said on the page too: a page newer than its server (rebuilt under it) is otherwise a
+        # silent hang, its start never answered.
+        session.events.publish(
+            {
+                "ch": "log",
+                "level": "error",
+                "source": "server",
+                "text": "The server did not understand the page: restart `uv run duels`.",
+            }
+        )
         return None
     match msg:
         case RcMsg():
@@ -310,17 +319,9 @@ def handle(session: Session, text: str) -> object:
         case GroundMsg():
             session.set_ground(msg.lat, msg.lon, msg.alt)
         case SessionMsg():
-            session.command(msg.action, msg.scenario, msg.vehicle, msg.pad)
+            session.command(msg.action, msg.location, msg.vehicle, msg.pad)
         case WindMsg():
-            from drone_duels.content.schema import Wind
-
-            wind = Wind(
-                speed_ms=msg.speed_ms,
-                from_deg=msg.from_deg,
-                turbulence=msg.turbulence,
-                gusts=msg.gusts,
-            )
-            session.set_wind(wind, msg.gust_now)
+            session.set_wind(msg.wind, msg.gust_now)
         case VideoMsg():
             session.set_video(msg.system)
         case DynamicsMsg():

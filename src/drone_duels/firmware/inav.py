@@ -41,6 +41,7 @@ from drone_duels.session.base import (
     FirmwareError,
     PhysicsProcess,
     SpawnContext,
+    settings_files,
 )
 from drone_duels.video.osd import MSP_DISPLAYPORT, DisplayPort, MspReader, OsdScreen
 
@@ -99,18 +100,6 @@ def interrupt(proc: subprocess.Popen[bytes], timeout: float = 3.0) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout)
-
-
-def settings_files(files: Iterable[Path], video: VideoSystem) -> list[Path]:
-    """Each settings file, then its video system's beside it, if there is one: chupito.cli,
-    then chupito.analog.cli (the OSD for an analog picture) or chupito.digital.cli."""
-    out: list[Path] = []
-    for path in files:
-        out.append(path)
-        extra = path.with_name(f"{path.stem}.{video}{path.suffix}")
-        if extra.exists():
-            out.append(extra)
-    return out
 
 
 def load_settings(files: Iterable[Path]) -> str:
@@ -469,6 +458,8 @@ class Inav(Firmware):
     so INAV's receiver loses its link and INAV's own failsafe flies (RTH, in chupito.cli)."""
 
     name = "INAV"
+    # INAV takes the wing jumping back to the hand, as the old wingsim's reset did: no reboot.
+    resets_in_place = True
 
     def __init__(self, ctx: SpawnContext, events: Events, physics: PhysicsProcess) -> None:
         super().__init__(ctx, events, physics)

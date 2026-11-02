@@ -16,10 +16,11 @@ import type { Flight, ModeRuntime } from "../../flight.ts";
 import { cleanRoomCode, newRoomCode, type Role, Room } from "../../net/peer.ts";
 import type { Course } from "../../net/protocol.ts";
 import type { Pose } from "../../net/server.ts";
-import { content, course as currentCourse, toast } from "../../state/app.ts";
+import { content, course as currentCourse, toast, vehicleId } from "../../state/app.ts";
 import { hudBanner, hudPanel, hudTimer } from "../../state/hud.ts";
 import { prefs, updatePrefs } from "../../state/prefs.ts";
 import { status } from "../../state/session.ts";
+import { vehicleCard } from "../../ui/app.ts";
 import { h, render } from "../../ui/h.ts";
 import { mapOffset } from "../../world/geo.ts";
 import { Ghost, type PeerPose } from "../ghost.ts";
@@ -56,17 +57,27 @@ export const race: ModeDef = {
   id: "race",
   name: "Race",
   desc: "Through the gates against the clock, alone or head to head.",
-  pickVehicle: true,
   vehicles: (all) => all.filter((v) => v.kind !== "ground"),
-  lobby(host, ctx, vehicle) {
-    return raceLobby(host, ctx, vehicle!);
+  places: (all) =>
+    all.filter((loc) => Object.values(content()?.courses ?? {}).some((c) => c.location === loc.id)),
+  lobby(host, ctx) {
+    return raceLobby(host, ctx);
   },
 };
 
-function raceLobby(host: HTMLElement, ctx: ModeContext, vehicle: string): () => void {
+function raceLobby(host: HTMLElement, ctx: ModeContext): () => void {
+  const mine = signal(
+    ctx.vehicles.find((v) => v.id === vehicleId())?.id ?? ctx.vehicles[0]?.id ?? "quad5",
+  );
   let room: Room | null = null;
   const peerState = signal<{ vehicle: string; ready: boolean } | null>(null);
   const disposers: (() => void)[] = [];
+  const cards = ctx.vehicles.map((v) => vehicleCard(v, () => mine(v.id)));
+  disposers.push(
+    effect(() =>
+      cards.forEach((c, i) => c.classList.toggle("selected", ctx.vehicles[i]!.id === mine())),
+    ),
+  );
   const nameInput = h("input", { value: prefs().player.name }) as HTMLInputElement;
   nameInput.addEventListener("change", () =>
     updatePrefs((p) => ({ ...p, player: { name: nameInput.value.trim() || "Pilot" } })),
@@ -77,7 +88,7 @@ function raceLobby(host: HTMLElement, ctx: ModeContext, vehicle: string): () => 
   }) as HTMLInputElement;
   const body = h("div");
 
-  const solo = () => ctx.fly(vehicle, 0, (f) => new RaceRuntime(f, null, vehicle, null));
+  const solo = () => ctx.fly(mine(), 0, (f) => new RaceRuntime(f, null, mine(), null));
 
   const enter = async (role: Role, code: string) => {
     room = await Room.join("race", code, role, nameInput.value.trim() || "Pilot", TYPES);
@@ -90,18 +101,19 @@ function raceLobby(host: HTMLElement, ctx: ModeContext, vehicle: string): () => 
     r.on("start").subscribe(
       () => {
         lobbyOnly.abort();
-        const opponent = peerState()?.vehicle ?? vehicle;
+        const opponent = peerState()?.vehicle ?? mine();
         room = null; // the runtime owns it now
-        ctx.fly(vehicle, 1, (f) => new RaceRuntime(f, r, vehicle, opponent));
+        ctx.fly(mine(), 1, (f) => new RaceRuntime(f, r, mine(), opponent));
       },
       { signal },
     );
     let ready = false;
-    const sendLobby = () => r.send("lobby", { vehicle, ready });
+    const sendLobby = () => r.send("lobby", { vehicle: mine(), ready });
     disposers.push(
       effect(() => {
         const peer = r.peer();
         const ps = peerState();
+        const vehicle = mine();
         const err = r.error();
         if (peer) sendLobby();
         const go = h(
@@ -182,7 +194,9 @@ function raceLobby(host: HTMLElement, ctx: ModeContext, vehicle: string): () => 
 
   render(
     host,
-    h("h2", null, `${ctx.scenario.name}: race`),
+    h("h2", null, `${ctx.location.name.split(": ").at(-1)}: race`),
+    h("h4", null, "Your aircraft"),
+    h("div", { class: "cards" }, cards),
     h(
       "div",
       { class: "actions" },
@@ -275,7 +289,7 @@ class RaceRuntime implements ModeRuntime {
       effect(() => {
         if (flight.pad() && !this.placed) {
           this.placed = true;
-          void this.view.place().then(() => this.view.draw(0, 0));
+          void this.view.place().then(() => this.draw());
         }
       }),
     );
@@ -320,7 +334,7 @@ class RaceRuntime implements ModeRuntime {
           sounds.lap();
           toast(`Lap ${this.progress.laps.length}: ${fmtTime(this.progress.laps.at(-1)!)}`, "good");
         } else sounds.gate();
-        this.view.draw(this.progress.gate, this.progress.next % this.progress.n);
+        this.draw();
       }
     }
     this.lastPose = pose;
@@ -337,6 +351,11 @@ class RaceRuntime implements ModeRuntime {
     }
     this.ghost?.draw();
     this.panel();
+  }
+
+  /** The course as the race stands: the next gates marked, this lap's passed ones done. */
+  private draw(): void {
+    this.view.draw(this.progress.upcoming(), this.progress.next % this.progress.n);
   }
 
   private finish(t: number): void {
@@ -402,7 +421,7 @@ class RaceRuntime implements ModeRuntime {
     hudPanel(null);
     hudTimer(null);
     hudBanner({ big: "", small: "Back to the grid" });
-    this.view.draw(0, 0);
+    this.draw();
     this.flight.reset();
   }
 

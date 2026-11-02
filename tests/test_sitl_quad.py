@@ -110,7 +110,7 @@ def flight() -> Iterator[Flight]:
     session = Session(load(), events, slot=SLOT, firmware_factory=factory)
     session.start()
     try:
-        session.command("start", scenario="freefly-toronto", vehicle="quad5")
+        session.command("start", location="billy-bishop", vehicle="quad5")
         wait_for("ready", lambda: session.state in ("ready", "failed"), 180)
         assert session.state == "ready", session.step
         yield session, events, made
@@ -132,6 +132,27 @@ def test_osd_screens_come_through(flight: Flight) -> None:
     assert any(c != 0x20 for c in screen.codes)  # something drawn, not a blank screen
 
 
+def test_the_video_system_switches_in_flight(flight: Flight) -> None:
+    """ArduPilot takes the HD grid without a reboot, so the vehicle stays up and ready."""
+    session, events, _ = flight
+    firmware = session._firmware
+    assert isinstance(firmware, ArduCopter) and firmware.sitl is not None
+    pid = firmware.sitl.pid
+
+    def grid() -> tuple[int, int]:
+        screen = OsdMsg.model_validate(events.of("osd")[-1])
+        return (screen.cols, screen.rows)
+
+    try:
+        session.set_video("digital")
+        wait_for("the HD grid", lambda: grid() == (50, 18), 10)
+    finally:
+        session.set_video("analog")
+    wait_for("the analog grid again", lambda: grid() == (30, 13), 10)
+    assert session.state == "ready" and session._firmware is firmware
+    assert firmware.sitl.pid == pid and firmware.sitl.poll() is None
+
+
 def test_arm_climb_land_disarm(flight: Flight) -> None:
     session, events, _ = flight
     assert session.origin is not None
@@ -145,8 +166,9 @@ def test_arm_climb_land_disarm(flight: Flight) -> None:
         assert events.telemetry().mode == "LOITER"  # pyright: ignore[reportOptionalMemberAccess]
 
         radio.set(throttle=1850)
-        wait_for("5 m up", lambda: (t := events.telemetry()) is not None
-                 and (t.alt_rel or 0) > 5.0, 30)
+        wait_for(
+            "5 m up", lambda: (t := events.telemetry()) is not None and (t.alt_rel or 0) > 5.0, 30
+        )
         pose = events.pose()
         assert pose is not None and pose[ALT] > origin_alt + 4.5  # the truth agrees
         climb = events.telemetry()
@@ -160,8 +182,11 @@ def test_arm_climb_land_disarm(flight: Flight) -> None:
         # The page goes quiet: the receiver stops its pulses, and ArduPilot's radio failsafe
         # brakes and holds (FS_THR_ENABLE 7).
         radio.on = False
-        wait_for("radio failsafe", lambda: (t := events.telemetry()) is not None
-                 and t.mode == "BRAKE", 10)
+        wait_for(
+            "radio failsafe",
+            lambda: (t := events.telemetry()) is not None and t.mode == "BRAKE",
+            10,
+        )
         assert any("Radio Failsafe" in m["text"] for m in events.of("log"))
         braked = events.telemetry()
         assert braked is not None and braked.armed and (braked.alt_rel or 0) > 4
@@ -171,12 +196,14 @@ def test_arm_climb_land_disarm(flight: Flight) -> None:
         radio.set(mode=1500)
         time.sleep(0.7)
         radio.set(mode=1000)
-        wait_for("LOITER again", lambda: (t := events.telemetry()) is not None
-                 and t.mode == "LOITER", 10)
+        wait_for(
+            "LOITER again", lambda: (t := events.telemetry()) is not None and t.mode == "LOITER", 10
+        )
 
         radio.set(throttle=1000)  # down, and LOITER lands
-        wait_for("landed", lambda: (p := events.pose()) is not None
-                 and p[ALT] < origin_alt + 0.1, 30)
+        wait_for(
+            "landed", lambda: (p := events.pose()) is not None and p[ALT] < origin_alt + 0.1, 30
+        )
         assert session._physics is not None  # pyright: ignore[reportPrivateUsage]
         assert session._physics.status.get("phase") == "ground"  # pyright: ignore[reportPrivateUsage]
         time.sleep(2)

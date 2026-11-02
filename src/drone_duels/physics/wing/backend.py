@@ -40,7 +40,6 @@ CHANNELS = 8
 """INAV reads eight channels from X-Plane's joystick."""
 HEARD_S = 1.0
 """INAV is stepping the physics while it was heard from this recently."""
-STILL_AIR = {"speed_ms": 0.0, "from_deg": 0.0, "turbulence": "none", "gusts": False}
 
 
 class WingBackend:
@@ -61,14 +60,7 @@ class WingBackend:
             frame = AIRFRAMES[airframe]
         except KeyError:
             raise SystemExit(f"no wing airframe {airframe!r}: {', '.join(AIRFRAMES)}") from None
-        air = {**STILL_AIR, **wind}
-        self.weather = weather.from_settings(
-            air["speed_ms"],
-            air["from_deg"],
-            air["turbulence"],
-            air["gusts"],
-            span=frame.wing.reference.span,
-        )
+        self.weather = weather.from_settings(wind, span=frame.wing.reference.span)
         self.aircraft = Aircraft(frame, heading=math.radians(heading_deg), weather=self.weather)
         self.map_ground = MapGround(origin)
         self._sticks: tuple[int, ...] | None = NEUTRAL
@@ -134,10 +126,8 @@ class WingBackend:
     def ground(self, lat: float, lon: float, alt: float) -> None:
         self.map_ground.report(lat, lon, alt)
 
-    def wind(
-        self, speed_ms: float, from_deg: float, turbulence: str, gusts: bool, gust_now: bool
-    ) -> None:
-        weather.update(self.weather, speed_ms, from_deg, turbulence, gusts, gust_now)
+    def wind(self, wind: dict[str, Any], gust_now: bool) -> None:
+        weather.update(self.weather, wind, gust_now)
 
     def reset(self) -> None:
         self.server.reset()

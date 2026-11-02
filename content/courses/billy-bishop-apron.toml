@@ -4,50 +4,48 @@ location = "billy-bishop"
 laps = 2
 alt_ref = "agl"
 
+# The gate: a 2.7 m square frame, 0.26 m deep, round a 1.5 m square way through.
+[gate]
+inside_m = [1.5, 1.5]
+outside_m = [2.7, 2.7]
+depth_m = 0.26
+
 [[gates]]
 at = [43.6309300, -79.3898844]
 alt_m = 4.0
 ypr_deg = [270.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6308116, -79.3902793]
 alt_m = 5.5
 ypr_deg = [225.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6305258, -79.3904429]
 alt_m = 4.0
 ypr_deg = [180.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6302399, -79.3902793]
 alt_m = 5.5
 ypr_deg = [135.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6301215, -79.3898844]
 alt_m = 4.0
 ypr_deg = [90.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6302399, -79.3894895]
 alt_m = 5.5
 ypr_deg = [45.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6305258, -79.3893259]
 alt_m = 4.0
 ypr_deg = [0.0, 0.0, 0.0]
-size_m = [3.0, 2.5]
 
 [[gates]]
 at = [43.6308116, -79.3894895]
 alt_m = 5.5
 ypr_deg = [315.0, 0.0, 0.0]
-size_m = [3.0, 2.5]

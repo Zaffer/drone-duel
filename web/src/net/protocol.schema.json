@@ -5,7 +5,7 @@
   "$defs": {
     "SessionMsg": {
       "additionalProperties": false,
-      "description": "Start a scenario with a vehicle, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop.",
+      "description": "Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop.",
       "properties": {
         "ch": {
           "const": "session",
@@ -23,7 +23,7 @@
           ],
           "type": "string"
         },
-        "scenario": {
+        "location": {
           "anyOf": [
             {
               "type": "string"
@@ -55,7 +55,7 @@
       "required": [
         "ch",
         "action",
-        "scenario",
+        "location",
         "vehicle",
         "pad"
       ],
@@ -119,35 +119,68 @@
       "title": "GroundMsg",
       "type": "object"
     },
+    "Wind": {
+      "additionalProperties": false,
+      "properties": {
+        "speed_ms": {
+          "description": "mean wind at 6 m, m/s",
+          "maximum": 30,
+          "minimum": 0,
+          "type": "number"
+        },
+        "from_deg": {
+          "description": "where it blows from, degrees true",
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        },
+        "turbulence": {
+          "description": "MIL-F-8785C's turbulence for this wind (\u03c3_w 0.1 \u00d7 the wind at 6 m) times this: 0 smooth air, 1 the standard's, 2 and 3 as rough as its moderate and severe",
+          "maximum": 3,
+          "minimum": 0,
+          "type": "number"
+        },
+        "eddy_scale": {
+          "description": "the turbulence's scale lengths times this: larger is slower, rolling air; 1 is MIL-F-8785C's",
+          "maximum": 4,
+          "minimum": 0.25,
+          "type": "number"
+        },
+        "gust_factor": {
+          "description": "the strongest gust over the mean wind, as a weather report gives it; 1: no gusts on top of the turbulence",
+          "maximum": 2.5,
+          "minimum": 1,
+          "type": "number"
+        },
+        "gust_every_s": {
+          "description": "mean time between gusts, s",
+          "maximum": 120,
+          "minimum": 2,
+          "type": "number"
+        }
+      },
+      "required": [
+        "speed_ms",
+        "from_deg",
+        "turbulence",
+        "eddy_scale",
+        "gust_factor",
+        "gust_every_s"
+      ],
+      "title": "Wind",
+      "type": "object"
+    },
     "WindMsg": {
       "additionalProperties": false,
+      "description": "The wind now (the Wind options tab); `gust_now` starts a gust at once (G).",
       "properties": {
         "ch": {
           "const": "wind",
           "default": "wind",
           "type": "string"
         },
-        "speed_ms": {
-          "maximum": 30,
-          "minimum": 0,
-          "type": "number"
-        },
-        "from_deg": {
-          "exclusiveMaximum": 360,
-          "minimum": 0,
-          "type": "number"
-        },
-        "turbulence": {
-          "enum": [
-            "none",
-            "light",
-            "moderate",
-            "severe"
-          ],
-          "type": "string"
-        },
-        "gusts": {
-          "type": "boolean"
+        "wind": {
+          "$ref": "#/$defs/Wind"
         },
         "gust_now": {
           "default": false,
@@ -156,10 +189,7 @@
       },
       "required": [
         "ch",
-        "speed_ms",
-        "from_deg",
-        "turbulence",
-        "gusts",
+        "wind",
         "gust_now"
       ],
       "title": "WindMsg",
@@ -246,7 +276,7 @@
           ],
           "type": "string"
         },
-        "scenario": {
+        "location": {
           "anyOf": [
             {
               "type": "string"
@@ -319,7 +349,7 @@
       "required": [
         "ch",
         "state",
-        "scenario",
+        "location",
         "vehicle",
         "pad",
         "step",
@@ -901,6 +931,9 @@
           ],
           "type": "string"
         },
+        "gate": {
+          "$ref": "#/$defs/GateFrame"
+        },
         "gates": {
           "items": {
             "$ref": "#/$defs/Gate"
@@ -915,6 +948,7 @@
         "location",
         "laps",
         "alt_ref",
+        "gate",
         "gates"
       ],
       "title": "Course",
@@ -965,6 +999,7 @@
           "additionalItems": false
         },
         "alt_m": {
+          "description": "the gate's centre, m above the ground or sea (alt_ref)",
           "type": "number"
         },
         "ypr_deg": {
@@ -984,9 +1019,22 @@
             }
           ],
           "additionalItems": false
-        },
-        "size_m": {
-          "description": "width, height (inside the frame)",
+        }
+      },
+      "required": [
+        "at",
+        "alt_m",
+        "ypr_deg"
+      ],
+      "title": "Gate",
+      "type": "object"
+    },
+    "GateFrame": {
+      "additionalProperties": false,
+      "description": "The course's gate: a square frame round the inside that is flown through.",
+      "properties": {
+        "inside_m": {
+          "description": "width, height of the way through",
           "maxItems": 2,
           "minItems": 2,
           "type": "array",
@@ -999,15 +1047,34 @@
             }
           ],
           "additionalItems": false
+        },
+        "outside_m": {
+          "description": "width, height of the whole frame",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "depth_m": {
+          "description": "the frame's thickness along the way through",
+          "exclusiveMinimum": 0,
+          "type": "number"
         }
       },
       "required": [
-        "at",
-        "alt_m",
-        "ypr_deg",
-        "size_m"
+        "inside_m",
+        "outside_m",
+        "depth_m"
       ],
-      "title": "Gate",
+      "title": "GateFrame",
       "type": "object"
     },
     "Location": {
@@ -1102,67 +1169,6 @@
         "airframe"
       ],
       "title": "PhysicsSpec",
-      "type": "object"
-    },
-    "Scenario": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "mode": {
-          "enum": [
-            "freefly",
-            "duel",
-            "race"
-          ],
-          "type": "string"
-        },
-        "location": {
-          "type": "string"
-        },
-        "vehicles": {
-          "description": "what the vehicle picker offers",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "default_vehicle": {
-          "type": "string"
-        },
-        "course": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "race: the course id"
-        },
-        "blurb": {
-          "default": "",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "mode",
-        "location",
-        "vehicles",
-        "default_vehicle",
-        "course",
-        "blurb"
-      ],
-      "title": "Scenario",
       "type": "object"
     },
     "StartPad": {
@@ -1270,57 +1276,12 @@
       "title": "Vehicle",
       "type": "object"
     },
-    "Wind": {
-      "additionalProperties": false,
-      "properties": {
-        "speed_ms": {
-          "description": "mean wind at 6 m, m/s",
-          "maximum": 30,
-          "minimum": 0,
-          "type": "number"
-        },
-        "from_deg": {
-          "description": "where it blows from, degrees true",
-          "exclusiveMaximum": 360,
-          "minimum": 0,
-          "type": "number"
-        },
-        "turbulence": {
-          "description": "MIL-F-8785C intensity",
-          "enum": [
-            "none",
-            "light",
-            "moderate",
-            "severe"
-          ],
-          "type": "string"
-        },
-        "gusts": {
-          "description": "random 1-cos gusts on top",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "speed_ms",
-        "from_deg",
-        "turbulence",
-        "gusts"
-      ],
-      "title": "Wind",
-      "type": "object"
-    },
     "ContentMsg": {
       "additionalProperties": false,
       "properties": {
         "locations": {
           "additionalProperties": {
             "$ref": "#/$defs/Location"
-          },
-          "type": "object"
-        },
-        "scenarios": {
-          "additionalProperties": {
-            "$ref": "#/$defs/Scenario"
           },
           "type": "object"
         },
@@ -1345,7 +1306,6 @@
       },
       "required": [
         "locations",
-        "scenarios",
         "vehicles",
         "courses",
         "controllers"
@@ -1445,6 +1405,9 @@
     "Gate": {
       "$ref": "#/$defs/Gate"
     },
+    "GateFrame": {
+      "$ref": "#/$defs/GateFrame"
+    },
     "GroundMsg": {
       "$ref": "#/$defs/GroundMsg"
     },
@@ -1480,9 +1443,6 @@
     },
     "RcMsg": {
       "$ref": "#/$defs/RcMsg"
-    },
-    "Scenario": {
-      "$ref": "#/$defs/Scenario"
     },
     "SessionMsg": {
       "$ref": "#/$defs/SessionMsg"

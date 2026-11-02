@@ -22,7 +22,7 @@ def test_page_messages_validate() -> None:
     m = client_msg.validate_json('{"ch":"rc","seq":3,"us":[1500,1500,1000,1500,1000]}')
     assert m.ch == "rc"
     m = client_msg.validate_json(
-        '{"ch":"session","action":"start","scenario":"freefly-toronto","vehicle":"quad5","pad":0}'
+        '{"ch":"session","action":"start","location":"billy-bishop","vehicle":"quad5","pad":0}'
     )
     assert m.ch == "session"
     with pytest.raises(ValidationError):

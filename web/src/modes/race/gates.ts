@@ -1,11 +1,11 @@
 // A race course's gates, and when one is passed (DESIGN.md §7): pure maths, tested in
 // test/gates.test.ts.
 //
-// A gate is a rectangle of `size` (width, height, inside the frame) at its centre, facing the
-// way to fly through it: yaw from true north, pitch up, roll right, as an aircraft's. It is passed
-// when the vehicle's path between two poses crosses its plane forwards inside the rectangle.
+// A gate is a square frame (the course's GateFrame) at its centre, facing the way to fly through
+// it: yaw from true north, pitch up, roll right, as an aircraft's. It is passed when the
+// vehicle's path between two poses crosses its plane forwards inside the frame's inside.
 
-import type { Gate } from "../../net/protocol.ts";
+import type { Gate, GateFrame } from "../../net/protocol.ts";
 import { bodyAxesEnu, neFrom, quatOf, type Vec3 } from "../../world/geo.ts";
 
 export interface GateGeom {
@@ -16,15 +16,20 @@ export interface GateGeom {
   fwd: Vec3;
   right: Vec3;
   up: Vec3;
+  /** The way through: width, height, m. */
   width: number;
   height: number;
+  /** The whole frame: width, height, thickness along the way through, m. */
+  outerWidth: number;
+  outerHeight: number;
+  depth: number;
 }
 
 /** Margin round a gate's inside that still counts, m (a vehicle's half-size). */
 export const MARGIN_M = 0.25;
 
-/** A gate's geometry, its centre `groundAlt` + its alt_m above sea level for an AGL course. */
-export function gateGeom(g: Gate, centreAlt: number): GateGeom {
+/** A gate's geometry, its frame the course's, its centre at sim height `centreAlt`. */
+export function gateGeom(g: Gate, frame: GateFrame, centreAlt: number): GateGeom {
   const d = Math.PI / 180;
   const [yaw, pitch, roll] = g.ypr_deg;
   const { fwd, right, up } = bodyAxesEnu(quatOf(yaw * d, pitch * d, roll * d));
@@ -35,8 +40,11 @@ export function gateGeom(g: Gate, centreAlt: number): GateGeom {
     fwd,
     right,
     up,
-    width: g.size_m[0],
-    height: g.size_m[1],
+    width: frame.inside_m[0],
+    height: frame.inside_m[1],
+    outerWidth: frame.outside_m[0],
+    outerHeight: frame.outside_m[1],
+    depth: frame.depth_m,
   };
 }
 
@@ -71,20 +79,13 @@ export function passes(
   );
 }
 
-/** The four corners of a gate's inside, as east, north, up offsets from its centre. */
-export function corners(g: GateGeom): Vec3[] {
-  const w = g.width / 2;
-  const h = g.height / 2;
+/** A point `across` m right of and `up` m above a gate's centre, as east, north, up from it. */
+export function inPlane(g: GateGeom, across: number, up: number): Vec3 {
   return [
-    [-w, -h],
-    [w, -h],
-    [w, h],
-    [-w, h],
-  ].map(([x, y]) => [
-    g.right[0] * x! + g.up[0] * y!,
-    g.right[1] * x! + g.up[1] * y!,
-    g.right[2] * x! + g.up[2] * y!,
-  ]);
+    g.right[0] * across + g.up[0] * up,
+    g.right[1] * across + g.up[1] * up,
+    g.right[2] * across + g.up[2] * up,
+  ];
 }
 
 /** Progress through a course of `n` gates × `laps`: which gate is next, and the lap times. */
@@ -110,6 +111,15 @@ export class Progress {
   /** The index (0..n-1) of the gate to fly through next. */
   get gate(): number {
     return this.next % this.n;
+  }
+
+  /** The gates (0..n-1) to fly through next, soonest first: up to `count`, none past the finish. */
+  upcoming(count = 3): number[] {
+    const left = this.n * this.lapsTotal - this.next;
+    return Array.from(
+      { length: Math.max(0, Math.min(count, left)) },
+      (_, i) => (this.next + i) % this.n,
+    );
   }
 
   /** Gate passed at `t` s since the start. Returns true when that ended a lap. */
