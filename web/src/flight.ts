@@ -13,6 +13,7 @@ import { switchPos } from "./input/mapping.ts";
 import { radio } from "./input/radio.ts";
 import type { RcMsg, Vehicle } from "./net/protocol.ts";
 import { link, type Pose } from "./net/server.ts";
+import { GOGGLES_M, Operator, operatorSpot } from "./people/operator.ts";
 import {
   content,
   vehicle as currentVehicle,
@@ -63,6 +64,8 @@ export class Flight {
   /** The pad as the sim has it: lat, lon, ground m above sea level, heading. */
   readonly pad = signal<RigContext["pad"] | null>(null);
   mode: ModeRuntime | null = null;
+  /** The pilot standing behind the pad (not for the truck, which they would be driving). */
+  operator: Operator | null = null;
   /** The truck starts this far ahead of the pad (a duel's driver), m. */
   truckAhead = 0;
   private readonly abort = new AbortController();
@@ -167,6 +170,8 @@ export class Flight {
     this.rig?.leave(this.rigContext()!);
     this.body()?.dispose();
     this.body(null);
+    this.operator?.dispose();
+    this.operator = null;
     this.feed.dispose();
     this.minimap.dispose();
     this.mapLayer.dispose();
@@ -205,10 +210,18 @@ export class Flight {
   ): Promise<void> {
     this.body()?.dispose();
     this.body(null);
+    this.operator?.dispose();
+    this.operator = null;
     // Where the map's ground meets the sim's: the scenario's pad.
     const h = await this.world.groundHeightSettled(origin[0], origin[1]);
     if (this.bodyKey !== key || this.abort.signal.aborted) return;
     mapOffset(h - origin[2]);
+    if (spec.kind !== "ground") {
+      const at = { lat: origin[0], lon: origin[1], heading_deg: pad.heading_deg };
+      const spot = await operatorSpot(this.world, at, mapOffset());
+      if (this.bodyKey !== key || this.abort.signal.aborted) return;
+      this.operator = new Operator(this.world, spot);
+    }
     if (pad.lat !== origin[0] || pad.lon !== origin[1]) {
       pad.alt = (await this.world.groundHeightSettled(pad.lat, pad.lon)) - mapOffset();
     }
@@ -257,6 +270,7 @@ export class Flight {
     rig.enter(ctx, this.pose());
     this.world.mouseCamera = rig.mouse;
     this.body()?.setVisible(rig.showVehicle);
+    this.operator?.setVisible(!rig.fromPilot);
     this.feed.setOn(id === "fpv");
     this.mapLayer.setOn(id === "map");
   }
@@ -273,7 +287,8 @@ export class Flight {
     const ctx = this.rigContext();
     if (pose && ctx && this.rig && !paused()) this.rig.update(ctx, pose, dt);
     const pad = this.pad();
-    if (pad) this.feed.setPilot(pad.lat, pad.lon, pad.alt + 1.5);
+    const pilot = this.operator?.spot ?? pad;
+    if (pilot) this.feed.setPilot(pilot.lat, pilot.lon, pilot.alt + GOGGLES_M);
     this.feed.frame(now, pose);
     this.mode?.tick(now, pose);
     this.minimap.setMarks([
@@ -346,6 +361,7 @@ export class Flight {
           (180 / Math.PI);
       const h = await this.world.groundHeight(lat, lon, [
         ...body.primitives,
+        ...(this.operator?.primitives ?? []),
         ...this.dynamics.primitives,
       ]);
       if (h !== undefined) link.send({ ch: "ground", lat, lon, alt: h - mapOffset() });

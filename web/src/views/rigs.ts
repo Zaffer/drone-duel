@@ -10,6 +10,7 @@
 import * as C from "cesium";
 import type { CameraSpec } from "../net/protocol.ts";
 import type { Pose } from "../net/server.ts";
+import { GOGGLES_M, pilotOffset } from "../people/operator.ts";
 import type { ViewId } from "../state/prefs.ts";
 import {
   add3,
@@ -43,6 +44,8 @@ export interface Rig {
   readonly mouse: boolean;
   /** Whether the vehicle's own model is drawn (not from inside it). */
   readonly showVehicle: boolean;
+  /** Whether the camera is the pilot's own eye, so the operator is not drawn. */
+  readonly fromPilot?: boolean;
   enter(ctx: RigContext, pose: Pose | null): void;
   update(ctx: RigContext, pose: Pose, dt: number): void;
   leave(ctx: RigContext): void;
@@ -141,15 +144,16 @@ const spotter: Rig = {
   id: "spotter",
   mouse: false,
   showVehicle: true,
+  fromPilot: true,
   enter(ctx) {
     frustum(ctx).fov = C.Math.toRadians(ctx.fovDeg);
   },
   update(ctx, pose) {
     const p = ctx.pad;
-    // The pilot stands 3 m behind the pad, eyes 1.7 m up.
-    const h = C.Math.toRadians(p.heading_deg);
+    // Where the operator stands, behind the pad: their goggles.
     const padPos = toFixed(p.lat, p.lon, p.alt, scratchPos);
-    const eye = offsetEnu(padPos, [-Math.sin(h) * 3, -Math.cos(h) * 3, 1.7], new C.Cartesian3());
+    const [east, north] = pilotOffset(p.heading_deg);
+    const eye = offsetEnu(padPos, [east, north, GOGGLES_M], new C.Cartesian3());
     const target = toFixed(pose.lat, pose.lon, pose.alt, new C.Cartesian3());
     // Zoom as an eye would squint: narrower the farther it is, never narrower than 15°.
     const dist = C.Cartesian3.distance(eye, target);

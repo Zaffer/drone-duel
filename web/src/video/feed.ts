@@ -5,9 +5,9 @@
 // analog chain resamples it to 754 × 480: more is wasted), then sent through analog-vision's
 // AnalogFeed, signal by signal: the OSD goes into the video before the transmitter, as the
 // flight controller's OSD chip puts it, so the link spoils it too. The link's carrier to noise
-// is free space from the pilot (setPilot: the goggles at the start pad) at the VTX power, each end
-// a dipole standing up from its frame, with slow fading on top. Without WebGL2's float targets,
-// the world plain with the OSD laid over it.
+// is free space from the pilot (setPilot: the operator's goggles, behind the start pad) at the
+// VTX power, each end a dipole standing up from its frame, with slow fading on top. Without
+// WebGL2's float targets, the world plain with the OSD laid over it.
 //
 // Digital: 16:9, letterboxed in the window, no effect, the HD OSD grid laid over the picture as
 // DJI/HDZero/Walksnail goggles draw it.

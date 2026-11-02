@@ -13,6 +13,7 @@ const ESRI_TERRAIN =
 const MODEL_CREDITS = [
   'Drone model: "FPV Drone" by PinaPipe (CC BY 4.0)',
   'Truck model: "Military Truck" by Raphael Escamilla (CC BY 4.0)',
+  'Operator model: "Quantum Modular Character Free Sample" (Fab)',
 ];
 
 export type GroundSource = "google" | "ion" | "esri";
