@@ -4,11 +4,12 @@
 import "./cesium-base.ts";
 import "./theme/base.css";
 import "./ui/ui.css";
+import { effect } from "alien-signals";
 import { radio } from "./input/radio.ts";
 import { api } from "./net/api.ts";
 import { link } from "./net/server.ts";
-import { config, content, screen } from "./state/app.ts";
-import { loadPrefs } from "./state/prefs.ts";
+import { config, content, location, screen } from "./state/app.ts";
+import { loadPrefs, prefs } from "./state/prefs.ts";
 import { wireSession } from "./state/session.ts";
 import { mountApp } from "./ui/app.ts";
 import { World } from "./world/world.ts";
@@ -21,6 +22,8 @@ async function boot(): Promise<void> {
   wireSession();
   link.open();
   const world = new World(document.getElementById("world")!, cfg.map_keys);
+  // The sun: the time of day set in Graphics, at the place chosen.
+  effect(() => world.setTimeOfDay(prefs().graphics.timeOfDay, location()?.origin[1] ?? 0));
   // For the console and the browser tests: the world, the link and the controller.
   (window as unknown as { duels: unknown }).duels = { world, link, radio };
   mountApp(document.getElementById("app")!, world);

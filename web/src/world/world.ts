@@ -65,6 +65,21 @@ export class World {
     this.ready = this.load(keys);
   }
 
+  /** The sun at `hour` (0–24) of local solar time at longitude `lon`, today, and held there; or,
+   * with null, the real time. Cesium lights the models and the sky by the clock's sun. */
+  setTimeOfDay(hour: number | null, lon: number): void {
+    const clock = this.viewer.clock;
+    if (hour === null) {
+      clock.clockStep = C.ClockStep.SYSTEM_CLOCK;
+      return;
+    }
+    const now = new Date();
+    const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    clock.clockStep = C.ClockStep.TICK_DEPENDENT;
+    clock.multiplier = 0;
+    clock.currentTime = C.JulianDate.fromDate(new Date(midnight + (hour - lon / 15) * 3_600_000));
+  }
+
   /** True when the ground is a 3D tileset rather than the globe surface. */
   get groundIsTiles(): boolean {
     return this.tileset !== null;

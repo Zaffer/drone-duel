@@ -66,6 +66,13 @@ function check(get: () => boolean, set: (v: boolean) => void): HTMLInputElement 
   return c;
 }
 
+/** "06:30", "12:00 noon" from hours. */
+const hourText = (hours: number) => {
+  const hh = String(Math.floor(hours)).padStart(2, "0");
+  const mm = String(Math.round((hours % 1) * 60)).padStart(2, "0");
+  return `${hh}:${mm}${hours === 12 ? " noon" : ""}`;
+};
+
 const setP = <K extends keyof Prefs>(k: K, v: Partial<Prefs[K]>) =>
   updatePrefs((p) => ({ ...p, [k]: { ...p[k], ...v } }));
 
@@ -396,6 +403,17 @@ export function openPause(
               ],
               () => prefs().graphics.quality,
               (v) => setP("graphics", { quality: v }),
+            ),
+          ),
+          opt(
+            "Time of day",
+            ...slider(
+              -0.5,
+              23.5,
+              0.5,
+              () => prefs().graphics.timeOfDay ?? -0.5,
+              (v) => setP("graphics", { timeOfDay: v < 0 ? null : v }),
+              (v) => (v < 0 ? "real time" : `${hourText(v)} local`),
             ),
           ),
           opt(

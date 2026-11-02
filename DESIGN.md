@@ -423,7 +423,7 @@ to a view, R resets, B switches vehicle, D shows the dynamics overlay (Chupito),
 | Wind | speed, direction, turbulence level, gusts on/off, "gust now" |
 | Controls | controller profile, calibration wizard, channel map, expo/rates for the truck, keyboard |
 | Inputs | every hotkey, and each vehicle's sticks and switches on a radio, gamepad and keyboard (`ui/inputs.ts`, which the HUD's key strip also reads) |
-| Graphics | map source and keys (Google, Cesium ion, Esri), quality, frame cap |
+| Graphics | map source and keys (Google, Cesium ion, Esri), quality, frame cap, time of day (the sun's local solar hour, noon by default, or the real time) |
 | Audio | master, effects, motor sound |
 | Session | QGroundControl port info, restart firmware, quit to menu |
 

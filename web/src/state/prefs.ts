@@ -29,7 +29,13 @@ export interface Prefs {
     /** Read the radio in the server (Linux evdev) rather than through Chrome. */
     serverRadio: boolean;
   };
-  graphics: { quality: "low" | "medium" | "high"; maxFps: number };
+  graphics: {
+    quality: "low" | "medium" | "high";
+    maxFps: number;
+    /** The sun's hour of local solar time at the place flown (0–24), or null for the real time
+     * (World.setTimeOfDay). */
+    timeOfDay: number | null;
+  };
   audio: { on: boolean; master: number; motors: number; effects: number };
   hud: { minimap: boolean; dials: boolean; units: "metric" | "imperial" };
 }
@@ -39,14 +45,15 @@ export const DEFAULT_PREFS: Prefs = {
   video: { system: "analog", vtxMw: 25, osd: true, tiltDeg: null },
   view: { initial: "fpv", chaseDistance: 4, fovDeg: 75 },
   controls: { calibrations: {}, serverRadio: false },
-  graphics: { quality: "high", maxFps: 0 },
+  graphics: { quality: "high", maxFps: 0, timeOfDay: 12 },
   audio: { on: true, master: 0.8, motors: 0.6, effects: 0.8 },
   hud: { minimap: true, dials: true, units: "metric" },
 };
 
 function merge<T>(base: T, over: unknown): T {
   if (typeof base !== "object" || base === null || Array.isArray(base)) {
-    return (over ?? base) as T;
+    // A saved null is a choice (the real time of day), not a missing value.
+    return (over === undefined ? base : over) as T;
   }
   if (typeof over !== "object" || over === null) return base;
   const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
