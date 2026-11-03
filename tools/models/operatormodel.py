@@ -34,7 +34,7 @@ SOURCE_URL = "https://www.fab.com/listings/8e200050-3158-4762-b297-f785b5b1533d"
 LEFT_OUT = {"Eye", "Eyelashes", "Teeth_UP", "Teeth_Down"}
 """Under the goggles, or inside the mouth."""
 BACK_TO_FRONT = {"Cap", "SKM_Patch_Flag_Cap"}
-"""Turned about the crown: the brim would cut through the goggles."""
+"""Turned back to front about the cap's own axis: the brim would cut through the goggles."""
 COLOURS: dict[str, tuple[str, float]] = {
     # the gear's materials: sRGB colour, roughness
     "goggles": ("#1a1b1f", 0.4),
@@ -61,6 +61,12 @@ ANTENNA_LENGTH = 22.0
 """Each of the radio's two long-range antennas, standing up from hinges on its top corners."""
 ANTENNA_SPLAY_DEG = 12.0
 """Each leans out from upright by this much, in a V."""
+CAP_TILT_DEG = 24.0
+"""The cap's band leans back this much: its strap sits 8 cm below the brim's seam, 18 cm behind.
+Turned about the vertical, the strap would come down over the eyes; about the band's own axis,
+it stays up on the forehead, above the goggles, and the brim drops over the nape."""
+CAP_PIVOT = np.array([0.0, 175.0, 1.0])
+"""Where that axis passes, mid-head: the turned cap still covers the scalp."""
 GOGGLES_SIZE = np.array([17.0, 7.5, 7.0])
 GOGGLES_GAP = 0.6
 """Between the goggles' back and the face, and the strap and the head."""
@@ -185,10 +191,17 @@ def hold_radio(pose: Pose) -> None:
                 pose.rotate(f"{finger}_{joint}_{side}", axis_angle(curl_axis, np.radians(degrees)))
 
 
-def turn_back_to_front(mesh: SkinnedMesh, crown: np.ndarray) -> None:
-    """Half a turn about the vertical through `crown` (x, z), in place."""
-    mesh.points[:, [0, 2]] = 2 * crown - mesh.points[:, [0, 2]]
-    mesh.normals[..., [0, 2]] *= -1
+def cap_axis() -> np.ndarray:
+    """The cap's own up, square to its band: leaning back by CAP_TILT_DEG."""
+    tilt = np.radians(CAP_TILT_DEG)
+    return np.array([0.0, np.cos(tilt), -np.sin(tilt)])
+
+
+def turn_back_to_front(mesh: SkinnedMesh) -> None:
+    """Half a turn about the cap's axis through CAP_PIVOT, in place."""
+    turn = axis_angle(cap_axis(), np.pi)
+    mesh.points[:] = (mesh.points - CAP_PIVOT) @ turn.T + CAP_PIVOT
+    mesh.normals[:] = mesh.normals @ turn.T
 
 
 def bake(mesh: SkinnedMesh, skinning: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
@@ -359,14 +372,11 @@ def operator_parts(source: bytes) -> list[Primitive]:
     eyes = every["Eye"].points  # the head bone stays put: bind pose and pose agree
     meshes = [m for name, m in every.items() if name not in LEFT_OUT]
 
-    top = every["Head"].points
-    top = top[top[:, 1] > top[:, 1].max() - 10.0][:, [0, 2]]
-    crown = (top.min(axis=0) + top.max(axis=0)) / 2
     groups: dict[str, list[Primitive]] = {}
     head: np.ndarray | None = None
     for mesh in meshes:
         if mesh.name in BACK_TO_FRONT:
-            turn_back_to_front(mesh, crown)
+            turn_back_to_front(mesh)
         points, normals = bake(mesh, skinning)
         if mesh.name == "Head":
             head = points
