@@ -5,6 +5,7 @@ import "./cesium-base.ts";
 import "./theme/base.css";
 import "./ui/ui.css";
 import { effect } from "alien-signals";
+import { perf } from "./hud/perf.ts";
 import { radio } from "./input/radio.ts";
 import { api } from "./net/api.ts";
 import { link } from "./net/server.ts";
@@ -24,8 +25,8 @@ async function boot(): Promise<void> {
   const world = new World(document.getElementById("world")!, cfg.map_keys);
   // The sun: the time of day set in Graphics, at the place chosen.
   effect(() => world.setTimeOfDay(prefs().graphics.timeOfDay, location()?.origin[1] ?? 0));
-  // For the console and the browser tests: the world, the link and the controller.
-  (window as unknown as { duels: unknown }).duels = { world, link, radio };
+  // For the console and the browser tests: the world, the link, the controller, the frame stats.
+  (window as unknown as { duels: unknown }).duels = { world, link, radio, perf };
   mountApp(document.getElementById("app")!, world);
   screen("menu");
 }

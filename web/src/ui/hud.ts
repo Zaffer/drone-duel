@@ -2,11 +2,12 @@
 // minimap bottom right (the dials hide in FPV, where the OSD is the instrument panel), toasts,
 // what the session is doing while it starts, the mode's banner and panel, and the keys:
 //   Esc pause and options   V / 1-6 views   R reset   B vehicle   T throw   D dynamics
-//   N minimap   H keys help   G a gust now
+//   N minimap   H keys help   G a gust now   P performance
 
 import { effect } from "alien-signals";
 import { type Flight, sendWind } from "../flight.ts";
 import { mountDials } from "../hud/dials.ts";
+import { mountPerf } from "../hud/perf.ts";
 import { link } from "../net/server.ts";
 import {
   dynamicsOn,
@@ -96,6 +97,8 @@ export function mountHud(
   const starting = h("div", { class: "starting" });
   const banner = h("div", { class: "banner" });
   const panelHost = h("div");
+  const perfBox = h("div");
+  const perfPanel = mountPerf(perfBox);
   const keysHelp = h(
     "div",
     { class: "keys-help" },
@@ -115,6 +118,7 @@ export function mountHud(
     starting,
     banner,
     panelHost,
+    perfBox,
     keysHelp,
   );
   root.replaceChildren(hud);
@@ -152,6 +156,7 @@ export function mountHud(
       updatePrefs((p) => ({ ...p, hud: { ...p.hud, minimap: !p.hud.minimap } }));
     else if (e.code === "KeyH") keysHelp.classList.toggle("faded");
     else if (e.code === "KeyG") sendWind(true);
+    else if (e.code === "KeyP") perfPanel.toggle();
   };
   window.addEventListener("keydown", keys);
 
@@ -253,6 +258,7 @@ export function mountHud(
 
   return () => {
     disposeDials();
+    perfPanel.dispose();
     for (const d of disposers) d();
     clearInterval(fadeTimer);
     window.removeEventListener("keydown", keys);

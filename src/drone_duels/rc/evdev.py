@@ -3,8 +3,8 @@
 A drone radio in USB joystick mode is a HID joystick: on Linux an input device with up to eight
 absolute axes (X, Y, Z, RX, RY, RZ, THROTTLE, RUDDER), channel n on axis n. `RadioReader` finds the
 first joystick in /proc/bus/input/devices, reads it in a thread of its own and finds it again once
-it is plugged back in. The page asks for it (protocol.RadioSourceMsg) and gets every axis, -1..1
-as the radio reports it, nothing reversed; it maps and calibrates them as it does a gamepad's.
+it is plugged back in, and calls `on_change` on every movement (and when it comes or goes). Every
+axis is -1..1 as the radio reports it, nothing reversed; rc.pilot maps and flies them.
 """
 
 import fcntl
@@ -14,6 +14,7 @@ import re
 import select
 import struct
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,7 +76,8 @@ def find_joysticks(devices: str | None = None) -> list[Joystick]:
 
 
 class RadioReader:
-    def __init__(self) -> None:
+    def __init__(self, on_change: Callable[[], None] | None = None) -> None:
+        self._on_change = on_change or (lambda: None)
         self._axes: dict[int, Axis] = {}
         self._device: Joystick | None = None
         self._lock = threading.Lock()
@@ -118,18 +120,21 @@ class RadioReader:
                 self._axes = read_axes(fd)
                 self._device = sticks[0]
             log.info("radio: %s", sticks[0].name)
+            self._on_change()
             try:
                 while not self._stop.is_set():
                     if select.select([fd], [], [], 0.5)[0]:
                         data = os.read(fd, INPUT_EVENT.size * 64)
                         with self._lock:
                             apply_events(data, self._axes)
+                        self._on_change()
             except OSError as exc:
                 log.info("radio unplugged (%s)", exc)
             finally:
                 os.close(fd)
                 with self._lock:
                     self._device = None
+                self._on_change()
 
 
 def read_axes(fd: int) -> dict[int, Axis]:

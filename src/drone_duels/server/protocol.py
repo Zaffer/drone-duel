@@ -79,11 +79,13 @@ class DynamicsMsg(Msg):
 
 
 class RadioSourceMsg(Msg):
-    """Read the radio in the server (Linux evdev) and stream its axes here (RadioMsg), for when
-    Chrome's Gamepad API cannot see all of it; or stop."""
+    """Read the radio in the server (Linux evdev) and stream it here (RadioMsg), for when
+    Chrome's Gamepad API cannot see all of it; or stop. `fly`: the server flies it straight to
+    the firmware (rc.pilot), and the page sends no `rc` (DESIGN.md §12)."""
 
     ch: Literal["radio_source"] = "radio_source"
     on: bool
+    fly: bool = False
 
 
 ClientMsg = Annotated[
@@ -187,12 +189,14 @@ class PhysicsMsg(Msg):
 
 
 class RadioMsg(Msg):
-    """The radio as the server reads it: every axis, -1..1, nothing reversed; name None with no
-    radio. At the radio's rate while a page asks (RadioSourceMsg)."""
+    """The radio as the server reads it: every axis, -1..1, nothing reversed, and the channels
+    as the server maps them (its profile, the player's calibration); name None with no radio. At
+    60 Hz while a page asks (RadioSourceMsg)."""
 
     ch: Literal["radio"] = "radio"
     name: str | None
     axes: list[float]
+    channels: list[float] = Field(default_factory=list)
 
 
 ServerMsg = Annotated[

@@ -29,7 +29,7 @@ import type { ModeContext, ModeDef } from "../types.ts";
 import { type Match, pilotOf, strikes, winner } from "./judge.ts";
 
 const TYPES = ["start", "match", "aircraft", "pose", "hit", "lost", "out"];
-const POSE_HZ = 20;
+const POSE_HZ = 30;
 const RESPAWN_MS = 2500;
 const SWAP_S = 6;
 const TRUCK = "truck";
@@ -313,7 +313,6 @@ class DuelRuntime implements ModeRuntime {
       spec,
       "#22C7B8",
       this.room.peer()?.name ?? "Opponent",
-      () => this.room.clockOffset,
     );
   }
 
@@ -390,14 +389,15 @@ class DuelRuntime implements ModeRuntime {
     const ready = status().state === "ready";
     if (pose && ready && now - this.lastSent > 1000 / POSE_HZ) {
       this.lastSent = now;
-      this.room.send("pose", {
+      this.room.sendFast("pose", {
         kind: this.amPilot ? "air" : "truck",
         lat: pose.lat,
         lon: pose.lon,
         h: pose.alt + mapOffset(),
         q: pose.q,
         v: pose.v,
-        t: Date.now(),
+        // The sender's clock when it was there: the frame it was sampled for.
+        t: performance.timeOrigin + now,
       });
     }
     const other = this.ghost?.draw() ?? null;

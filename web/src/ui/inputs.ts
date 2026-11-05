@@ -45,6 +45,10 @@ export const flightKeys = (): Hotkey[] => [
   { keys: ["N"], does: "The minimap, on or off", strip: "minimap" },
   { keys: ["H"], does: "The key strip, shown or hidden", strip: "help" },
   { keys: ["G"], does: "A gust now, as the Wind tab sets it" },
+  {
+    keys: ["P"],
+    does: "The performance panel: frame rate, frame time, how far the pose is carried on, where the sticks come from",
+  },
 ];
 
 const overlayKeys = (): Hotkey[] => [

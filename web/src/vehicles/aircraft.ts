@@ -1,20 +1,22 @@
 // An aircraft flown by its firmware on the server's physics: its glTF model, placed each frame at
-// the true pose (link.poses()), extrapolated to the frame's time. A model-specific `animate`
-// moves its parts (rotors, elevons) from the pose's actuators.
+// the true pose (link.poses()) on the physics' own clock, from its timeline (DESIGN.md §3.1). A
+// model-specific `animate` moves its parts (rotors, elevons) from the pose's actuators.
 
 import * as C from "cesium";
 import type { Vehicle } from "../net/protocol.ts";
 import { link, type Pose } from "../net/server.ts";
 import { modelMatrix, toFixed } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
-import { type Body, extrapolate } from "./types.ts";
+import { Timeline } from "./timeline.ts";
+import type { Body } from "./types.ts";
 
 export type Animate = (model: C.Model, pose: Pose, dt: number) => void;
 
 export class Aircraft implements Body {
   model: C.Model | null = null;
   readonly primitives: object[] = [];
-  private latest: Pose | null = null;
+  /** The poses by sim time. */
+  readonly timeline = new Timeline<Pose>();
   private readonly abort = new AbortController();
   private readonly matrix = new C.Matrix4();
   private visible = true;
@@ -28,7 +30,9 @@ export class Aircraft implements Body {
     link.poses().subscribe(
       (p) => {
         // A NaN in a model's matrix stops Cesium rendering for good.
-        if ([p.lat, p.lon, p.alt, ...p.q].every(Number.isFinite)) this.latest = p;
+        if ([p.t, p.lat, p.lon, p.alt, ...p.q].every(Number.isFinite)) {
+          this.timeline.push(p, p.at);
+        }
       },
       { signal: this.abort.signal },
     );
@@ -36,7 +40,7 @@ export class Aircraft implements Body {
       .then((model) => {
         if (this.abort.signal.aborted) return;
         this.model = model;
-        model.show = this.visible && this.latest !== null;
+        model.show = this.visible && this.timeline.newest !== null;
         world.scene.primitives.add(model);
         this.primitives.push(model);
       })
@@ -44,8 +48,11 @@ export class Aircraft implements Body {
   }
 
   poseAt(now: number): Pose | null {
-    const p = this.latest;
-    return p ? extrapolate(p, (now - p.at) / 1000) : null;
+    return this.timeline.sample(now);
+  }
+
+  ahead(now: number): number {
+    return this.timeline.ahead(now);
   }
 
   draw(now: number): void {
@@ -62,7 +69,7 @@ export class Aircraft implements Body {
 
   setVisible(on: boolean): void {
     this.visible = on;
-    if (this.model) this.model.show = on && this.latest !== null;
+    if (this.model) this.model.show = on && this.timeline.newest !== null;
   }
 
   dispose(): void {

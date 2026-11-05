@@ -1,53 +1,38 @@
 import { describe, expect, test } from "bun:test";
-import { calibrate, profileFor, switchPos, toChannels } from "../src/input/mapping.ts";
-import type { Controller } from "../src/net/protocol.ts";
+import cases from "../../tests/fixtures/mapping.json";
+import { calibrate, profileFor, switchPos, toChannels, toFirmware } from "../src/input/mapping.ts";
+import type { Controller, Vehicle } from "../src/net/protocol.ts";
+import type { Calibration } from "../src/state/prefs.ts";
 
-const literadio: Controller = {
-  id: "literadio2",
-  name: "BETAFPV LiteRadio 2",
-  match: ["0483", "5750", "BETAFPV"],
-  channels: [0, 1, 2, 3, 4, 5, 6, 7].map((axis) => ({
-    axis,
-    reverse: false,
-  })) as Controller["channels"],
-  notes: "",
-};
+// The cases the server's mapping (drone_duels.rc.mapping) passes too.
+const profiles = cases.profiles as unknown as Record<string, Controller>;
 
 describe("mapping", () => {
-  test("a profile is picked by any of its match strings", () => {
-    expect(
-      profileFor("STMicroelectronics BETAFPV Joystick (Vendor: 0483 Product: 5750)", [literadio])
-        ?.id,
-    ).toBe("literadio2");
-    expect(profileFor("Xbox Wireless Controller", [literadio])).toBeNull();
+  test.each(cases.profile_for)("a profile is picked by any of its match strings: $id", (c) => {
+    expect(profileFor(c.id, Object.values(profiles))?.id ?? null).toBe(c.profile);
   });
 
-  test("centred channels map about their centre, others end to end", () => {
-    const cal = { min: -0.8, mid: 0.1, max: 0.9 };
-    expect(calibrate(0.1, cal, true)).toBeCloseTo(0);
-    expect(calibrate(0.9, cal, true)).toBeCloseTo(1);
-    expect(calibrate(-0.8, cal, true)).toBeCloseTo(-1);
-    expect(calibrate(-0.8, cal, false)).toBeCloseTo(-1);
-    expect(calibrate(0.05, cal, false)).toBeCloseTo(0);
-    expect(calibrate(5, cal, false)).toBe(1);
+  test.each(cases.calibrate)("calibrate $raw (centred $centred)", (c) => {
+    expect(calibrate(c.raw, c.cal, c.centred)).toBeCloseTo(c.out);
   });
 
-  test("a calibration overrides the profile, axis and direction", () => {
-    const axes = [0.5, -0.2, -1, 0, 1, 0, -1, 1];
-    const cal = {
-      channels: [
-        { axis: 1, reverse: true, cal: { min: -1, mid: 0, max: 1 } },
-        { axis: 0, reverse: false, cal: { min: -1, mid: 0, max: 1 } },
-      ],
-    };
-    expect(toChannels(axes, [], literadio, cal)).toEqual([0.2, 0.5]);
-    expect(toChannels(axes, [], literadio, undefined)).toEqual(axes);
+  test.each(cases.channels)("$why", (c) => {
+    const profile = c.profile ? profiles[c.profile]! : null;
+    const got = toChannels(
+      c.axes,
+      c.buttons,
+      profile,
+      (c.calibration ?? undefined) as Calibration | undefined,
+    );
+    expect(got.length).toBe(c.out.length);
+    got.forEach((x, i) => expect(x).toBeCloseTo(c.out[i]!));
   });
 
-  test("switch positions", () => {
-    expect(switchPos(-1)).toBe(0);
-    expect(switchPos(0)).toBe(1);
-    expect(switchPos(1)).toBe(2);
-    expect(switchPos(undefined)).toBe(0);
+  test.each(cases.switch_pos)("switch position of $x", (c) => {
+    expect(switchPos(c.x ?? undefined)).toBe(c.pos as 0 | 1 | 2);
+  });
+
+  test.each(cases.to_firmware)("$why", (c) => {
+    expect(toFirmware(c.channels, c.firmware as Vehicle["firmware"]["kind"])).toEqual(c.us);
   });
 });

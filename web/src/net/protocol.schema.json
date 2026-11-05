@@ -240,7 +240,7 @@
     },
     "RadioSourceMsg": {
       "additionalProperties": false,
-      "description": "Read the radio in the server (Linux evdev) and stream its axes here (RadioMsg), for when\nChrome's Gamepad API cannot see all of it; or stop.",
+      "description": "Read the radio in the server (Linux evdev) and stream it here (RadioMsg), for when\nChrome's Gamepad API cannot see all of it; or stop. `fly`: the server flies it straight to\nthe firmware (rc.pilot), and the page sends no `rc` (DESIGN.md \u00a712).",
       "properties": {
         "ch": {
           "const": "radio_source",
@@ -249,11 +249,16 @@
         },
         "on": {
           "type": "boolean"
+        },
+        "fly": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
         "ch",
-        "on"
+        "on",
+        "fly"
       ],
       "title": "RadioSourceMsg",
       "type": "object"
@@ -673,7 +678,7 @@
     },
     "RadioMsg": {
       "additionalProperties": false,
-      "description": "The radio as the server reads it: every axis, -1..1, nothing reversed; name None with no\nradio. At the radio's rate while a page asks (RadioSourceMsg).",
+      "description": "The radio as the server reads it: every axis, -1..1, nothing reversed, and the channels\nas the server maps them (its profile, the player's calibration); name None with no radio. At\n60 Hz while a page asks (RadioSourceMsg).",
       "properties": {
         "ch": {
           "const": "radio",
@@ -695,12 +700,19 @@
             "type": "number"
           },
           "type": "array"
+        },
+        "channels": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
         }
       },
       "required": [
         "ch",
         "name",
-        "axes"
+        "axes",
+        "channels"
       ],
       "title": "RadioMsg",
       "type": "object"

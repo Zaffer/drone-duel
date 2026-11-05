@@ -6,6 +6,11 @@
 // The source with the most axes wins; on a tie, the server's: Chrome can list an axis and never
 // move it (the LiteRadio 2's CH5 and CH8), which Linux reads fine. A radio is any pad without the
 // standard mapping that has four axes or more.
+//
+// The server's radio flies from the server (rc/pilot.py), never through this page's thread, which
+// is busy drawing (DESIGN.md §3.1, §12): this says whether it flies (`radio_source`), and takes
+// its channels as the server maps them, for the UI and the truck. Flight sends `rc` only for the
+// page's own controllers.
 
 import { link } from "../net/server.ts";
 import { content, paused } from "../state/app.ts";
@@ -30,8 +35,11 @@ export interface RawController {
 }
 
 class Radio extends EventTarget {
-  /** The server's reading of the radio, newest. */
-  private server: { name: string | null; axes: number[]; at: number } | null = null;
+  /** The server's reading of the radio, newest, with its channels as the server maps them. */
+  private server: { name: string | null; axes: number[]; channels: number[]; at: number } | null =
+    null;
+  /** Whether the server's radio flies (as last told to the server). */
+  private serverFlies = false;
   private keys = new Set<string>();
   private keyState: KeyState = { throttle: -1, armed: false, modePos: 0 };
   private padArm = { armed: false, modePos: 0, a: false, x: false };
@@ -43,10 +51,11 @@ class Radio extends EventTarget {
   raw: RawController | null = null;
 
   start(): void {
-    link.send({ ch: "radio_source", on: true });
-    link.when("open").subscribe(() => link.send({ ch: "radio_source", on: true }));
+    const tell = () => link.send({ ch: "radio_source", on: true, fly: this.serverFlies });
+    tell();
+    link.when("open").subscribe(tell);
     link.on("radio").subscribe((m) => {
-      this.server = { name: m.name, axes: m.axes, at: performance.now() };
+      this.server = { name: m.name, axes: m.axes, channels: m.channels, at: performance.now() };
     });
     window.addEventListener("keydown", (e) => {
       this.keys.add(e.code);
@@ -105,12 +114,21 @@ class Radio extends EventTarget {
     this.last = now;
     const raw = this.pick();
     this.raw = raw;
+    const serverFlies = !this.keyboard && raw?.source === "server";
+    if (serverFlies !== this.serverFlies) {
+      this.serverFlies = serverFlies;
+      link.send({ ch: "radio_source", on: true, fly: serverFlies });
+    }
     let out: number[];
     if (this.keyboard || !raw) {
       // The keyboard: chosen in Controls, or the only controller there is.
       out = keyboardChannels(this.keys, this.keyState, dt);
       if (inputSource() !== "keyboard") inputSource("keyboard");
       if (controllerName() !== "Keyboard") controllerName("Keyboard");
+    } else if (raw.source === "server" && this.server?.channels.length) {
+      out = this.server.channels;
+      if (controllerName() !== this.serverName()) controllerName(this.serverName());
+      if (inputSource() !== "server") inputSource("server");
     } else if (!raw.standard) {
       const profiles = Object.values(content()?.controllers ?? {});
       const profile = profileFor(raw.id, profiles);
@@ -132,6 +150,14 @@ class Radio extends EventTarget {
     }
     this.latest = out;
     this.dispatchEvent(new CustomEvent("sample", { detail: out }));
+  }
+
+  /** The server's radio by its profile's name, else its own. */
+  private serverName(): string | null {
+    const name = this.server?.name ?? null;
+    if (!name) return null;
+    const profile = profileFor(name, Object.values(content()?.controllers ?? {}));
+    return profile?.name ?? name;
   }
 
   /** The newest sample (the UI copies it into `channels` once a frame). */

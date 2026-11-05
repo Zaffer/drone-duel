@@ -9,7 +9,6 @@ import asyncio
 import json
 import logging
 import os
-import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,7 +22,7 @@ from pydantic import ValidationError
 from drone_duels import __version__, ports
 from drone_duels.content.store import Content
 from drone_duels.content.store import load as load_content
-from drone_duels.rc.evdev import RadioReader
+from drone_duels.rc.pilot import Pilot
 from drone_duels.server import prefs
 from drone_duels.server.protocol import (
     ConfigMsg,
@@ -83,48 +82,6 @@ class Client:
             pose, self.pose = self.pose, None
             if pose is not None:
                 await self.ws.send_bytes(pose)
-
-
-class RadioStream:
-    """The radio read in the server (rc.evdev), streamed to the pages at RATE_HZ while any asks."""
-
-    RATE_HZ = 250.0
-
-    def __init__(self, hub: "Hub") -> None:
-        self.hub = hub
-        self.wanted: set[object] = set()
-        self.reader: RadioReader | None = None
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def want(self, who: object, on: bool) -> None:
-        if on:
-            self.wanted.add(who)
-        else:
-            self.wanted.discard(who)
-        if self.wanted and self._thread is None:
-            self.reader = RadioReader()
-            self.reader.start()
-            self._stop.clear()
-            self._thread = threading.Thread(target=self._run, name="radio-stream", daemon=True)
-            self._thread.start()
-        elif not self.wanted and self._thread is not None:
-            self.close()
-
-    def close(self) -> None:
-        self._stop.set()
-        if self._thread:
-            self._thread.join(1)
-        if self.reader:
-            self.reader.stop()
-        self._thread = self.reader = None
-
-    def _run(self) -> None:
-        reader = self.reader
-        assert reader is not None
-        while not self._stop.wait(1 / self.RATE_HZ):
-            axes = reader.axes()
-            self.hub.publish({"ch": "radio", "name": reader.name, "axes": axes or []})
 
 
 class Hub:
@@ -200,7 +157,7 @@ def create_app(
     hub = Hub()
     session = session or Session(content, hub, slot=slot)
     session.events = hub
-    radio = RadioStream(hub)
+    pilot = Pilot(session, hub.publish, content, prefs.load())
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -211,7 +168,7 @@ def create_app(
             yield
         finally:
             await asyncio.to_thread(session.close)
-            radio.close()
+            pilot.close()
 
     app = FastAPI(title="Drone Duels", version=__version__, lifespan=lifespan)
     app.state.hub = hub
@@ -243,6 +200,7 @@ def create_app(
         if not isinstance(data, dict):
             raise HTTPException(400, "prefs must be a JSON object")
         prefs.save(data)
+        pilot.set_prefs(data)
         return data
 
     @app.get("/osd/font/{name}.png")
@@ -270,12 +228,12 @@ def create_app(
                 text = await ws.receive_text()
                 msg = handle(session, text)
                 if isinstance(msg, RadioSourceMsg):
-                    radio.want(client, msg.on)
+                    pilot.want(client, msg.on, msg.fly)
         except WebSocketDisconnect:
             pass
         finally:
             hub.clients.discard(client)
-            radio.want(client, False)
+            pilot.want(client, False)
             pump.cancel()
 
     if (CESIUM / "Cesium.js").exists():

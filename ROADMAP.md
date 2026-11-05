@@ -47,7 +47,8 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 
 - Test and tune more radio profiles; a shared profile format others can contribute.
 - Windows (WSL2) and macOS.
-- A low-latency native input path (SDL2 in the server), if the Gamepad API's latency shows.
+- Gamepads read in the server too (SDL2), as the radio already is (`rc/pilot.py`), so no
+  controller's sticks pass through the page's busy thread (DESIGN.md §3.1).
 
 ## Hardware
 

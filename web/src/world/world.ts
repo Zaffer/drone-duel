@@ -6,6 +6,7 @@
 import * as C from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import type { MapKeys } from "../net/protocol.ts";
+import { drawEachFrame } from "../streams/time.ts";
 
 const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -72,8 +73,21 @@ export class World {
       msaaSamples: 1,
       // A pilot's view needs no picking of entities, and the page owns double clicks.
       requestRenderMode: false,
+      // The page's one frame loop draws, after the views have placed everything (§3.1).
+      useDefaultRenderLoop: false,
     });
     const viewer = this.viewer;
+    drawEachFrame(() => {
+      try {
+        viewer.resize();
+        viewer.render();
+      } catch (err) {
+        // As Cesium's own loop does: say so and stop, rather than throw every frame.
+        drawEachFrame(null);
+        console.error("rendering stopped", err);
+        viewer.cesiumWidget.showErrorPanel("Rendering has stopped.", undefined, String(err));
+      }
+    });
     this.scene = viewer.scene;
     viewer.clock.clockStep = C.ClockStep.SYSTEM_CLOCK;
     viewer.scene.globe.depthTestAgainstTerrain = true;

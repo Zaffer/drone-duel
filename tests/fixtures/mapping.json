@@ -1,0 +1,111 @@
+{
+  "about": "Raw axes to channels to pulses (DESIGN.md §12): the page (web/src/input/mapping.ts, web/test/mapping.test.ts) and the server (drone_duels.rc.mapping, tests/test_mapping.py) both pass every case here.",
+  "profiles": {
+    "literadio2": {
+      "id": "literadio2",
+      "name": "BETAFPV LiteRadio 2",
+      "match": ["0483", "5750", "BETAFPV"],
+      "channels": [
+        { "axis": 0, "reverse": false },
+        { "axis": 1, "reverse": false },
+        { "axis": 2, "reverse": false },
+        { "axis": 3, "reverse": false },
+        { "axis": 4, "reverse": false },
+        { "axis": 5, "reverse": false },
+        { "axis": 6, "reverse": false },
+        { "axis": 7, "reverse": false }
+      ],
+      "notes": ""
+    },
+    "pad": {
+      "id": "pad",
+      "name": "A radio with a button",
+      "match": ["pad"],
+      "channels": [
+        { "axis": 0, "reverse": false },
+        { "axis": 1, "reverse": true },
+        { "axis": 2, "reverse": false },
+        { "axis": 3, "reverse": false },
+        { "button": 0 }
+      ],
+      "notes": ""
+    }
+  },
+  "profile_for": [
+    { "id": "STMicroelectronics BETAFPV Joystick (Vendor: 0483 Product: 5750)", "profile": "literadio2" },
+    { "id": "Xbox Wireless Controller", "profile": null }
+  ],
+  "calibrate": [
+    { "raw": 0.1, "cal": { "min": -0.8, "mid": 0.1, "max": 0.9 }, "centred": true, "out": 0 },
+    { "raw": 0.9, "cal": { "min": -0.8, "mid": 0.1, "max": 0.9 }, "centred": true, "out": 1 },
+    { "raw": -0.8, "cal": { "min": -0.8, "mid": 0.1, "max": 0.9 }, "centred": true, "out": -1 },
+    { "raw": -0.8, "cal": { "min": -0.8, "mid": 0.1, "max": 0.9 }, "centred": false, "out": -1 },
+    { "raw": 0.05, "cal": { "min": -0.8, "mid": 0.1, "max": 0.9 }, "centred": false, "out": 0 },
+    { "raw": 5, "cal": { "min": -0.8, "mid": 0.1, "max": 0.9 }, "centred": false, "out": 1 }
+  ],
+  "channels": [
+    {
+      "why": "a calibration overrides the profile, axis and direction",
+      "axes": [0.5, -0.2, -1, 0, 1, 0, -1, 1],
+      "buttons": [],
+      "profile": "literadio2",
+      "calibration": {
+        "channels": [
+          { "axis": 1, "reverse": true, "cal": { "min": -1, "mid": 0, "max": 1 } },
+          { "axis": 0, "reverse": false, "cal": { "min": -1, "mid": 0, "max": 1 } }
+        ]
+      },
+      "out": [0.2, 0.5]
+    },
+    {
+      "why": "the profile alone: the LiteRadio's axes as they are",
+      "axes": [0.5, -0.2, -1, 0, 1, 0, -1, 1],
+      "buttons": [],
+      "profile": "literadio2",
+      "calibration": null,
+      "out": [0.5, -0.2, -1, 0, 1, 0, -1, 1]
+    },
+    {
+      "why": "a reversed axis and a button",
+      "axes": [0.25, 0.5, 0, 0],
+      "buttons": [1],
+      "profile": "pad",
+      "calibration": null,
+      "out": [0.25, -0.5, 0, 0, 1]
+    },
+    {
+      "why": "no profile: axis n is channel n + 1, held to -1..1",
+      "axes": [0.3, 2, -3],
+      "buttons": [],
+      "profile": null,
+      "calibration": null,
+      "out": [0.3, 1, -1]
+    }
+  ],
+  "switch_pos": [
+    { "x": -1, "pos": 0 },
+    { "x": 0, "pos": 1 },
+    { "x": 1, "pos": 2 },
+    { "x": null, "pos": 0 }
+  ],
+  "to_firmware": [
+    {
+      "why": "INAV: as they are",
+      "channels": [0.5, 0.5, -1, 0, 1, 0, -1, 1],
+      "firmware": "inav",
+      "us": [1750, 1750, 1000, 1500, 2000, 1500, 1000, 2000]
+    },
+    {
+      "why": "ArduPilot reads pitch forward as a low pulse",
+      "channels": [0.5, 0.5, -1, 0, 1, 0, -1, 1],
+      "firmware": "ardupilot-copter",
+      "us": [1750, 1250, 1000, 1500, 2000, 1500, 1000, 2000]
+    },
+    {
+      "why": "at least eight, the rest low; halves round up",
+      "channels": [0.001, -0.001, -1, 0],
+      "firmware": "inav",
+      "us": [1501, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
+    }
+  ]
+}

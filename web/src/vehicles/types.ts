@@ -8,9 +8,12 @@ import type { Pose } from "../net/server.ts";
 
 export interface Body {
   readonly spec: Vehicle;
-  /** The true pose now, extrapolated from the latest; null until the first one. Heights are the
-   * sim's (above sea level); add geo.mapOffset to draw them. */
+  /** The true pose at `now` (performance.now(), ms): the aircraft's from their timeline, the
+   * truck's carried on from its latest; null until the first one. Heights are the sim's (above sea
+   * level); add geo.mapOffset to draw them. */
   poseAt(now: number): Pose | null;
+  /** How far past its newest pose `poseAt(now)` carries it on, s (the performance panel). */
+  ahead?(now: number): number;
   /** Draw it for the frame at `now` (performance.now()). */
   draw(now: number): void;
   /** Its primitives, which ground sampling must look through. */
@@ -22,7 +25,8 @@ export interface Body {
   dispose(): void;
 }
 
-/** A pose `dt` seconds on, along its velocity (attitude held). */
+/** A pose `dt` seconds on, along its velocity (attitude held): the truck's, whose poses the page
+ * makes itself, stamped as they are made. */
 export function extrapolate(p: Pose, dt: number): Pose {
   if (dt <= 0) return p;
   const R = 6378137;

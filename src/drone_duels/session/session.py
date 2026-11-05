@@ -32,7 +32,10 @@ from drone_duels.world.elevation import ElevationError, ground_elevation_m
 log = logging.getLogger(__name__)
 
 RC_TIMEOUT_S = 0.2
-"""No sticks from the page for this long: the radio link is lost (DESIGN.md §8)."""
+"""No sticks for this long (the server's radio or the page's): the radio link is lost (DESIGN.md
+§8)."""
+LAUNCH_HIGH_US = 1665
+"""A launch channel above this is high (the switch's top third, as mapping.switch_pos)."""
 PHYSICS_READY_S = 30.0
 
 
@@ -90,6 +93,8 @@ class Session:
         self._lock = threading.Lock()
         self._last_rc = 0.0
         self._rc_live = False
+        self._spec: Vehicle | None = None
+        self._launch_high = True
         self._stop = threading.Event()
         self._worker = threading.Thread(target=self._run, name="session", daemon=True)
         self._watchdog = threading.Thread(target=self._watch, name="session-watch", daemon=True)
@@ -122,11 +127,24 @@ class Session:
         self._commands.put(_Command(action, location, vehicle, pad))
 
     def send_rc(self, us: Sequence[int]) -> None:
+        """The pilot's channels, µs, from the server's radio (rc.pilot) or the page's."""
         self._last_rc = time.monotonic()
         self._rc_live = True
         firmware = self._firmware
         if firmware is not None and self.state == "ready":
             firmware.send_rc(us)
+            self._launch(us)
+
+    def _launch(self, us: Sequence[int]) -> None:
+        """A hand-launched wing is thrown when its launch switch flicks high, whoever flies it
+        (DESIGN.md §12); a switch already high at the start waits to go low first."""
+        aux = self._spec.aux if self._spec else None
+        if aux is None or aux.launch is None or len(us) < aux.launch:
+            return
+        high = us[aux.launch - 1] > LAUNCH_HIGH_US
+        if high and not self._launch_high:
+            self.command("throw")
+        self._launch_high = high
 
     def set_ground(self, lat: float, lon: float, alt: float) -> None:
         if self._physics:
@@ -232,6 +250,8 @@ class Session:
         vehicle: Vehicle = self.content.vehicle(vehicle_id)
         pad = location.pads[min(self.pad, len(location.pads) - 1)]
         self.vehicle = vehicle_id
+        self._spec = vehicle
+        self._launch_high = True
         self.state = "starting"
         self._set_step("finding the ground")
         ground = location.ground_alt_m

@@ -577,8 +577,9 @@ export interface PlanMsg {
   rally: PlanItem[];
 }
 /**
- * The radio as the server reads it: every axis, -1..1, nothing reversed; name None with no
- * radio. At the radio's rate while a page asks (RadioSourceMsg).
+ * The radio as the server reads it: every axis, -1..1, nothing reversed, and the channels
+ * as the server maps them (its profile, the player's calibration); name None with no radio. At
+ * 60 Hz while a page asks (RadioSourceMsg).
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "RadioMsg".
@@ -587,10 +588,12 @@ export interface RadioMsg {
   ch: "radio";
   name: string | null;
   axes: number[];
+  channels: number[];
 }
 /**
- * Read the radio in the server (Linux evdev) and stream its axes here (RadioMsg), for when
- * Chrome's Gamepad API cannot see all of it; or stop.
+ * Read the radio in the server (Linux evdev) and stream it here (RadioMsg), for when
+ * Chrome's Gamepad API cannot see all of it; or stop. `fly`: the server flies it straight to
+ * the firmware (rc.pilot), and the page sends no `rc` (DESIGN.md §12).
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "RadioSourceMsg".
@@ -598,6 +601,7 @@ export interface RadioMsg {
 export interface RadioSourceMsg {
   ch: "radio_source";
   on: boolean;
+  fly: boolean;
 }
 /**
  * The radio's channels, from channel 1, µs (1000-2000).

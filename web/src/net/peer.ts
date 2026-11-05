@@ -7,6 +7,11 @@
 //   ping   both ways  {t}: the sender's clock (Date.now()); answered by pong {t, at}
 // and whatever the mode sends (duel: match, intent, pose, hit, lost; race: race, pose, gate, done).
 // The clock offset from the pings lets both pages agree when a countdown ends.
+//
+// Poses go by `sendFast`, on a data channel of their own beside Trystero's one reliable, ordered
+// channel: unordered and never resent, so a lost packet costs one pose rather than holding up
+// the ones behind it (DESIGN.md §7). Both ends open it on the same connection with a fixed id
+// (`negotiated`), so it needs no signalling; until it is open, poses go the reliable way.
 
 import type { JsonValue, MessageAction, Room as TrysteroRoom } from "@trystero-p2p/core";
 import { signal } from "alien-signals";
@@ -14,6 +19,8 @@ import { signal } from "alien-signals";
 const APP_ID = "drone-duels";
 const PROTOCOL = 1;
 const PING_MS = 2000;
+/** The poses' channel, the same on both ends. */
+const FAST = { label: "drone-duels-fast", id: 42 } as const;
 /** Room codes: no 0/o, 1/l/i to misread when said aloud. */
 const CODE_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789";
 
@@ -46,6 +53,7 @@ export class Room extends EventTarget {
   /** The opponent's clock less ours (ms), from the pings. */
   clockOffset = 0;
   private actions = new Map<string, MessageAction<JsonValue>>();
+  private fast = new Map<string, RTCDataChannel>();
   private roles = new Map<string, { role: Role; name: string }>();
   private pinger: ReturnType<typeof setInterval>;
   private onHide = () => void this.leave();
@@ -87,6 +95,8 @@ export class Room extends EventTarget {
         .catch(() => {});
     this.room.onPeerLeave = (peerId) => {
       this.roles.delete(peerId);
+      this.fast.get(peerId)?.close();
+      this.fast.delete(peerId);
       if (peerId !== this.peer()?.id) return;
       this.rttMs = null;
       // Another page of the opponent's role, waiting in the room, takes over.
@@ -120,6 +130,23 @@ export class Room extends EventTarget {
     }
   }
 
+  /** Send the opponent message `type` on the poses' channel: it may come out of order, or not
+   * at all. On the reliable channel until that one opens. */
+  sendFast(type: string, data: JsonValue): void {
+    const peer = this.peer();
+    if (!peer) return;
+    const ch = this.fastChannel(peer.id);
+    if (ch?.readyState === "open") {
+      try {
+        ch.send(JSON.stringify({ type, data }));
+        return;
+      } catch (err) {
+        console.warn(`peer: ${type}, fast`, err);
+      }
+    }
+    this.send(type, data);
+  }
+
   /** The opponent's clock now, by ours. */
   peerNow(): number {
     return Date.now() + this.clockOffset;
@@ -127,6 +154,8 @@ export class Room extends EventTarget {
 
   async leave(): Promise<void> {
     clearInterval(this.pinger);
+    for (const ch of this.fast.values()) ch.close();
+    this.fast.clear();
     removeEventListener("pagehide", this.onHide);
     this.peer(null);
     await this.room.leave().catch(() => {});
@@ -148,6 +177,7 @@ export class Room extends EventTarget {
       }
       if (!this.peer()) {
         this.peer({ id: peerId, name: h.name });
+        this.fastChannel(peerId);
         // Say hello back, in case ours went before they listened.
         void this.actions
           .get("hello")!
@@ -171,6 +201,36 @@ export class Room extends EventTarget {
       return;
     }
     this.dispatchEvent(new PeerMessage(type, data));
+  }
+
+  /** The poses' channel to `peerId`, opened on Trystero's connection to them; null without one. */
+  private fastChannel(peerId: string): RTCDataChannel | null {
+    const open = this.fast.get(peerId);
+    if (open && open.readyState !== "closed") return open;
+    const pc = this.room.getPeers()[peerId];
+    if (!pc || pc.connectionState === "closed") return null;
+    let ch: RTCDataChannel;
+    try {
+      ch = pc.createDataChannel(FAST.label, {
+        negotiated: true,
+        id: FAST.id,
+        ordered: false,
+        maxRetransmits: 0,
+      });
+    } catch (err) {
+      console.warn("peer: no poses' channel", err);
+      return null;
+    }
+    ch.onmessage = (e: MessageEvent<string>) => {
+      try {
+        const { type, data } = JSON.parse(e.data) as { type: string; data: JsonValue };
+        if (this.actions.has(type)) this.receive(type, data, peerId);
+      } catch {
+        // not ours: dropped
+      }
+    };
+    this.fast.set(peerId, ch);
+    return ch;
   }
 }
 

@@ -30,7 +30,7 @@ import { fmtTime, Progress, passes } from "./gates.ts";
 
 const TYPES = ["lobby", "start", "grid", "go", "pose", "gate", "done", "again"];
 const COUNTDOWN_S = 5;
-const POSE_HZ = 20;
+const POSE_HZ = 30;
 const BEST_KEY = "drone-duels-best";
 
 function best(courseId: string): number | null {
@@ -253,13 +253,7 @@ class RaceRuntime implements ModeRuntime {
     const signal = this.abort.signal;
     if (room) {
       const spec = content()!.vehicles[opponent ?? vehicle]!;
-      this.ghost = new Ghost(
-        flight.world,
-        spec,
-        "#22C7B8",
-        room.peer()?.name ?? "Opponent",
-        () => room.clockOffset,
-      );
+      this.ghost = new Ghost(flight.world, spec, "#22C7B8", room.peer()?.name ?? "Opponent");
       room.on<PeerPose>("pose").subscribe((p) => this.ghost?.push(p), { signal });
       room.on<{ next: number }>("gate").subscribe((m) => (this.peerNext = m.next), { signal });
       room.on<{ time: number }>("done").subscribe(
@@ -340,13 +334,14 @@ class RaceRuntime implements ModeRuntime {
     this.lastPose = pose;
     if (pose && this.room && now - this.lastSent > 1000 / POSE_HZ) {
       this.lastSent = now;
-      this.room.send("pose", {
+      this.room.sendFast("pose", {
         lat: pose.lat,
         lon: pose.lon,
         h: pose.alt + mapOffset(),
         q: pose.q,
         v: pose.v,
-        t: Date.now(),
+        // The sender's clock when it was there: the frame it was sampled for.
+        t: performance.timeOrigin + now,
       });
     }
     this.ghost?.draw();

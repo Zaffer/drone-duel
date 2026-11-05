@@ -1,15 +1,18 @@
-// The other player's vehicle, as their page sends it (DESIGN.md §7): its model drawn a little in
-// the past (DELAY_S), between the two poses either side, so 20 Hz updates over the internet move
-// smoothly. Poses travel with map heights (above the ellipsoid), so neither page needs the other's
+// The other player's vehicle, as their page sends it (DESIGN.md §7): on a timeline by the time
+// each pose carries (vehicles/timeline.ts), drawn a jitter buffer behind (the lateness of the
+// last poses, 60 to 250 ms), between the two poses either side, so 30 Hz poses over the internet,
+// late and lost, move smoothly. The timeline learns the sender's clock from the poses themselves.
+// Poses travel with map heights (above the ellipsoid), so neither page needs the other's
 // sea-level offset.
 
 import * as C from "cesium";
 import type { Vehicle } from "../net/protocol.ts";
+import { type Sample, Timeline } from "../vehicles/timeline.ts";
 import { modelMatrix, type Quat } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
 
 /** A pose as peers send it: lat, lon, map height (m above the ellipsoid), body→NED quaternion,
- * NED velocity, and the sender's clock (Date.now()). */
+ * NED velocity, and the sender's clock when it was there (ms since the epoch). */
 export interface PeerPose {
   lat: number;
   lon: number;
@@ -19,14 +22,13 @@ export interface PeerPose {
   t: number;
 }
 
-const DELAY_S = 0.15;
-const KEPT = 20;
 /** No pose for this long: the ghost is hidden. */
 const STALE_MS = 2000;
 
 export class Ghost {
   model: C.Model | null = null;
-  private poses: PeerPose[] = [];
+  private readonly timeline = new Timeline<Sample>();
+  private lastArrived = 0;
   private readonly matrix = new C.Matrix4();
   private disposed = false;
   /** Load the model: only once there is a pose to put it at (its matrix is never empty). */
@@ -39,8 +41,6 @@ export class Ghost {
     spec: Vehicle,
     colour: string,
     name: string,
-    /** The sender's clock less ours (ms). */
-    private readonly offset: () => number,
   ) {
     this.load = () =>
       void C.Model.fromGltfAsync({
@@ -77,31 +77,17 @@ export class Ghost {
       this.warned = true;
       return;
     }
-    this.poses.push(p);
-    if (this.poses.length > KEPT) this.poses.shift();
+    const now = performance.now();
+    this.lastArrived = now;
+    this.timeline.push({ t: p.t / 1000, lat: p.lat, lon: p.lon, alt: p.h, q: p.q, v: p.v }, now);
   }
 
-  /** The ghost's pose now (in the past by DELAY_S), or null when stale. */
-  poseNow(): PeerPose | null {
-    const ps = this.poses;
-    const last = ps[ps.length - 1];
-    if (!last) return null;
-    const at = Date.now() + this.offset() - DELAY_S * 1000;
-    if (at - last.t > STALE_MS) return null;
-    let i = ps.length - 1;
-    while (i > 0 && ps[i - 1]!.t > at) i--;
-    const b = ps[i]!;
-    const a = ps[i - 1];
-    if (!a || at >= b.t) return b;
-    const k = Math.max(0, Math.min(1, (at - a.t) / (b.t - a.t || 1)));
-    return {
-      lat: a.lat + (b.lat - a.lat) * k,
-      lon: a.lon + (b.lon - a.lon) * k,
-      h: a.h + (b.h - a.h) * k,
-      q: k < 0.5 ? a.q : b.q,
-      v: b.v,
-      t: at,
-    };
+  /** The ghost's pose at `now` (performance.now()), a jitter buffer in the past; null when
+   * stale. */
+  poseNow(now = performance.now()): PeerPose | null {
+    if (!this.timeline.newest || now - this.lastArrived > STALE_MS) return null;
+    const s = this.timeline.sample(now, this.timeline.buffer(now));
+    return s ? { lat: s.lat, lon: s.lon, h: s.alt, q: s.q, v: s.v, t: s.t * 1000 } : null;
   }
 
   draw(): PeerPose | null {

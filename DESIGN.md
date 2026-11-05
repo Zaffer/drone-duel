@@ -79,8 +79,9 @@ the truck, Windows/WSL and macOS, and flying real hardware.
    ├─ Session          mode-agnostic: spawn / switch / reset / destroy a vehicle at a location
    ├─ ContentStore     content/*.toml → typed specs
    ├─ Prefs            ~/.config/drone-duels/prefs.json (controls, video, graphics, audio)
-   ├─ RadioStream      the radio read through Linux (evdev), for when Chrome can't see it all
-   ├─ RcSink           sticks from the page → the firmware's RC input, with failsafe on silence
+   ├─ Pilot            the radio read through Linux (evdev), flown straight to the firmware
+   ├─ RcSink           sticks (the server's radio, or the page's) → the firmware's RC input,
+   │                   with failsafe on silence
    ├─ TelemetryClient  MAVLink via mavlink-router (sysid 254) │ MSP for INAV
    ├─ OsdClient        MSP DisplayPort from the firmware → grid screens
    └─ per vehicle slot:
@@ -104,9 +105,62 @@ SITL serial0 and INAV's CLI both default to 5760; the port map ends that clash.
 
 **Time.** ArduPilot's JSON backend and INAV's X-Plane link both run in lockstep: the physics
 steps when the firmware sends its outputs, so the sim never drifts from the firmware's clock.
-The physics streams the true pose to the server at the firmware's loop rate. The server forwards
-the newest pose per browser frame and drops the rest, so the camera is never more than a frame
-late.
+The physics streams the true pose to the server at 120 Hz, each stamped with its sim time `t`.
+
+### 3.1 Timing and latency
+
+Measured (2026-11-04, the table below): the physics kept to the wall clock within 2 ms and sent
+a pose every 8.4 ms, but the page handled 63% of them in clumps between frames, up to 100 ms
+late, because drawing a frame holds the page's one thread (45 fps). The page stamped each pose
+when it handled it and carried it on along its velocity from there, so the aircraft surged,
+stalled and stepped back (rubber banding). And the sticks went through that same busy thread
+(the server's radio to the page and back): from the page alone, 100 ms from a stick step to the
+elevons moving. Hence four paths, each with its own need:
+
+| Path | Needs | How |
+|---|---|---|
+| Sticks → firmware | shortest, steady, never waiting on drawing | the server's radio flies directly (§12) |
+| Your aircraft → screen | exact, no added delay | a timeline on sim time, sampled at "sim now" |
+| The other player → screen | smooth over the internet's jitter | the same timeline, drawn a buffer behind (§7) |
+| Ground station (COP) | what a GCS really sees | telemetry, as it comes (§2.2) |
+
+**The pose timeline** (`web/src/vehicles/timeline.ts`) keeps the latest second of samples by
+the time they carry, never by when the page handled them. The page learns how that clock maps
+to its own from the quickest deliveries: the least of (arrival − `t`) over the last 2 s, which
+the clumps cannot raise. The estimate moves at most 5% of real time (it slews), so a change in
+it never shows as a jump; only when every sample has come 150 ms late for 250 ms (the physics
+stalled, its clock slipped) does it jump to them, and one late clump (the page itself stalled)
+does not. Sampled between two samples, the position follows the cubic through both with their
+velocities and the attitude turns between them (slerp); past the newest, it goes on along the
+velocity and body rates for up to 100 ms, then holds. Your own aircraft is sampled at "sim now",
+with no delay added: it is carried on 6 ms at the median, 10 to 30 ms at the 95th percentile.
+
+**One frame loop.** Cesium's own render loop is off. Each animation frame runs every
+subscriber of `frames()` in order (the views place the camera and the vehicle from the
+timeline), then draws, so a frame shows what it placed, not the frame before's.
+
+**Measured** (2026-11-04, headless Chrome on the RTX 4090, the Chupito at 33 m/s in chase view,
+the old code and the new flown by the same script):
+
+| | before | after |
+|---|---|---|
+| Drawn speed, 1st / 50th / 99th percentile | 3 / 32 / 96 m/s | 30 / 33 / 35 m/s |
+| Frames more than 10% off the true speed | 895 of 1129 | 2 of 1055 |
+| Frames stepping back along the path | 20 | 2 |
+| Stick to elevons, through INAV (median) | 100 ms, sticks from the page, elevons as the page saw them | 30 ms, the server's radio, elevons as the server sent them: under 0.3 ms to the firmware, the rest INAV's loop |
+
+A gamepad or the keyboard still flies through the page (100 ms as above); the radio does not.
+In the game, the performance panel (P) shows the frame rate, the frame time, how far the pose
+is carried on and where the sticks come from. `web/test/timeline.test.ts` replays the poses as
+Chrome got them (`web/test/fixtures/pose-arrivals.json`), `tests/test_pilot.py` times the
+server's radio to the firmware, and `tests/test_session_chupito.py` a stick step to INAV's
+elevons.
+
+**Later, all in the browser.** The seams stay: input → sim → timeline → renderer. The physics
+and the firmware (WebAssembly) would run in a dedicated Worker on a fixed step, the radio read
+there through WebHID (dedicated workers, Chrome 131+), so the sticks still never wait on
+drawing, and the poses would reach the same timeline through a SharedArrayBuffer (which needs
+the page cross-origin isolated).
 
 ## 4. Repository layout
 
@@ -307,8 +361,17 @@ A mode is a pair of plugins with one lifecycle, `setup → running → finished`
 | Race | 2 (P2P) | Live, side by side. Each player flies their own sim and sees the other as a ghost (no collisions). Countdown start from the host. A gate counts when the segment between two true poses crosses its rectangle in the right direction, from GO (the countdown waits for the session it started to be ready). The next gate wears a chevron on each side, the one after it dots; the next three shade from ember to the rest's pale. Lap and total times; first to finish wins. |
 
 The peer link stays Trystero over Nostr relays (WebRTC, no server), one room per match. Peers
-exchange poses at 20 Hz for the ghost or truck, events (strike, gate, crash, finish) with a
-sequence number, and a clock offset estimated at the start, so the countdown and timers agree.
+exchange poses at 30 Hz for the ghost or truck, events (strike, gate, crash, finish) with a
+sequence number, and a clock offset from pings, so the countdown and timers agree.
+
+Poses go on a data channel of their own, unordered and never resent (`negotiated`, beside
+Trystero's), so a lost packet costs one pose rather than stalling those behind it, as Trystero's
+one reliable channel would; events stay on the reliable one. Each pose carries the sender's
+clock at the moment it shows. The receiver keeps them in the same timeline as its own aircraft
+(§3.1) and draws the other player a buffer behind: 100 ms to start, then the 95th percentile of
+the lateness plus one interval, between 60 and 250 ms, changed slowly. Judging is as before:
+gates on your own true poses; the pilot's page judges a strike against the truck as the pilot
+saw it (favouring the shooter).
 
 ## 8. Server ⇄ page protocol
 
@@ -318,19 +381,19 @@ high-rate pose channel.
 | Direction | Channel | Rate | Content |
 |---|---|---|---|
 | page → server | `session` | on demand | start, switch, reset, destroy |
-| page → server | `rc` | 250 Hz | 16 channels in µs, sequence number |
+| page → server | `rc` | 250 Hz | 16 channels in µs, sequence number; only while the page's controller flies (§12) |
 | page → server | `ground` | 20 Hz | ground height under the aircraft |
 | page → server | `wind` | on change | speed, direction, turbulence, gust trigger |
 | page → server | `video` | on change | analog or digital (sets the OSD grid, §10) |
-| page → server | `radio_source` | on open | stream the radio as the server reads it |
+| page → server | `radio_source` | on change | stream the radio as the server reads it; and whether it flies (§12) |
 | server → page | `status` | on change | slot, vehicle, firmware state, arming blockers |
-| server → page | `pose` | each frame | true position, attitude, velocity, rotor/servo state (binary) |
+| server → page | `pose` | 120 Hz | sim time, true position, attitude, velocity, body rates, rotor/servo state (binary) |
 | server → page | `osd` | per draw | the firmware's DisplayPort screen |
 | server → page | `telemetry` | 10 Hz | what a GCS sees: mode, armed, GPS, battery, attitude, alt |
 | server → page | `plan` | on change | mission, fence, rally (ArduPilot) |
 | server → page | `dynamics` | 30 Hz | wing internals (when the overlay is on) |
 | server → page | `physics` | on change | what the physics says it is doing: ground, hand, flying, crashed |
-| server → page | `radio` | 250 Hz | the radio's axes, read through Linux (while asked) |
+| server → page | `radio` | 60 Hz | the radio's axes, read through Linux, and its channels as the server maps them (while asked) |
 
 The protocol is defined once, in `server/protocol.py`, as pydantic models: a discriminated union
 on `ch`, validated on the way in. `tools/gen_protocol_ts.py` writes their JSON Schema and
@@ -343,8 +406,9 @@ socket, which either serves easily. The deciding win is pydantic at the edges. O
 validates content files, prefs, REST and WebSocket messages, and generates the TypeScript types,
 so the server and the page cannot disagree silently.
 
-RC failsafe: if no `rc` message arrives for 200 ms (page hidden, tab crashed), the session tells
-the firmware its link is lost, and the firmware's own failsafe runs, as on a real link. ArduPilot
+RC failsafe: if no sticks arrive for 200 ms (the radio unplugged; or, while the page's controller
+flies, the tab hidden or crashed; or the page gone), the session tells the firmware its link is
+lost, and the firmware's own failsafe runs, as on a real link. ArduPilot
 SITL would hold the last pulses forever, so the adapter sets `SIM_RC_FAIL`; INAV's X-Plane link
 stops reporting a joystick, and its receiver times out. Both come back with the next sticks.
 
@@ -456,14 +520,23 @@ at runtime). The firmware OSD keeps its own fonts and colours, as real goggles s
 
 ## 12. Controllers
 
-- `input/radio.ts` samples `navigator.getGamepads()` at 250 Hz with a timer (the page is in
-  front while flying) and emits an Observable of channels, -1..1, "natural" for every firmware
-  (stick forward +1); `flight.ts` applies each firmware's conventions (ArduPilot's pitch) on the way
-  out.
-- Chrome on Linux may not expose a radio until a stick moves, or all its axes. So the server also
-  reads it through Linux itself (`rc/evdev.py`) and streams its axes; the page takes whichever
-  source sees the most axes, the server's on a tie (Chrome lists the LiteRadio 2's CH5 and CH8 axes
-  but never moves them), through the same profiles and calibration.
+- The server reads a radio through Linux itself (`rc/evdev.py`): Chrome on Linux may not expose
+  a radio until a stick moves, or all its axes (it lists the LiteRadio 2's CH5 and CH8 but never
+  moves them). **When the server's radio flies, it flies from the server** (`rc/pilot.py`): each
+  stick movement is mapped (profile, calibration: `rc/mapping.py`) and sent to the firmware at
+  once, and the sticks are sent again every 4 ms (250 Hz, as ELRS) between movements. They never
+  pass through the page, whose thread is busy drawing (§3.1). The page still gets the axes and
+  the mapped channels at 60 Hz, for the HUD, the Controls tab, the calibration wizard and the
+  truck (its physics is in the page).
+- `input/radio.ts` picks the controller: the source that sees the most axes, the server's on a
+  tie, the keyboard when there is none or the player chose it. It tells the server whether its
+  radio flies (`radio_source`). Otherwise the page flies: it samples `navigator.getGamepads()` or
+  the keys at 250 Hz with a timer and sends `rc`. Channels are -1..1, "natural" for every
+  firmware (stick forward +1); each firmware's conventions (ArduPilot's pitch) are applied on the
+  way out, in the page (`flight.ts`) and the server (`rc/mapping.py`) alike, and both pass one
+  set of test cases (`tests/fixtures/mapping.json`).
+- A hand-launched wing is thrown when its launch channel flicks high, whoever flies it: the
+  session watches the sticks it forwards.
 - A profile (`content/controllers/*.toml`) matches a gamepad by its USB vendor and product id,
   and maps axes and buttons to AETR plus AUX1–AUX8 with inversions. We ship LiteRadio 2 (from
   today's radio.py), TX15 and T8L. EdgeTX radios in USB joystick mode order the axes by their

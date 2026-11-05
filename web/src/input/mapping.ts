@@ -1,12 +1,14 @@
 // From a controller's raw axes to the pilot's channels (DESIGN.md §12): pure functions, so they
-// are tested on their own (test/mapping.test.ts).
+// are tested on their own (test/mapping.test.ts). The server maps its own radio the same way
+// (drone_duels.rc.mapping): both pass tests/fixtures/mapping.json.
 //
 // Channels are "natural", whatever the firmware: each -1..1 from channel 1, roll +1 right, pitch
 // +1 stick forward (nose down), throttle +1 full, yaw +1 right; switches -1 low, +1 high. The
 // firmware's own conventions (ArduPilot reads pitch forward as a low pulse) are applied on the
 // way out (flight.ts's `toFirmware`).
 
-import type { Controller } from "../net/protocol.ts";
+import type { Controller, Vehicle } from "../net/protocol.ts";
+import { toUs } from "../state/input.ts";
 import type { AxisCal, Calibration } from "../state/prefs.ts";
 
 /** Channels whose travel has a centre (the sticks other than the throttle). */
@@ -57,6 +59,15 @@ export function toChannels(
     });
   }
   return axes.slice(0, 16).map((a) => Math.max(-1, Math.min(1, a)));
+}
+
+/** The channels as the firmware's pulses, µs, at least eight: ArduPilot reads pitch forward as
+ * a low pulse, INAV as a high one (as Betaflight). */
+export function toFirmware(ch: readonly number[], firmware: Vehicle["firmware"]["kind"]): number[] {
+  const us = ch.slice(0, 16).map(toUs);
+  while (us.length < 8) us.push(1000);
+  if (firmware === "ardupilot-copter" && ch[1] !== undefined) us[1] = toUs(-ch[1]);
+  return us;
 }
 
 /** A switch channel's position: 0 low, 1 middle, 2 high. */

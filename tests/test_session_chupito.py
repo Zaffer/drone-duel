@@ -1,8 +1,9 @@
 """The Chupito end to end, as the page flies it: the session starts INAV SITL on the wing's
-physics, the sticks arm it, a throw launches it, and it flies; the pose, telemetry and OSD
-streams come out as the page reads them. Then the radio link is lost, and INAV's own failsafe
-brings it home until the pilot takes it back."""
+physics, the sticks arm it, a throw launches it, and it flies; a stick step moves the elevons
+within 45 ms; the pose, telemetry and OSD streams come out as the page reads them. Then the
+radio link is lost, and INAV's own failsafe brings it home until the pilot takes it back."""
 
+import statistics
 import subprocess
 import threading
 import time
@@ -34,6 +35,7 @@ class Recorded:
         self.lock = threading.Lock()
         self.messages: list[dict[str, Any]] = []
         self.poses: list[dict[str, float]] = []
+        self.arrived: list[float] = []
 
     def publish(self, msg: dict[str, Any]) -> None:
         with self.lock:
@@ -43,6 +45,7 @@ class Recorded:
         pose: dict[str, float] = dict(zip(POSE_FIELDS, POSE.unpack(frame), strict=True))
         with self.lock:
             self.poses.append(pose)
+            self.arrived.append(time.monotonic())
 
     def channel(self, ch: str) -> list[dict[str, Any]]:
         with self.lock:
@@ -97,6 +100,25 @@ def _ours() -> list[str]:
         out = subprocess.run(["pgrep", "-af", pattern], capture_output=True, text=True).stdout
         found += [line for line in out.splitlines() if "pgrep" not in line]
     return found
+
+
+def _stick_to_elevons(session: Session, events: Recorded, radio: Radio, roll: int) -> float:
+    """Seconds from a roll stick step to the elevons moving (in the poses as they come out)."""
+    with events.lock:
+        before = events.poses[-1]["a0"] - events.poses[-1]["a1"]
+        seen = len(events.poses)
+    radio.sticks[0] = roll
+    sent = time.monotonic()
+    session.send_rc(list(radio.sticks))
+    deadline = sent + 1.0
+    while time.monotonic() < deadline:
+        with events.lock:
+            for pose, at in zip(events.poses[seen:], events.arrived[seen:], strict=True):
+                if abs(pose["a0"] - pose["a1"] - before) > 0.02:
+                    return at - sent
+            seen = len(events.poses)
+        time.sleep(0.001)
+    pytest.fail(f"the elevons did not move for a roll of {roll}")
 
 
 def _speed(p: dict[str, float]) -> float:
@@ -156,7 +178,7 @@ def _flying(video: VideoSystem) -> Iterator[tuple[Session, Recorded, Radio, floa
 
 def test_the_chupito_flies_on_inav_through_the_session() -> None:
     """On digital video: it climbs out, INAV sees it, and its OSD is Betaflight HD's 53 x 20."""
-    with _flying("digital") as (_, events, radio, ground):
+    with _flying("digital") as (session, events, radio, ground):
         launch = events.pose()
         samples = []
         for _ in range(12):
@@ -167,6 +189,16 @@ def test_the_chupito_flies_on_inav_through_the_session() -> None:
         assert top > launch["alt"] + 15, f"climbs: from {launch['alt']:.1f} to {top:.1f}"
         assert max(_speed(p) for p in samples) > 12, "flies"
         assert samples[-1]["a2"] > 100, "the prop turns"
+
+        # The firmware loop, end to end: about 30 ms (2026-11-04). Ours is at most 16 ms of it
+        # (the physics takes the sticks every 4 ms, the bridge every 4 ms, the pose goes at
+        # 120 Hz); the rest is INAV's own, as on the real aircraft.
+        delays = []
+        for roll in (1700, 1500, 1300, 1500) * 3:
+            delays.append(_stick_to_elevons(session, events, radio, roll))
+            time.sleep(0.3)
+        assert statistics.median(delays) < 0.045, delays
+        assert max(delays) < 0.08, delays
 
         t = TelemetryMsg.model_validate(events.last("telemetry"))
         assert t.armed and t.mode in ("LAUNCH", "ANGLE"), t.mode

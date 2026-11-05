@@ -9,7 +9,8 @@ import { rotorNorm, truckEngine } from "./audio/levels.ts";
 import { sounds } from "./audio/sounds.ts";
 import { DynamicsOverlay } from "./dynamics/overlay.ts";
 import { Minimap } from "./hud/minimap.ts";
-import { switchPos } from "./input/mapping.ts";
+import { perf } from "./hud/perf.ts";
+import { toFirmware } from "./input/mapping.ts";
 import { radio } from "./input/radio.ts";
 import type { RcMsg, Vehicle } from "./net/protocol.ts";
 import { link, type Pose } from "./net/server.ts";
@@ -24,7 +25,7 @@ import {
   view,
   wind,
 } from "./state/app.ts";
-import { toUs } from "./state/input.ts";
+import { inputSource } from "./state/input.ts";
 import { prefs, type ViewId } from "./state/prefs.ts";
 import { phase, sessionStarting, status } from "./state/session.ts";
 import { every, frames } from "./streams/time.ts";
@@ -49,15 +50,6 @@ export interface ModeRuntime {
 const GROUND_MS = 50;
 const GROUND_LEAD_S = 0.3;
 
-/** The firmware's own channel conventions on the way out: ArduPilot reads pitch forward as a
- * low pulse, INAV as a high one (as Betaflight). */
-export function toFirmware(ch: readonly number[], spec: Vehicle): number[] {
-  const us = ch.slice(0, 16).map(toUs);
-  while (us.length < 8) us.push(1000);
-  if (spec.firmware.kind === "ardupilot-copter" && ch[1] !== undefined) us[1] = toUs(-ch[1]);
-  return us;
-}
-
 export class Flight {
   readonly body = signal<Body | null>(null);
   /** The pad as the sim has it: lat, lon, ground m above sea level, heading. */
@@ -77,7 +69,6 @@ export class Flight {
   private seq = 0;
   private bodyKey = "";
   private groundBusy = false;
-  private launchHigh = true;
   private lastFrame = 0;
   private disposers: (() => void)[] = [];
 
@@ -285,6 +276,7 @@ export class Flight {
     const body = this.body();
     body?.draw(now);
     const pose = body?.poseAt(now) ?? null;
+    perf.frame(now, body?.ahead?.(now) ?? 0);
     const ctx = this.rigContext();
     if (pose && ctx && this.rig && !paused()) this.rig.update(ctx, pose, dt);
     const pad = this.pad();
@@ -336,17 +328,14 @@ export class Flight {
       body.setControls(truckControls(ch, radio.held, pads[0] ?? null));
       return;
     }
+    // The server's radio flies from the server (rc/pilot.py), never through this page's busy
+    // thread (DESIGN.md §12); the page sends only its own controller's sticks. The session
+    // throws a hand-launched wing on its launch switch's flick up, whoever flies it.
+    if (inputSource() === "server") return;
     // Pausing cannot stop the firmware, so the radio keeps flying it: going quiet here would be a
     // lost link, and the firmware's failsafe would disarm it.
     if (v.firmware.kind === "none" || status().state !== "ready") return;
-    link.send({ ch: "rc", seq: ++this.seq, us: toFirmware(ch, v) as RcMsg["us"] });
-    // A hand-launched wing is thrown on its launch switch's flick up.
-    const launch = v.aux?.launch;
-    if (launch) {
-      const high = switchPos(ch[launch - 1]) === 2;
-      if (high && !this.launchHigh) this.throw();
-      this.launchHigh = high;
-    }
+    link.send({ ch: "rc", seq: ++this.seq, us: toFirmware(ch, v.firmware.kind) as RcMsg["us"] });
   }
 
   // The map's ground under the vehicle, a little ahead of it, for its physics.
