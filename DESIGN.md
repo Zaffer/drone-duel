@@ -156,6 +156,21 @@ Chrome got them (`web/test/fixtures/pose-arrivals.json`), `tests/test_pilot.py` 
 server's radio to the firmware, and `tests/test_session_chupito.py` a stick step to INAV's
 elevons.
 
+**The frame's cost** is Cesium choosing the ground's tiles, on the main thread, and it grows
+with the window (a 3440×1440 window needs more tiles than 1600×900). Two things cost most of it
+until 2026-11-04, measured at 3440×1400 in chase view:
+
+- The globe drawn under Google's tiles (`world/backstop.ts`) had 2 heights per tile side.
+  Cesium judges a heightmap's error by that, so it split the globe about five levels deeper than
+  usual: 20 to 100 thousand tiles visited each frame, 5 to 20 fps. With 65, as ordinary
+  heightmaps have, it visits a few hundred (`web/test/backstop.test.ts` holds it).
+- Google's tileset comes with `enableCollision` on: every frame Cesium casts a ray through its
+  meshes under the camera, read back from the GPU, to keep the camera above them. That is now on
+  only while the mouse moves the camera (Map, orbit), which takes about a fifth of the main thread.
+
+Uncapped, the frame is now 3.8 ms in FPV and 10.3 ms in chase at 3440×1400 (14 fps and 67 ms in
+chase before).
+
 **Later, all in the browser.** The seams stay: input → sim → timeline → renderer. The physics
 and the firmware (WebAssembly) would run in a dedicated Worker on a fixed step, the radio read
 there through WebHID (dedicated workers, Chrome 131+), so the sticks still never wait on

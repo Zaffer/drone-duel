@@ -7,15 +7,12 @@ import * as C from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import type { MapKeys } from "../net/protocol.ts";
 import { drawEachFrame } from "../streams/time.ts";
+import { BACKSTOP_M, BACKSTOP_SSE, backstopTerrain } from "./backstop.ts";
 
 const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const ESRI_TERRAIN =
   "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer";
-/** Where the globe is flattened to under Google's tiles, m above the ellipsoid: below any sea on
- * Earth (the geoid is at most 106 m under the ellipsoid), so it never rises through them. */
-const BACKSTOP_M = -120;
-
 const MODEL_CREDITS = [
   'Drone model: "FPV Drone" by PinaPipe (CC BY 4.0)',
   'Truck model: "Military Truck" by Raphael Escamilla (CC BY 4.0)',
@@ -44,14 +41,15 @@ export class World {
   private tilesAsked = 0;
   /** The globe's own terrain (the menus), kept while the backstop stands in for it. */
   private globeTerrain: C.TerrainProvider | null = null;
-  /** Google's tiles have no skirts: where neighbouring tiles differ in detail (flat water most of
-   * all) a slit opens between them. Flying, the globe stays drawn under them, flattened to
-   * BACKSTOP_M, so a slit shows the imagery far below rather than space. */
-  private readonly backstop = new C.CustomHeightmapTerrainProvider({
-    width: 2,
-    height: 2,
-    callback: () => new Float32Array(4).fill(BACKSTOP_M),
-  });
+  /** The globe under Google's tiles, flying (backstop.ts). */
+  private readonly backstop = backstopTerrain();
+  /** The globe's screen-space error in the menus, kept while the backstop stands in. */
+  private globeSse: number | null = null;
+  /** Whether the free mouse camera is kept above Google's tiles. Cesium does it by casting a ray
+   * through the tiles' meshes under the camera every frame, read back from the GPU (Scene's
+   * getGlobeHeight): a fifth of the page's time measured (2026-11-04), so only while the mouse
+   * moves the camera; the pilot views place it themselves. */
+  private collide = true;
 
   constructor(container: HTMLElement, keys: MapKeys) {
     C.Ion.defaultAccessToken = keys.cesium_ion_token ?? "";
@@ -116,6 +114,7 @@ export class World {
       if (this.tileset) this.tileset.show = false;
       this.tileset = null;
       if (this.globeTerrain) this.scene.terrainProvider = this.globeTerrain;
+      if (this.globeSse !== null) this.scene.globe.maximumScreenSpaceError = this.globeSse;
       this.source = this.globeSource;
       this.ready = this.globeReady;
       return this.ready;
@@ -126,9 +125,12 @@ export class World {
       // Back in the menus before the tiles came: leave them hidden.
       if (!tiles || asked !== this.tilesAsked) return;
       tiles.show = true;
+      tiles.enableCollision = this.collide;
       this.tileset = tiles;
       this.globeTerrain ??= this.scene.terrainProvider;
+      this.globeSse ??= this.scene.globe.maximumScreenSpaceError;
       this.scene.terrainProvider = this.backstop;
+      this.scene.globe.maximumScreenSpaceError = BACKSTOP_SSE;
       this.source = "google";
     });
     return this.ready;
@@ -163,6 +165,8 @@ export class World {
   set mouseCamera(on: boolean) {
     const ctl = this.scene.screenSpaceCameraController;
     ctl.enableInputs = on;
+    this.collide = on;
+    if (this.tileset) this.tileset.enableCollision = on;
   }
 
   private async loadGoogle(key: string): Promise<C.Cesium3DTileset | null> {
