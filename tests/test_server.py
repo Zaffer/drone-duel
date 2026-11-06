@@ -76,3 +76,17 @@ def test_another_sites_page_cannot_open_the_socket() -> None:
                 ws.receive_text()
         with client.websocket_connect("/ws", headers={"origin": "http://localhost:8600"}) as ws:
             assert json.loads(ws.receive_text())["ch"] == "status"
+
+
+def test_exit_stops_the_server_from_the_game_page_only() -> None:
+    import time
+
+    app = create_app()
+    stopped: list[bool] = []
+    app.state.quit = lambda: stopped.append(True)
+    with TestClient(app) as client:
+        evil = client.post("/api/quit", headers={"origin": "https://evil.example"})
+        assert evil.status_code == 403
+        assert client.post("/api/quit", headers={"origin": "http://localhost:8600"}).json() == {}
+        time.sleep(0.4)
+    assert stopped == [True]

@@ -21,10 +21,10 @@ for real.
   the Chupito, and SkyFlow-Dynamics' `racer5in` plant for the quad. One wind model drives both.
 - Modes: **Free Fly**, **Duel** (a drone or the Chupito against the truck) and **Race** (live
   head to head through gates). Modes are plugins, so more can follow.
-- A mode, then a place, picked from a menu: Free Fly at Toronto's Billy Bishop, or a Race at
-  AreaXO (the race runs the place's course).
-- Vehicle select: the 5" quad, the Chupito or the truck, in flight (the pause menu) or in a Duel
-  or Race lobby. Switching respawns you at the place's start.
+- A mode (the menu's scenario), a place, then a vehicle, picked from a menu: Free Fly at
+  Toronto's Billy Bishop, or a Race at AreaXO (the race runs the place's course).
+- Vehicle select: the 5" quad, the Chupito or the truck, in the menu or in flight (the pause
+  menu). Switching respawns you at the place's start.
 - Views: FPV (the camera feed with the real OSD), chase near and far, a line-of-sight spotter,
   Map/COP, a free orbit camera, and a minimap PiP with the aviation dials.
 - Video: analog (analog-vision's NTSC chain, SD OSD) or digital (clean 16:9, HD OSD).
@@ -223,7 +223,7 @@ drone-duels/
       state/                alien-signals stores (§9)
       streams/              Observable sources: ws channels, gamepad, frames, timers
       net/                  server ws client, protocol types (generated, §8), peer link
-      ui/                   menu, place picker, pause menu, top bar, toasts
+      ui/                   menu (scenario, location, vehicle), pause menu, top bar, toasts
       world/                Cesium viewer, basemap, tile colliders, ground sampling
       vehicles/             quad, wing, truck: models, animation; truck physics (Rapier)
       people/               the operator standing behind the pad
@@ -471,10 +471,14 @@ Toolchain: bun builds and serves the bundle (`bun build`, with watch in dev). Ty
 
 ## 11. UI
 
-**Flow.** Main menu: Free Fly · Duel · Race · Options. Then the places for that mode (Race: those
-with a course). Free Fly then flies at once, in the vehicle last flown; the pause menu's Vehicle
-tab switches it. Duel and Race go to a lobby, which picks the vehicle (Duel: for your turns as
-the pilot) and has a room code, peer status and ready.
+**Flow.** The main menu is three columns, each opened by a pick in the one before: the scenario
+(Free Fly · Duel · Race), the location (Race: those with a course), the vehicle (Duel: an
+aircraft, for your turns as the pilot). Free Fly flies on the vehicle's pick; the pause menu's
+Vehicle tab switches it. Duel and Race draw their lobby under the vehicles: name, solo, host or
+join, then the room code, peer status and ready. Esc steps back a column; the picks are kept for
+the next visit. Options and Exit sit in the top right corner; Exit asks once, then stops the
+server (`POST /api/quit`, as Ctrl-C would, so the session closes the firmware) and closes the
+window.
 
 **In flight.** A thin top bar shows mode · place · vehicle · view · video · wind · timer/score.
 It fades after 3 s in FPV and comes back on mouse movement or a menu key. In the corners:
@@ -588,7 +592,8 @@ speed and direction.
 ## 15. Decided in review (2026-10-29)
 
 1. "Mission" is kept for ArduPilot missions. (Scenarios, a mode at a place, were dropped on
-   2026-11-01: a game is a mode and a place, the vehicle picked in flight or in the lobby.)
+   2026-11-01: a game is a mode and a place, the vehicle picked in flight or in the lobby.
+   Since 2026-11-05 the menu's first column calls the mode a "scenario"; the code says mode.)
 2. Synetic-Labs/Analog-Vision has a `package.json` (commit d5548dc), so it is a bun git
    dependency.
 3. racer5in is close enough to our 5" for now (a row for our own build is on the roadmap).

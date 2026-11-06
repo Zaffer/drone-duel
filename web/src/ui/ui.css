@@ -2,27 +2,176 @@
 
 /* ---------- Menus ---------- */
 
+/* The main menu: the brand and the top corner (Options, Exit) over three columns, picked in turn:
+   scenario, location, vehicle (with Duel's and Race's lobby under the vehicles). */
 .menu {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: minmax(340px, 420px) 1fr;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 36px;
+  padding: 48px 48px 28px;
   background:
-    radial-gradient(
-      120% 90% at 0% 0%,
-      rgb(13 14 21 / 0.96) 30%,
-      rgb(13 14 21 / 0.55) 60%,
-      transparent 85%
+    linear-gradient(
+      to right,
+      rgb(13 14 21 / 0.94) 0,
+      rgb(13 14 21 / 0.8) 900px,
+      rgb(13 14 21 / 0.25) 1300px,
+      transparent 1600px
     ), linear-gradient(to top, rgb(13 14 21 / 0.7), transparent 40%);
   animation: fade-in 400ms var(--ease);
 }
 
-.menu-side {
+.menu-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.menu-corner {
+  display: flex;
+  gap: 8px;
+}
+
+.corner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 10px;
+  background: rgb(21 23 36 / 0.8);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  backdrop-filter: blur(10px);
+}
+
+.corner-btn:hover {
+  color: var(--text);
+  border-color: #3d4366;
+}
+
+.corner-btn .icon {
+  display: grid;
+}
+
+.corner-btn .icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.corner-btn.armed {
+  color: var(--rose);
+  border-color: var(--rose);
+}
+
+.menu-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(250px, 320px)) minmax(300px, 380px);
+  align-items: start;
+  gap: 20px;
+  min-height: 0;
+}
+
+.menu-col {
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 56px 40px 28px 48px;
+  gap: 12px;
   min-height: 0;
+  max-height: 100%;
+  animation: rise 300ms var(--ease);
+}
+
+.menu-col h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.menu-col .step {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font: 600 11px var(--mono);
+  letter-spacing: 0;
+  color: var(--ember);
+}
+
+.col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.col-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.col-list .card {
+  min-height: 0;
+}
+
+.col-body .hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.col-lobby {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.col-lobby:empty {
+  display: none;
+}
+
+.col-lobby .actions {
+  flex-wrap: wrap;
+}
+
+.col-lobby .actions input:not([type]) {
+  flex: 1;
+  min-width: 0;
+}
+
+.col-lobby .field input {
+  min-width: 0;
+}
+
+/* After Exit: the server has stopped. */
+.stopped {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  background: var(--bg);
+}
+
+.stopped h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+
+.stopped p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .brand {
@@ -53,12 +202,6 @@
   color: var(--muted);
   font-size: 13px;
   letter-spacing: 0.02em;
-}
-
-.modes {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 .mode-btn {
@@ -142,38 +285,6 @@
 .chip.tide {
   color: var(--tide);
   border-color: rgb(34 199 184 / 0.4);
-}
-
-.menu-main {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: 40px 48px 36px 8px;
-  min-width: 0;
-  min-height: 0;
-}
-
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  max-width: 980px;
-  animation: rise 300ms var(--ease);
-}
-
-.picker h2 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px;
 }
 
 .card {

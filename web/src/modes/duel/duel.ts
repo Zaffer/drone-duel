@@ -20,7 +20,6 @@ import { content, toast, vehicleId } from "../../state/app.ts";
 import { hudBanner, hudPanel, hudTimer } from "../../state/hud.ts";
 import { prefs, updatePrefs } from "../../state/prefs.ts";
 import { phase as physicsPhase, status } from "../../state/session.ts";
-import { vehicleCard } from "../../ui/app.ts";
 import { h, render } from "../../ui/h.ts";
 import { mapOffset } from "../../world/geo.ts";
 import { Ghost, type PeerPose } from "../ghost.ts";
@@ -41,14 +40,15 @@ export const duel: ModeDef = {
   name: "Duel",
   desc: "Strike the truck from the air, or drive it out of reach. Then swap.",
   vehicles: (all) => all,
+  picks: (all) => all.filter((v) => v.kind !== "ground"),
+  pickHint: "Your aircraft, for your turns as the pilot. The other player drives the truck.",
   lobby(host, ctx) {
     return duelLobby(host, ctx);
   },
 };
 
 function duelLobby(host: HTMLElement, ctx: ModeContext): () => void {
-  const aircraft = ctx.vehicles.filter((v) => v.kind !== "ground");
-  const mine = signal(aircraft.find((v) => v.id === vehicleId())?.id ?? aircraft[0]?.id ?? "quad5");
+  const mine = ctx.vehicle;
   const rules = { rounds: 2, minutes: 2, lives: 3 };
   let room: Room | null = null;
   const peerAircraft = signal<string | null>(null);
@@ -61,18 +61,6 @@ function duelLobby(host: HTMLElement, ctx: ModeContext): () => void {
     placeholder: "room code",
     style: "width: 130px",
   }) as HTMLInputElement;
-  const cards = aircraft.map((v) => {
-    const c = vehicleCard(v, () => {
-      mine(v.id);
-      room?.send("aircraft", { vehicle: v.id });
-    });
-    return c;
-  });
-  disposers.push(
-    effect(() =>
-      cards.forEach((c, i) => c.classList.toggle("selected", aircraft[i]!.id === mine())),
-    ),
-  );
   const body = h("div");
 
   const go = (r: Room, m: Match) => {
@@ -194,17 +182,10 @@ function duelLobby(host: HTMLElement, ctx: ModeContext): () => void {
 
   render(
     host,
-    h(
-      "h2",
-      null,
-      `${ctx.location.name.split(": ").at(-1)}: your aircraft for your turns as the pilot`,
-    ),
-    h("div", { class: "cards" }, cards),
+    h("label", { class: "field" }, "Your name", nameInput),
     h(
       "div",
       { class: "actions" },
-      h("label", { class: "field" }, "Your name", nameInput),
-      h("span", { class: "spacer" }),
       h(
         "button",
         { class: "primary", onclick: () => void enter("host", newRoomCode()) },

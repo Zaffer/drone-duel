@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -173,6 +174,7 @@ def create_app(
     app = FastAPI(title="Drone Duels", version=__version__, lifespan=lifespan)
     app.state.hub = hub
     app.state.session = session
+    app.state.quit = lambda: os.kill(os.getpid(), signal.SIGINT)
 
     @app.get("/api/content")
     def get_content() -> ContentMsg:
@@ -202,6 +204,15 @@ def create_app(
         prefs.save(data)
         pilot.set_prefs(data)
         return data
+
+    @app.post("/api/quit")
+    async def quit_game(request: Request) -> dict[str, Any]:
+        """The menu's Exit: stop as Ctrl-C would (the lifespan closes the session), just after
+        answering. Only from the game's own page: another site could otherwise end the game."""
+        if not local_origin(request.headers.get("origin")):
+            raise HTTPException(403, "not from the game's page")
+        asyncio.get_running_loop().call_later(0.2, app.state.quit)
+        return {}
 
     @app.get("/osd/font/{name}.png")
     def osd_font(name: str) -> Response:

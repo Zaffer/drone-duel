@@ -16,11 +16,10 @@ import type { Flight, ModeRuntime } from "../../flight.ts";
 import { cleanRoomCode, newRoomCode, type Role, Room } from "../../net/peer.ts";
 import type { Course } from "../../net/protocol.ts";
 import type { Pose } from "../../net/server.ts";
-import { content, course as currentCourse, toast, vehicleId } from "../../state/app.ts";
+import { content, course as currentCourse, toast } from "../../state/app.ts";
 import { hudBanner, hudPanel, hudTimer } from "../../state/hud.ts";
 import { prefs, updatePrefs } from "../../state/prefs.ts";
 import { status } from "../../state/session.ts";
-import { vehicleCard } from "../../ui/app.ts";
 import { h, render } from "../../ui/h.ts";
 import { mapOffset } from "../../world/geo.ts";
 import { Ghost, type PeerPose } from "../ghost.ts";
@@ -66,18 +65,10 @@ export const race: ModeDef = {
 };
 
 function raceLobby(host: HTMLElement, ctx: ModeContext): () => void {
-  const mine = signal(
-    ctx.vehicles.find((v) => v.id === vehicleId())?.id ?? ctx.vehicles[0]?.id ?? "quad5",
-  );
+  const mine = ctx.vehicle;
   let room: Room | null = null;
   const peerState = signal<{ vehicle: string; ready: boolean } | null>(null);
   const disposers: (() => void)[] = [];
-  const cards = ctx.vehicles.map((v) => vehicleCard(v, () => mine(v.id)));
-  disposers.push(
-    effect(() =>
-      cards.forEach((c, i) => c.classList.toggle("selected", ctx.vehicles[i]!.id === mine())),
-    ),
-  );
   const nameInput = h("input", { value: prefs().player.name }) as HTMLInputElement;
   nameInput.addEventListener("change", () =>
     updatePrefs((p) => ({ ...p, player: { name: nameInput.value.trim() || "Pilot" } })),
@@ -194,20 +185,16 @@ function raceLobby(host: HTMLElement, ctx: ModeContext): () => void {
 
   render(
     host,
-    h("h2", null, `${ctx.location.name.split(": ").at(-1)}: race`),
-    h("h4", null, "Your aircraft"),
-    h("div", { class: "cards" }, cards),
+    h("label", { class: "field" }, "Your name", nameInput),
     h(
       "div",
       { class: "actions" },
-      h("label", { class: "field" }, "Your name", nameInput),
-      h("span", { class: "spacer" }),
-      h("button", { onclick: solo }, "Solo time trial"),
-      h(
-        "button",
-        { class: "primary", onclick: () => void enter("host", newRoomCode()) },
-        "Host a race",
-      ),
+      h("button", { class: "primary", onclick: solo }, "Solo time trial"),
+      h("button", { onclick: () => void enter("host", newRoomCode()) }, "Host a race"),
+    ),
+    h(
+      "div",
+      { class: "actions" },
       codeInput,
       h("button", { onclick: () => void enter("guest", cleanRoomCode(codeInput.value)) }, "Join"),
     ),

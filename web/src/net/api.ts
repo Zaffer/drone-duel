@@ -1,4 +1,4 @@
-// The server's REST API: content, config and the player's preferences.
+// The server's REST API: content, config, the player's preferences, and quitting.
 
 import type { ConfigMsg, ContentMsg } from "./protocol.ts";
 
@@ -18,4 +18,6 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(prefs),
     }),
+  /** Stop the game: the server closes the session (the firmware) and exits. */
+  quit: () => json<Record<string, never>>("/api/quit", { method: "POST" }),
 };

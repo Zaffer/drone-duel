@@ -33,10 +33,11 @@ map is Esri imagery on Esri terrain. A Cesium ion token (`CESIUM_ION_TOKEN`) is 
 uv run duels              # serves the game on http://localhost:8600 and opens Chrome
 ```
 
-Main menu: **Free Fly**, **Duel**, **Race**, then a place. Free Fly starts at once, in the
-vehicle you flew last; switch vehicles in flight from the pause menu's Vehicle tab. Duel and Race
-pick the vehicle in their lobby and meet the other player in a room: one hosts and reads out the
-code, the other joins (WebRTC, peer to peer).
+Main menu: three columns, picked in turn: the scenario (**Free Fly**, **Duel**, **Race**), the
+location, the vehicle. Free Fly starts when you pick the vehicle; switch vehicles in flight from
+the pause menu's Vehicle tab. Duel and Race then meet the other player in a room, under the
+vehicles: one hosts and reads out the code, the other joins (WebRTC, peer to peer). Esc steps back
+a column. **Options** and **Exit** (it stops the server too) are in the top right corner.
 
 **Controllers.** A drone radio in USB joystick mode, through Chrome's Gamepad API or, when Chrome
 can't see all its axes, read by the server through Linux. Profiles for the BETAFPV LiteRadio 2,

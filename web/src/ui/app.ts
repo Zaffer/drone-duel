@@ -1,15 +1,16 @@
-// The game's screens (DESIGN.md §11): the main menu (mode), the place picker, a mode's lobby
-// (Duel, Race: where the vehicle is picked), and flying (ui/hud.ts, with the pause menu,
-// ui/pause.ts, whose Vehicle tab switches vehicle). While in the menus the world turns slowly
-// round the chosen place.
+// The game's screens (DESIGN.md §11): the main menu, three columns picked in turn (scenario,
+// location, vehicle; Duel and Race add their lobby under the vehicles), and flying (ui/hud.ts,
+// with the pause menu, ui/pause.ts, whose Vehicle tab switches vehicle). Options and Exit sit in
+// the menu's top corner. While in the menus the world turns slowly round the chosen place.
 
-import { effect } from "alien-signals";
+import { effect, signal } from "alien-signals";
 import * as C from "cesium";
 import { sounds } from "../audio/sounds.ts";
 import { Flight, type ModeRuntime } from "../flight.ts";
 import { radio } from "../input/radio.ts";
-import { MODES, modePlaces, modeVehicles } from "../modes/registry.ts";
+import { MODES, modePicks, modePlaces } from "../modes/registry.ts";
 import type { ModeContext, ModeDef } from "../modes/types.ts";
+import { api } from "../net/api.ts";
 import type { Location, Vehicle } from "../net/protocol.ts";
 import { link } from "../net/server.ts";
 import {
@@ -25,7 +26,7 @@ import {
   wind,
 } from "../state/app.ts";
 import { controllerName, inputSource } from "../state/input.ts";
-import { frames } from "../streams/time.ts";
+import { after, frames } from "../streams/time.ts";
 import type { World } from "../world/world.ts";
 import { h, render, untracked } from "./h.ts";
 import { hudSlots, mountHud } from "./hud.ts";
@@ -38,10 +39,24 @@ const svg = (markup: string): HTMLElement => {
   return span;
 };
 
+/** One of the menu's columns: a numbered heading over what is picked there. */
+const column = (n: number, title: string) => {
+  const body = h("div", { class: "col-body" });
+  const node = h(
+    "section",
+    { class: "menu-col" },
+    h("h2", null, h("span", { class: "step" }, String(n)), title),
+    body,
+  );
+  return { node, body };
+};
+
 export function mountApp(root: HTMLElement, world: World): void {
   let teardown: (() => void) | null = null;
   let flight: Flight | null = null;
   let orbit: AbortController | null = null;
+  /** The location clicked in the menu (hovering one only shows it), kept for the next visit. */
+  let chosenPlace: string | null = null;
   radio.start();
   // The channels for the UI (the Controls tab's bars, the HUD), in the menus as in flight.
   frames().subscribe(() => radio.publish());
@@ -107,42 +122,202 @@ export function mountApp(root: HTMLElement, world: World): void {
     return { node: h("div", { class: "status-row" }, server, ctl, map), dispose };
   };
 
+  // Exit stops the server (and its firmware) and closes the window; it asks once first.
+  const exitButton = () => {
+    const label = h("span", null, "Exit");
+    let armed: AbortController | null = null;
+    const button = h(
+      "button",
+      {
+        class: "corner-btn",
+        title: "Stop the game and close the window",
+        onclick: () => {
+          if (!armed) {
+            sounds.click();
+            armed = new AbortController();
+            button.classList.add("armed");
+            label.textContent = "Click again to exit";
+            after(3000).subscribe(
+              () => {
+                armed = null;
+                button.classList.remove("armed");
+                label.textContent = "Exit";
+              },
+              { signal: armed.signal },
+            );
+            return;
+          }
+          armed.abort();
+          void quitGame();
+        },
+      },
+      svg(icons.exit),
+      label,
+    );
+    return { node: button, dispose: () => armed?.abort() };
+  };
+
+  const quitGame = async () => {
+    teardown?.();
+    teardown = null;
+    stopOrbit();
+    render(
+      root,
+      h(
+        "div",
+        { class: "stopped" },
+        h("h1", null, "Drone Duels has stopped"),
+        h(
+          "p",
+          null,
+          "You can close this window. Run ",
+          h("code", null, "uv run duels"),
+          " to fly again.",
+        ),
+      ),
+    );
+    try {
+      await api.quit();
+    } catch (err) {
+      console.error("could not stop the server", err);
+    }
+    window.close();
+  };
+
   const showMenu = () => {
     teardown?.();
     // The menus' backdrop is the free globe; Google's tiles are billed, so only flights use them.
     void world.useTiles(false);
     if (!orbit) startOrbit();
-    const main = h("div", { class: "menu-main" });
-    const modeButtons = MODES.map((m) =>
+    const scenario = column(1, "Scenario");
+    const place = column(2, "Location");
+    const ride = column(3, "Vehicle");
+    let lobbyTeardown: (() => void) | null = null;
+    const closeLobby = () => {
+      lobbyTeardown?.();
+      lobbyTeardown = null;
+    };
+
+    const scenarioButtons = MODES.map((m, i) =>
       h(
         "button",
-        { class: "mode-btn", onclick: () => pickMode(m, main, modeButtons) },
+        { class: "mode-btn", onclick: () => pickMode(m) },
         svg(icons[m.id]),
         h("span", null, h("div", { class: "title" }, m.name), h("div", { class: "desc" }, m.desc)),
-        h("span", { class: "kbd" }, String(MODES.indexOf(m) + 1)),
+        h("span", { class: "kbd" }, String(i + 1)),
       ),
     );
+    render(scenario.body, scenarioButtons);
+
+    const pickMode = (m: ModeDef) => {
+      sounds.click();
+      drawPlaces(m);
+    };
+
+    // Column 2: where this scenario can be played. Picking one opens column 3.
+    const drawPlaces = (m: ModeDef) => {
+      mode(m.id);
+      scenarioButtons.forEach((b, i) => b.classList.toggle("active", MODES[i] === m));
+      closeLobby();
+      const all = modePlaces(m);
+      if (!all.some((loc) => loc.id === chosenPlace)) chosenPlace = null;
+      const cards = all.map((loc) =>
+        locationCard(loc, () => {
+          sounds.click();
+          chosenPlace = loc.id;
+          wind(loc.wind);
+          drawPlaces(m);
+        }),
+      );
+      cards.forEach((c, i) => c.classList.toggle("selected", all[i]!.id === chosenPlace));
+      render(
+        place.body,
+        h(
+          "div",
+          { class: "col-list", onmouseleave: () => chosenPlace && locationId(chosenPlace) },
+          cards,
+        ),
+      );
+      place.node.hidden = false;
+      const loc = all.find((l) => l.id === chosenPlace);
+      if (loc) {
+        locationId(loc.id);
+        drawVehicles(m, loc);
+      } else {
+        ride.node.hidden = true;
+        render(ride.body);
+      }
+    };
+
+    // Column 3: what to fly. Free Fly flies on the pick; Duel and Race draw their lobby under it.
+    const drawVehicles = (m: ModeDef, loc: Location) => {
+      closeLobby();
+      const picks = modePicks(m);
+      const picked = signal(picks.find((v) => v.id === vehicleId())?.id ?? picks[0]?.id ?? "");
+      const cards = picks.map((v) =>
+        vehicleCard(v, () => {
+          sounds.click();
+          if (m.lobby) picked(v.id);
+          else fly(loc, v.id, 0, (f) => m.run!(f));
+        }),
+      );
+      const disposeCards = effect(() =>
+        cards.forEach((c, i) => c.classList.toggle("selected", picks[i]!.id === picked())),
+      );
+      const lobby = h("div", { class: "col-lobby" });
+      render(
+        ride.body,
+        h("div", { class: "col-list" }, cards),
+        ...(m.pickHint ? [h("p", { class: "hint" }, m.pickHint)] : []),
+        lobby,
+      );
+      ride.node.hidden = false;
+      const ctx: ModeContext = {
+        location: loc,
+        vehicle: picked,
+        fly: (vehicle, pad, attach) => fly(loc, vehicle, pad, attach),
+        quit: () => {
+          flight?.dispose();
+          flight = null;
+          screen("menu");
+        },
+      };
+      const disposeLobby = m.lobby?.(lobby, ctx);
+      lobbyTeardown = () => {
+        disposeCards();
+        disposeLobby?.();
+      };
+    };
+
+    const back = () => {
+      const m = MODES.find((x) => x.id === mode());
+      if (m && chosenPlace) {
+        chosenPlace = null;
+        drawPlaces(m);
+      } else if (m) {
+        closeLobby();
+        mode(null);
+        scenarioButtons.forEach((b) => b.classList.remove("active"));
+        place.node.hidden = true;
+        ride.node.hidden = true;
+        render(place.body);
+        render(ride.body);
+      }
+    };
+
     const chips = menuChips();
+    const exit = exitButton();
     const brand = h("div", { class: "brand" });
     brand.innerHTML = `${icons.logo}<div><h1>DRONE <span>DUELS</span></h1><p>Real firmware. Real places. Fly, duel, race.</p></div>`;
     const options = h(
       "button",
-      { class: "mode-btn", onclick: () => openPause(root, null, "controls") },
+      {
+        class: "corner-btn",
+        title: "Controls, keys and how to fly, video, wind, graphics, audio (O)",
+        onclick: () => openPause(root, null, "controls"),
+      },
       svg(icons.options),
-      h(
-        "span",
-        null,
-        h("div", { class: "title" }, "Options"),
-        h("div", { class: "desc" }, "Controls, keys and how to fly, video, wind, graphics, audio."),
-      ),
-      h("span", { class: "kbd" }, "O"),
-    );
-    const side = h(
-      "div",
-      { class: "menu-side" },
-      brand,
-      h("div", { class: "modes" }, modeButtons, options),
-      chips.node,
+      h("span", null, "Options"),
     );
     const toastBox = h("div", { class: "toasts" });
     const disposeToasts = effect(() =>
@@ -150,56 +325,39 @@ export function mountApp(root: HTMLElement, world: World): void {
         ...toasts().map((t) => h("div", { class: `toast ${t.tone}` }, t.text)),
       ),
     );
-    const node = h("div", { class: "menu" }, side, main, toastBox);
+    place.node.hidden = true;
+    ride.node.hidden = true;
+    const node = h(
+      "div",
+      { class: "menu" },
+      h(
+        "header",
+        { class: "menu-top" },
+        brand,
+        h("div", { class: "menu-corner" }, options, exit.node),
+      ),
+      h("div", { class: "menu-cols" }, scenario.node, place.node, ride.node),
+      chips.node,
+      toastBox,
+    );
     render(root, node);
     const keys = (e: KeyboardEvent) => {
-      const i = Number(e.key) - 1;
-      const m = MODES[i];
       if (document.activeElement?.tagName === "INPUT" || root.querySelector(".pause")) return;
-      if (m) pickMode(m, main, modeButtons);
+      const m = MODES[Number(e.key) - 1];
+      if (m) pickMode(m);
       if (e.code === "KeyO") openPause(root, null, "controls");
-      if (e.key === "Escape") {
-        mode(null);
-        render(main);
-        modeButtons.forEach((b) => b.classList.remove("active"));
-      }
+      if (e.key === "Escape") back();
     };
     window.addEventListener("keydown", keys);
     teardown = () => {
       chips.dispose();
+      exit.dispose();
       disposeToasts();
       window.removeEventListener("keydown", keys);
-      lobbyTeardown?.();
-      lobbyTeardown = null;
+      closeLobby();
     };
     const current = MODES.find((m) => m.id === mode());
-    if (current) pickMode(current, main, modeButtons);
-  };
-
-  let lobbyTeardown: (() => void) | null = null;
-
-  const pickMode = (m: ModeDef, main: HTMLElement, buttons: HTMLElement[]) => {
-    sounds.click();
-    mode(m.id);
-    buttons.forEach((b, i) => b.classList.toggle("active", MODES[i] === m));
-    lobbyTeardown?.();
-    lobbyTeardown = null;
-    const all = modePlaces(m);
-    const cards = all.map((loc) => locationCard(loc, () => pickLocation(m, loc, main)));
-    render(
-      main,
-      h(
-        "div",
-        { class: "picker" },
-        h("h2", null, `${m.name}: choose a place`),
-        h("div", { class: "cards" }, cards),
-      ),
-    );
-    const current = all.find((loc) => loc.id === locationId()) ?? all[0];
-    if (current) {
-      locationId(current.id);
-      cards.forEach((c, i) => c.classList.toggle("selected", all[i] === current));
-    }
+    if (current) drawPlaces(current);
   };
 
   const locationCard = (loc: Location, onPick: () => void) => {
@@ -219,36 +377,6 @@ export function mountApp(root: HTMLElement, world: World): void {
     );
     card.prepend(h("span", { class: "glyph" }, svg(icons.pin)));
     return card;
-  };
-
-  const pickLocation = (m: ModeDef, loc: Location, main: HTMLElement) => {
-    sounds.click();
-    locationId(loc.id);
-    wind(loc.wind);
-    const vehicles = modeVehicles(m);
-    const ctx: ModeContext = {
-      location: loc,
-      vehicles,
-      fly: (vehicle, pad, attach) => fly(loc, vehicle, pad, attach),
-      quit: () => {
-        flight?.dispose();
-        flight = null;
-        screen("menu");
-      },
-    };
-    if (m.lobby) {
-      lobbyTeardown?.();
-      const host = h("div", { class: "picker" });
-      render(main, host);
-      lobbyTeardown = m.lobby(host, ctx);
-      return;
-    }
-    // Free Fly: the vehicle last flown (at first the quad), switched in flight (the Vehicle tab).
-    const chosen =
-      vehicles.find((v) => v.id === vehicleId()) ??
-      vehicles.find((v) => v.kind === "multirotor") ??
-      vehicles[0];
-    if (chosen) fly(loc, chosen.id, 0, (f) => m.run!(f));
   };
 
   const fly = (loc: Location, vehicle: string, pad: number, attach: (f: Flight) => ModeRuntime) => {
