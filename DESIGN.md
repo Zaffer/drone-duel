@@ -330,6 +330,28 @@ through our harness, so the wiring cannot drift.
 The ArduPilot tune (`copter-quad5.parm`, from today's `fpv5.parm`) is re-fitted to racer5in's
 mass and thrust. `MOT_THST_HOVER` and `MOT_THST_EXPO` come from the plant, not by hand.
 
+**Flying itself** (a target, `target` in §8): the game flies it as a ground station would, over
+MAVLink as system 254, while the idle receiver plays on (nobody on the sticks): GUIDED, arm,
+`MAV_CMD_NAV_TAKEOFF` to the height above the pad, each waiting for its `COMMAND_ACK`, tried
+again until telemetry shows it climbing (`ArduCopter.hover`, on a thread of its own); up
+already, a position target at the height; `land` is LAND. Nothing about the RC changes: the arm
+and mode switches act only when they move, and the idle 1000 µs throttle is above
+`FS_THR_VALUE`. Measured (2026-11-06, SITL): 30 m held 16 s after asking from the pad (climbing
+at `WP_SPD_UP`'s 2.5 m/s); a reset respawns ArduCopter (48 s to ready, 32 of them waiting for
+the EKF), then 10 m in 8 s.
+
+**Hits** (`hit` in §8) damage the plant by part (`physics/quad/model.py`, `Damage`): a prop loses
+a blade of three each hit (that rotor's `ct2` and `cq2` scaled by the blades left, repacked with
+`pack_params`, the same shape so nothing is jitted again); a motor or arm hit kills that rotor
+(commanded 0 whatever ArduPilot asks: it spins down with the motor lag); the stack stops all four
+at once; a pierced pack holds 0.3 s (EST, the reasoning is beside `BATTERY_HOLD_S`) and then
+stops all four; the camera and frame lose nothing. Every hit leaves its momentum as SkyFlow's
+external force over the next frame (F = J / dt, W) and its moment about the centre of mass as
+the external torque (B). ArduCopter then flies what is left, as it would: one motor gone, the
+quad yaws away, tumbles and falls (SITL, from 30 m: 18 m/s into the ground 4 s later, crashed).
+The prop's imbalance (vibration) is not modelled. A reset mends it all; the physics' status
+carries the damage, and `physics` (§8) passes it to the page.
+
 ### 6.3 Truck
 
 Today's Rapier ray-cast vehicle (car.js and drivesession.js) on colliders built from the tiles,
@@ -374,6 +396,7 @@ A mode is a pair of plugins with one lifecycle, `setup → running → finished`
 | Free Fly | 1 | Any vehicle, switch at will (the pause menu), no score. Practice missions here with QGC. |
 | Duel | 2 (P2P) | Turns. The pilot (quad or Chupito) strikes the truck; the driver (truck) evades. A strike scores; a crash spends the aircraft. Swap each turn. Today's duelmatch rules carry over. |
 | Race | 2 (P2P) | Live, side by side. Each player flies their own sim and sees the other as a ghost (no collisions). Countdown start from the host. A gate counts when the segment between two true poses crosses its rectangle in the right direction, from GO (the countdown waits for the session it started to be ready). The next gate wears a chevron on each side, the one after it dots; the next three shade from ember to the rest's pale. Lap and total times; first to finish wins. |
+| Shoot Down | 1 | On foot with a rifle; a real quad hovers 30 m over the pad, 100 m in front. Bring it down. No score but shots, hits, downs and the time from the first shot to a down (§7.1). |
 
 The peer link stays Trystero over Nostr relays (WebRTC, no server), one room per match. Peers
 exchange poses at 30 Hz for the ghost or truck, events (strike, gate, crash, finish) with a
@@ -388,6 +411,56 @@ the lateness plus one interval, between 60 and 250 ms, changed slowly. Judging i
 gates on your own true poses; the pilot's page judges a strike against the truck as the pilot
 saw it (favouring the shooter).
 
+### 7.1 Shoot Down
+
+The player is a person on the ground with an 11.5" AR-15 (content/weapons/ar15-sbr.toml: its
+mass, twist, magazine, sights, zero, and the cartridge, M193, with each number's source). The
+target is the session's own vehicle, the 5" quad on ArduCopter and SkyFlow-Dynamics: the page
+asks for `target hover` and the server flies it up as a ground station would. Nobody flies it
+from the page (`ModeDef.ownsView`: no rig, feed, operator, sticks or motor in the player's ears).
+The page's modules are in `web/src/shoot/`:
+
+- **ballistics.ts**: a point mass on the G7 drag table scaled by the BC, through the moving air
+  (ISA density at the place's height), WGS84 gravity, Coriolis, and Litz's spin drift and
+  aerodynamic jump, stepped by RK4 at 0.5 ms. The sights are zeroed at 50 m by solving for the
+  bore's angle; the tests hold it to Didion's lag rule, a vacuum, and the same flight on G1 with
+  M193's published G1 coefficients.
+- **air.ts**: the place's wind made again in the page as physics/core/weather.py makes it
+  (MIL-F-8785C's log profile, Dryden-sized turbulence, 1 − cos gusts). The bullets fly through
+  it and the wind meter reads it; the drone's physics draws its own gusts from the same settings.
+- **target.ts**: the quad's parts as the drawn model lays them out (props as discs a blade crosses
+  with the chance the blades cover, motors, ESC sleeves, arms, pack, stack, camera, plates), and
+  the share of the bullet's momentum each takes as it passes through.
+- **rounds.ts**: rounds stepped in real time against the drone's drawn pose at the same moment
+  (favouring the shooter, as the duel's strikes) and the drawn ground; tracers, dust, sparks. A
+  hit goes to the server as `hit` (part, motor, impulse, where) and the physics does the rest.
+  The ground is a pick render (`sampleHeight`), so it is rationed: each round once a frame at
+  most, 2 ms a frame among them, none high above anything; a round found under it is searched
+  back along its way for where it went in. (Looked for every few metres of flight, a string of
+  shots fed on itself into seconds-long frames.)
+- **recoil.ts**: the rifle's momentum, bullet plus powder gas at Hatcher's 1.75 × muzzle speed
+  (5.5 N·s for M193 here), into a body of damped springs by stance: the shoulder pocket, the
+  torso pushed back and tipped about the hips (or elbows, prone), the shoulders turned by the
+  push landing right of the spine. **hold.ts**: breathing, the breath held (still for 6 s, then
+  the shakes, a forced breath at 14 s), the hold's wander and shiver by stance, heartbeats, the
+  trigger's jerk, and a heart rate that walking and running raise.
+- **shooter.ts**: the person (stances; walking, sprinting at 6 m/s with the rifle down, jumping;
+  the drawn ground looked up ahead as they move, a rise over a step a wall, a drop a fall; the
+  camera on the sight or head up) and the shot: the trigger breaks, the jerk, 8 ms of lock time, the bullet leaves along
+  the sight line tipped by the zero and spread by the ammunition's dispersion.
+- **rifle.ts**, **sights.ts**, **gunsounds.ts**: the first-person rifle and arms
+  (tools/models/riflemodel.py; its measured points in the GLB's extras), the holo's reticle
+  (at infinity, through its window) and the irons' aperture, and the rifle's sounds, those from
+  out there arriving at the speed of sound.
+
+Every spring (recoil, the heartbeat, the knees) is stepped in a few milliseconds whatever the
+frame, and the view's pitch is held off straight up and down: stepped a frame at a time, the
+heartbeat's grew without end under about 20 fps and turned the view over.
+
+The numbers no source gives are marked EST where they are set. Not modelled yet: the spatial
+variation of the wind along a shot, prop imbalance after a blade is lost, and ricochets. Walls
+are only the drawn tiles' heights: photogrammetry bushes are solid, and an overhang is not seen.
+
 ## 8. Server ⇄ page protocol
 
 One WebSocket at `/ws` carries JSON envelopes `{ch, t, data}`, plus binary frames for the
@@ -401,13 +474,15 @@ high-rate pose channel.
 | page → server | `wind` | on change | speed, direction, turbulence, gust trigger |
 | page → server | `video` | on change | analog or digital (sets the OSD grid, §10) |
 | page → server | `radio_source` | on change | stream the radio as the server reads it; and whether it flies (§12) |
+| page → server | `target` | on demand | the quad flies itself: hover at a height over the pad, or land (§6.2) |
+| page → server | `hit` | per hit | a bullet struck a part (and which motor's): the impulse, where; straight to the physics (§6.2) |
 | server → page | `status` | on change | slot, vehicle, firmware state, arming blockers |
 | server → page | `pose` | 120 Hz | sim time, true position, attitude, velocity, body rates, rotor/servo state (binary) |
 | server → page | `osd` | per draw | the firmware's DisplayPort screen |
 | server → page | `telemetry` | 10 Hz | what a GCS sees: mode, armed, GPS, battery, attitude, alt |
 | server → page | `plan` | on change | mission, fence, rally (ArduPilot) |
 | server → page | `dynamics` | 30 Hz | wing internals (when the overlay is on) |
-| server → page | `physics` | on change | what the physics says it is doing: ground, hand, flying, crashed |
+| server → page | `physics` | on change | what the physics says it is doing: ground, hand, flying, crashed; what hits have taken |
 | server → page | `radio` | 60 Hz | the radio's axes, read through Linux, and its channels as the server maps them (while asked) |
 
 The protocol is defined once, in `server/protocol.py`, as pydantic models: a discriminated union

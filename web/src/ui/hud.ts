@@ -26,10 +26,15 @@ import { prefs, updatePrefs } from "../state/prefs.ts";
 import { phase, status, telemetry } from "../state/session.ts";
 import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { h } from "./h.ts";
-import { flightKeys } from "./inputs.ts";
+import { flightKeys, shooterKeys } from "./inputs.ts";
 import { openPause } from "./pause.ts";
 
-const MODE_NAMES = { freefly: "Free Fly", duel: "Duel", race: "Race" } as const;
+const MODE_NAMES = {
+  freefly: "Free Fly",
+  duel: "Duel",
+  race: "Race",
+  shoot: "Shoot Down",
+} as const;
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
 export interface HudSlots {
@@ -99,13 +104,16 @@ export function mountHud(
   const panelHost = h("div");
   const perfBox = h("div");
   const perfPanel = mountPerf(perfBox);
+  // On the ground with a rifle (Shoot Down), the keys are the shooter's (shoot/shooter.ts).
+  const onFoot = flight.ownsView;
   const keysHelp = h(
     "div",
     { class: "keys-help" },
-    ...flightKeys()
+    ...(onFoot ? shooterKeys() : flightKeys())
       .filter((k) => k.strip)
       .map((k) => h("span", null, h("span", { class: "kbd" }, k.keys[0]!), " ", k.strip!)),
   );
+  if (onFoot) for (const seg of [vehicleSeg.el, viewSeg.el, videoSeg.el]) seg.hidden = true;
   const hud = h(
     "div",
     { class: "hud" },
@@ -145,6 +153,13 @@ export function mountHud(
     }
     wake();
     const n = Number(e.key);
+    if (onFoot) {
+      if (e.key === "Escape") pause();
+      else if (e.code === "KeyH") keysHelp.classList.toggle("faded");
+      else if (e.code === "KeyG") sendWind(true);
+      else if (e.code === "KeyP") perfPanel.toggle();
+      return;
+    }
     if (e.key === "Escape") pause();
     else if (e.code === "KeyV") cycleView(e.shiftKey ? -1 : 1);
     else if (n >= 1 && n <= VIEW_ORDER.length && !e.shiftKey) view(VIEW_ORDER[n - 1]!);
@@ -174,8 +189,9 @@ export function mountHud(
     effect(() => {
       viewSeg.value.textContent = VIEW_NAMES[view()];
       const v = view();
-      dials.hidden = v === "fpv" || !prefs().hud.dials || vehicle()?.firmware.kind === "none";
-      slots.minimap.hidden = v === "map" || !prefs().hud.minimap;
+      dials.hidden =
+        onFoot || v === "fpv" || !prefs().hud.dials || vehicle()?.firmware.kind === "none";
+      slots.minimap.hidden = onFoot || v === "map" || !prefs().hud.minimap;
     }),
     effect(() => {
       videoSeg.value.textContent = prefs().video.system === "analog" ? "Analog" : "Digital";
@@ -213,7 +229,8 @@ export function mountHud(
     }),
     effect(() => {
       const s = status();
-      const crashed = phase() === "crashed";
+      // Shooting a drone down, its crash is the point: the mode says so itself.
+      const crashed = phase() === "crashed" && !onFoot;
       const show =
         s.state === "starting" || s.state === "failed" || s.state === "destroyed" || crashed;
       starting.hidden = !show;
@@ -233,7 +250,7 @@ export function mountHud(
     }),
     effect(() => {
       // Say once how to arm, when the vehicle is first ready.
-      if (status().state !== "ready") return;
+      if (status().state !== "ready" || onFoot) return;
       const v = vehicle();
       const t = telemetry();
       if (!v || !t || !v.aux || t.armed) return;

@@ -6,9 +6,9 @@ and talking to the server over a UDP pair (DESIGN.md §3).
 
 The backend (quad: ArduPilot's JSON physics; wing: X-Plane's protocol for INAV) runs its own
 lockstep loop on a thread. This loop, at LOOP_HZ, takes the server's control datagrams (JSON,
-`t` names each: rc, ground, wind, reset, throw, dynamics, stop) and sends back the true pose
-(b"P" + protocol.POSE), the status (twice a second, and on change) and, when asked, the
-dynamics.
+`t` names each: rc, ground, wind, reset, throw, hit, dynamics, stop) and sends back the true
+pose (b"P" + protocol.POSE), the status (twice a second, and on change: its phase, and what hits
+have taken) and, when asked, the dynamics.
 """
 
 import argparse
@@ -73,6 +73,22 @@ class Backend(Protocol):
 
     def throw(self) -> None:
         """Throw a hand-launched aircraft (nothing for others)."""
+        ...
+
+    def hit(
+        self,
+        part: str,
+        motor: int | None,
+        impulse_ned: tuple[float, float, float],
+        at_frd: tuple[float, float, float],
+    ) -> None:
+        """A bullet struck `part` (protocol.HitMsg), leaving momentum `impulse_ned` (N·s) at
+        `at_frd` (m from the centre of mass, body FRD); `motor` ArduPilot's 1-4 for a rotor's
+        part. A model without damage may ignore it."""
+        ...
+
+    def damage(self) -> dict[str, Any] | None:
+        """What hits have taken (protocol.Damage), or None if nothing since the reset."""
         ...
 
     def dynamics(self) -> dict[str, Any] | None:
@@ -143,6 +159,14 @@ def run(backend: Backend, slot: int) -> None:
                     backend.reset()
                 elif kind == "throw":
                     backend.throw()
+                elif kind == "hit":
+                    motor = msg.get("motor")
+                    backend.hit(
+                        str(msg["part"]),
+                        int(motor) if motor is not None else None,
+                        _vec3(msg["impulse_ned"]),
+                        _vec3(msg["at_frd"]),
+                    )
                 elif kind == "dynamics":
                     dynamics_on = bool(msg.get("on"))
                 elif kind == "stop":
@@ -164,7 +188,7 @@ def run(backend: Backend, slot: int) -> None:
                 if dyn is not None:
                     send({"t": "dynamics", **dyn})
             status = {"t": "status", "listening": True, "connected": backend.connected(),
-                      "phase": backend.phase()}
+                      "phase": backend.phase(), "damage": backend.damage()}
             if status != last_status or now >= next_status:
                 next_status = now + STATUS_S
                 last_status = status
@@ -173,6 +197,11 @@ def run(backend: Backend, slot: int) -> None:
     finally:
         backend.stop()
         sock.close()
+
+
+def _vec3(v: Any) -> tuple[float, float, float]:  # noqa: ANN401 - JSON
+    x, y, z = (float(c) for c in v)
+    return (x, y, z)
 
 
 def main(argv: list[str] | None = None) -> None:

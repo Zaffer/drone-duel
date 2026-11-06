@@ -197,17 +197,16 @@ class PhysicsProcess:
                 continue
             kind = msg.pop("t", None)
             if kind == "status":
-                changed = (msg.get("phase"), msg.get("connected")) != (
-                    self.status.get("phase"),
-                    self.status.get("connected"),
-                )
+                said = ("phase", "connected", "damage")
+                changed = any(msg.get(k) != self.status.get(k) for k in said)
                 with self._status_changed:
                     self.status = msg
                     self._status_changed.notify_all()
                 if changed:
                     self.events.publish(
                         {"ch": "physics", "phase": str(msg.get("phase", "")),
-                         "connected": bool(msg.get("connected"))}
+                         "connected": bool(msg.get("connected")),
+                         "damage": msg.get("damage")}
                     )
             elif kind == "dynamics":
                 self.events.publish({"ch": "dynamics", "data": msg})
@@ -253,6 +252,24 @@ class Firmware(ABC):
         """Take another video system's OSD grid while running. False when this firmware takes it
         only at boot: the session then respawns the vehicle."""
         return False
+
+    def hover(self, height_m: float) -> None:
+        """Fly itself, as a ground station would fly it: take off from the pad and hold
+        `height_m` above it (or go to that height, if up). Returns at once; the flying goes on
+        on a thread of its own, and a later hover or land overtakes it. Not every firmware
+        can: this one says so."""
+        self._cannot_fly_itself()
+
+    def land(self) -> None:
+        """Land where it is, as a ground station would ask (see `hover`)."""
+        self._cannot_fly_itself()
+
+    def _cannot_fly_itself(self) -> None:
+        log.warning("%s cannot fly itself here", self.name)
+        self.events.publish(
+            {"ch": "log", "level": "warn", "source": "session",
+             "text": f"{self.name} cannot fly itself here"}
+        )
 
     @abstractmethod
     def alive(self) -> bool: ...

@@ -56,7 +56,7 @@ const JUMP_MS = 120;
 // Each takes `a`, a sound being played: its AudioContext, the node it plays into, and when it
 // starts. `at` is seconds after that.
 
-interface Play {
+export interface Play {
   ctx: AudioContext;
   out: AudioNode;
   t: number;
@@ -111,7 +111,7 @@ interface Tone {
 }
 
 /** One oscillator note, gliding from `f` to `f1`; `vibrato` in Hz. */
-function tone(a: Play, o: Tone): void {
+export function tone(a: Play, o: Tone): void {
   const {
     type = "sine",
     f,
@@ -161,7 +161,7 @@ function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
   return buffer;
 }
 
-function noiseSource(ctx: BaseAudioContext): AudioBufferSourceNode {
+export function noiseSource(ctx: BaseAudioContext): AudioBufferSourceNode {
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffer(ctx);
   src.loop = true;
@@ -169,7 +169,7 @@ function noiseSource(ctx: BaseAudioContext): AudioBufferSourceNode {
 }
 
 /** A burst of filtered noise. */
-function noise(
+export function noise(
   a: Play,
   { at = 0, dur, gain, attack, hold, filter }: Omit<Tone, "f" | "type"> & { filter?: Filter },
 ): void {
@@ -828,6 +828,19 @@ class Sounds {
   }
   fence(): void {
     this.play("fence");
+  }
+
+  /** A one-off sound made elsewhere (the rifle's: shoot/gunsounds.ts), `delay` s from now,
+   * panned -1 (left) .. 1 (right), on the effects bus. */
+  custom(build: (a: Play) => void, delay = 0, pan = 0): void {
+    if (!this.live) return;
+    const ctx = this.ctx!;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = Math.max(-1, Math.min(1, pan));
+    panner.connect(this.effectsBus!);
+    build({ ctx, out: panner, t: ctx.currentTime + 0.005 + Math.max(0, delay) });
+    // Let the panner go once the sound is surely over.
+    setTimeout(() => panner.disconnect(), (delay + 6) * 1000);
   }
 
   private play<K extends EffectId>(

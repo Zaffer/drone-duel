@@ -57,6 +57,7 @@ FLIP = np.array([1.0, -1.0, -1.0])
 
 STATE = backend.state_slices(N)
 X, V, Q, W, ROTORS = (STATE[k] for k in ("x", "v", "q_wxyz", "w", "rotor_speeds"))
+INPUT = backend.input_slices(N)
 
 
 def ned_quat(q_wxyz: np.ndarray) -> tuple[float, float, float, float]:
@@ -160,28 +161,53 @@ class Plant:
         self.advance(s, self.inputs(np.zeros(N)), 1 / 1200, substeps)
 
     def advance(
-        self, s: np.ndarray, u: np.ndarray, dt: float, substeps: int
+        self,
+        s: np.ndarray,
+        u: np.ndarray,
+        dt: float,
+        substeps: int,
+        params: jax.Array | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """`substeps` steps of `dt` s with the inputs held: the state after, and the IMU there
-        (specific force, then rates, body FLU)."""
-        end, imu = self._advance(s, u, self.params, dt, substeps)
+        (specific force, then rates, body FLU). `params`: the airframe as damage has left it
+        (`damaged_params`), else as built."""
+        p = self.params if params is None else params
+        end, imu = self._advance(s, u, p, dt, substeps)
         return np.asarray(end), np.asarray(imu)
 
-    def statedot(self, s: np.ndarray, u: np.ndarray) -> np.ndarray:
-        return np.asarray(self._statedot(s, u, self.params))
+    def damaged_params(self, rotor_share: np.ndarray) -> jax.Array:
+        """The airframe's parameters with each rotor's (racer5in's order) thrust and drag-torque
+        coefficients (ct2, cq2) scaled by `rotor_share`: a prop with blades shot off. Packed as
+        the built ones are, the same shape, so `advance` is not traced again."""
+        values = {k: v for k, v in self.frame.values.items() if k != "limits"}
+        for name in ("ct2", "cq2"):
+            values[name] = [float(c) * float(k) for c, k in zip(values[name], rotor_share,
+                                                                  strict=True)]
+        return backend.pack_params(values)
+
+    def statedot(self, s: np.ndarray, u: np.ndarray, params: jax.Array | None = None) -> np.ndarray:
+        return np.asarray(self._statedot(s, u, self.params if params is None else params))
 
     def imu(self, s: np.ndarray, u: np.ndarray) -> np.ndarray:
         return np.asarray(self._imu(s, u, self.params))
 
     @staticmethod
     def inputs(
-        rotor_cmd: np.ndarray, wind_ned: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        rotor_cmd: np.ndarray,
+        wind_ned: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        force_ned: np.ndarray | None = None,
+        torque_frd: np.ndarray | None = None,
     ) -> np.ndarray:
-        """Commanded rotor speeds (racer5in's order) and the wind (NED, m/s), as SkyFlow's
-        inputs: no external force or torque."""
+        """Commanded rotor speeds (racer5in's order), the wind (NED, m/s), and an external
+        force (NED, N) and torque (body FRD, N·m), as SkyFlow's inputs (its F_ext is in W, its
+        τ_ext in B: NWU and FLU here)."""
         u = np.zeros(9 + N)
         u[:N] = rotor_cmd
-        u[N : N + 3] = FLIP * np.asarray(wind_ned)
+        u[INPUT["v_wind"]] = FLIP * np.asarray(wind_ned)
+        if force_ned is not None:
+            u[INPUT["F_ext"]] = FLIP * np.asarray(force_ned)
+        if torque_frd is not None:
+            u[INPUT["tau_ext"]] = FLIP * np.asarray(torque_frd)
         return u
 
     @staticmethod

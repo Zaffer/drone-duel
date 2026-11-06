@@ -38,6 +38,24 @@ export interface Prefs {
   };
   audio: { on: boolean; master: number; motors: number; effects: number };
   hud: { minimap: boolean; dials: boolean; units: "metric" | "imperial" };
+  /** Shoot Down's rifle and how the shooter aims it. */
+  shoot: {
+    /** Mouse: milliradians a count, at the hip (aiming scales it by the zoom). */
+    mouseMrad: number;
+    /** Gamepad: the right stick's fastest turn, degrees a second. */
+    padDegS: number;
+    /** On the sight, the view narrows to this share of the field of view (1: none). */
+    adsZoom: number;
+    /** The right button or trigger: hold to aim, or press to aim and press again. */
+    adsHold: boolean;
+    sight: "holo" | "irons";
+    /** Tracers: as the magazine is loaded (the weapon's file), every round, or none. */
+    tracers: "loaded" | "every" | "none";
+    /** The holo's brightness, 0..1. */
+    holoBright: number;
+    /** The wind meter on the HUD. */
+    windMeter: boolean;
+  };
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -48,6 +66,16 @@ export const DEFAULT_PREFS: Prefs = {
   graphics: { quality: "high", maxFps: 0, timeOfDay: 12 },
   audio: { on: true, master: 0.8, motors: 0.6, effects: 0.8 },
   hud: { minimap: true, dials: true, units: "metric" },
+  shoot: {
+    mouseMrad: 1.2,
+    padDegS: 160,
+    adsZoom: 0.8,
+    adsHold: true,
+    sight: "holo",
+    tracers: "loaded",
+    holoBright: 0.8,
+    windMeter: true,
+  },
 };
 
 function merge<T>(base: T, over: unknown): T {

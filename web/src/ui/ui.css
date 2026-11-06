@@ -405,7 +405,9 @@
 
 /* ---------- Flight HUD ---------- */
 
-.hud {
+/* Clicks between the panels go through to the world's canvas (the orbit camera's drag, the
+   rifleman's mouse); `#app > *` would otherwise take them, so this names #app to outrank it. */
+#app > .hud {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -604,6 +606,44 @@
 }
 .scoreboard .p2 {
   color: var(--tide);
+}
+
+/* Shoot Down: the shooter's state, bottom right, out of the sight picture's way. */
+.shoot-hud {
+  position: absolute;
+  bottom: 56px;
+  right: 16px;
+  min-width: 250px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.shoot-hud .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 0;
+}
+
+.shoot-hud .row > span {
+  color: var(--muted);
+}
+
+.shoot-hud .warn b {
+  color: var(--rose);
+}
+
+.shoot-hud .good b {
+  color: var(--leaf);
+}
+
+.shoot-hud .lrf b {
+  color: var(--sun);
+}
+
+.shoot-hud .hint {
+  color: var(--sun);
+  justify-content: center;
 }
 
 .keys-help {

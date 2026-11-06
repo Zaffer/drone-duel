@@ -135,6 +135,18 @@ class WingBackend:
     def throw(self) -> None:
         self.server.throw()
 
+    def hit(
+        self,
+        part: str,
+        motor: int | None,
+        impulse_ned: tuple[float, float, float],
+        at_frd: tuple[float, float, float],
+    ) -> None:
+        pass  # the wing takes no damage (yet)
+
+    def damage(self) -> dict[str, Any] | None:
+        return None
+
     def dynamics(self) -> dict[str, Any] | None:
         """Dynamics.of the aircraft, as wing.html's overlay reads it, and `motor`: INAV's
         throttle, 0..1 (its throttle row)."""

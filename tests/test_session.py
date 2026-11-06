@@ -251,3 +251,71 @@ def test_a_video_switch_respawns_a_firmware_that_takes_it_only_at_boot() -> None
         assert events.wait_state("ready")["video"] == "digital"
     finally:
         s.close()
+
+
+class FlyingFirmware(FakeFirmware):
+    flown: list[tuple[str, float]] = []
+
+    def hover(self, height_m: float) -> None:
+        FlyingFirmware.flown.append(("hover", height_m))
+
+    def land(self) -> None:
+        FlyingFirmware.flown.append(("land", 0.0))
+
+
+def test_a_target_flies_the_firmware_in_order_and_hits_go_to_the_physics() -> None:
+    events = Recorder()
+    FakeFirmware.behaviour = "ok"
+    FlyingFirmware.flown = []
+
+    def factory(ctx: SpawnContext, ev: Any, physics: PhysicsProcess) -> Firmware:  # noqa: ANN401
+        return FlyingFirmware(ctx, ev, physics)
+
+    s = Session(load(), events, slot=7, firmware_factory=factory)
+    s.start()
+    try:
+        s.target("hover", 30.0)  # nothing started: said, not flown
+        s.command("start", "billy-bishop", "truck")
+        s.target("hover", 30.0)  # queued behind the start: flown once it is ready
+        events.wait_state("ready")
+        physics = FakePhysics()
+        s._physics = cast(PhysicsProcess, physics)  # the truck has none; stand one in
+        s.hit("motor", 1, (0.5, 0.0, 0.0), (0.1, 0.1, 0.0))
+        assert physics.sent == [
+            {"t": "hit", "part": "motor", "motor": 1, "impulse_ned": [0.5, 0.0, 0.0],
+             "at_frd": [0.1, 0.1, 0.0]}
+        ]
+        cast(Any, physics).status = {"phase": "crashed"}
+        s.target("hover", 20.0)  # crashed: reset first
+        deadline = time.monotonic() + 5
+        while not any("crashed" in m.get("text", "") for m in events.msgs):
+            assert time.monotonic() < deadline, events.msgs
+            time.sleep(0.01)
+        s._physics = None
+        s.command("reset")  # the truck respawns
+        s.target("land")
+        deadline = time.monotonic() + 5
+        while len(FlyingFirmware.flown) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert FlyingFirmware.flown == [("hover", 30.0), ("land", 0.0)]
+        warnings = [m["text"] for m in events.msgs if m["ch"] == "log" and m["level"] == "warn"]
+        assert warnings == ["hover: nothing ready to fly", "hover: it has crashed: reset it first"]
+    finally:
+        s.close()
+
+
+def test_a_firmware_that_cannot_fly_itself_says_so() -> None:
+    events = Recorder()
+    FakeFirmware.behaviour = "ok"
+    s = _session(events)
+    try:
+        s.command("start", "billy-bishop", "truck")
+        events.wait_state("ready")
+        s.target("hover", 30.0)
+        deadline = time.monotonic() + 5
+        said = "fake cannot fly itself here"
+        while not any(m.get("text") == said for m in events.msgs):
+            assert time.monotonic() < deadline, events.msgs
+            time.sleep(0.01)
+    finally:
+        s.close()

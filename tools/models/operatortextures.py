@@ -80,10 +80,11 @@ SOURCES: dict[str, dict[str, str]] = {
 }
 
 
-def shrink(data: bytes, kind: str, flip_green: bool = False) -> bytes:
-    """One map as a JPEG at its kind's size."""
+def shrink(data: bytes, kind: str, flip_green: bool = False, side: int | None = None) -> bytes:
+    """One map as a JPEG, `side` pixels square (by default its kind's size here)."""
     image = Image.open(io.BytesIO(data)).convert("RGB")
-    side = BASE_PX if kind == "base" else DETAIL_PX
+    if side is None:
+        side = BASE_PX if kind == "base" else DETAIL_PX
     image = image.resize((side, side), Image.Resampling.LANCZOS)
     if flip_green:
         r, g, b = image.split()

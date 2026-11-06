@@ -5,16 +5,19 @@ export interface Protocol {
   AxisMap?: AxisMap;
   ButtonMap?: ButtonMap;
   CameraSpec?: CameraSpec;
+  Cartridge?: Cartridge;
   ConfigMsg?: ConfigMsg;
   ContentMsg?: ContentMsg;
   Controller?: Controller;
   Course?: Course;
+  Damage?: Damage;
   DynamicsData?: DynamicsData;
   DynamicsMsg?: DynamicsMsg;
   FirmwareSpec?: FirmwareSpec;
   Gate?: Gate;
   GateFrame?: GateFrame;
   GroundMsg?: GroundMsg;
+  HitMsg?: HitMsg;
   Location?: Location;
   LogMsg?: LogMsg;
   MapKeys?: MapKeys;
@@ -29,9 +32,11 @@ export interface Protocol {
   SessionMsg?: SessionMsg;
   StartPad?: StartPad;
   StatusMsg?: StatusMsg;
+  TargetMsg?: TargetMsg;
   TelemetryMsg?: TelemetryMsg;
   Vehicle?: Vehicle;
   VideoMsg?: VideoMsg;
+  Weapon?: Weapon;
   Wind?: Wind;
   WindMsg?: WindMsg;
 }
@@ -90,6 +95,44 @@ export interface CameraSpec {
   offset_m: [number, number, number];
 }
 /**
+ * The round a weapon fires: what the ballistics (web/src/shoot/ballistics.ts) and the recoil
+ * (web/src/shoot/recoil.ts) need of it.
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "Cartridge".
+ */
+export interface Cartridge {
+  name: string;
+  /**
+   * the bullet's mass, g
+   */
+  bullet_g: number;
+  /**
+   * the bullet's diameter, mm
+   */
+  diameter_mm: number;
+  /**
+   * the bullet's length, mm (its spin stability)
+   */
+  length_mm: number;
+  /**
+   * ballistic coefficient against G7, lb/in²
+   */
+  bc_g7: number;
+  /**
+   * muzzle speed from this weapon's barrel, m/s
+   */
+  muzzle_ms: number;
+  /**
+   * the powder charge, g: its gas recoils too
+   */
+  powder_g: number;
+  /**
+   * a tracer every this many rounds as loaded; 0: none (the menu may change it)
+   */
+  tracer_every: number;
+}
+/**
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "ConfigMsg".
  */
@@ -122,6 +165,9 @@ export interface ContentMsg {
   };
   controllers: {
     [k: string]: Controller;
+  };
+  weapons: {
+    [k: string]: Weapon;
   };
 }
 /**
@@ -482,6 +528,64 @@ export interface Controller {
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "Weapon".
+ */
+export interface Weapon {
+  id: string;
+  name: string;
+  /**
+   * the first-person model, under web/public/models
+   */
+  model: string;
+  /**
+   * loaded, with its sight
+   */
+  mass_kg: number;
+  barrel_in: number;
+  /**
+   * the rifling's turn, inches per turn, right hand
+   */
+  twist_in: number;
+  magazine: number;
+  /**
+   * a magazine change, s
+   */
+  reload_s: number;
+  /**
+   * the sights it has, the first fitted
+   *
+   * @minItems 1
+   */
+  sights: ["holo" | "irons", ...("holo" | "irons")[]];
+  /**
+   * the range its sights are zeroed at, m
+   */
+  zero_m: number;
+  cartridge: Cartridge;
+  blurb: string;
+}
+/**
+ * What hits have taken from the quad so far (HitMsg).
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "Damage".
+ */
+export interface Damage {
+  /**
+   * each motor's (1-4, ArduPilot's) thrust left at a given speed: 1 whole, 2/3 and 1/3 with a prop's blades shot off, 0 its prop gone or the motor dead
+   */
+  thrust: number[];
+  /**
+   * the motors' power: a pierced pack holds briefly (failing), a hit stack or a dead pack stops every motor (off)
+   */
+  power: "on" | "failing" | "off";
+  /**
+   * hits taken since the last reset
+   */
+  hits: number;
+}
+/**
+ * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "DynamicsData".
  */
 export interface DynamicsData {
@@ -513,6 +617,36 @@ export interface GroundMsg {
   alt: number;
 }
 /**
+ * A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.
+ * The physics takes what the part did away (physics/quad/model.py: a prop's blade, a motor,
+ * the power) and the impulse at the point it struck; the firmware flies on with what is left.
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "HitMsg".
+ */
+export interface HitMsg {
+  ch: "hit";
+  part: "prop" | "motor" | "arm" | "battery" | "stack" | "camera" | "frame";
+  /**
+   * ArduPilot's motor number (1 front right, 2 rear left, 3 front left, 4 rear right) for a prop, motor or arm; None otherwise
+   */
+  motor: number | null;
+  /**
+   * the momentum the bullet leaves in the vehicle, N·s, north, east, down
+   *
+   * @minItems 3
+   * @maxItems 3
+   */
+  impulse_ned: [number, number, number];
+  /**
+   * where it struck, m from the centre of mass, body forward, right, down
+   *
+   * @minItems 3
+   * @maxItems 3
+   */
+  at_frd: [number, number, number];
+}
+/**
  * A line from the firmware (STATUSTEXT) or the session.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -542,7 +676,7 @@ export interface OsdMsg {
 }
 /**
  * What the physics says the vehicle is doing, on each change: "ground", "hand", "flying",
- * "crashed"; and whether its firmware is stepping it.
+ * "crashed"; whether its firmware is stepping it; and what hits have taken from it.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "PhysicsMsg".
@@ -551,6 +685,10 @@ export interface PhysicsMsg {
   ch: "physics";
   phase: string;
   connected: boolean;
+  /**
+   * None: not hit since the reset
+   */
+  damage: Damage | null;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -743,6 +881,23 @@ export interface StatusMsg {
    */
   origin: [number, number, number] | null;
   heading_deg: number;
+}
+/**
+ * Fly the session's ArduCopter as a ground station would, for a target to shoot at: "hover"
+ * takes off from its pad (GUIDED, armed over MAVLink, a takeoff) and holds `height_m` above
+ * it, or climbs or sinks to it if already up; "land" lands where it is (LAND). The page sends
+ * no `rc` meanwhile: an idle receiver is played (firmware/ardupilot.py).
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "TargetMsg".
+ */
+export interface TargetMsg {
+  ch: "target";
+  action: "hover" | "land";
+  /**
+   * above the pad, m
+   */
+  height_m: number;
 }
 /**
  * What a ground station sees, from MAVLink (ArduPilot) or MSP (INAV): the map and the dials

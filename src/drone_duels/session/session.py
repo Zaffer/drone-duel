@@ -1,8 +1,13 @@
 """The session: one vehicle in one slot, spawned at a location's start pad (DESIGN.md §6.4).
 
-Commands (start, switch, reset, destroy, throw, stop) run one at a time on the session's own
-thread, in order. A new start or switch cancels a spawn still in progress. The pilot's sticks,
-the ground and the wind go straight through, from any thread.
+Commands (start, switch, reset, destroy, throw, target, stop) run one at a time on the session's
+own thread, in order. A new start or switch cancels a spawn still in progress. The pilot's
+sticks, the ground, the wind and hits go straight through, from any thread.
+
+A target (Shoot Down) is the firmware flying itself, as a ground station would fly it
+(Firmware.hover, land): queued as a command, so a `reset` then `target hover` from the page
+respawns the vehicle first and then takes off. A hit goes straight to the physics
+(physics/quad/model.py), and the firmware flies on with what it leaves.
 """
 
 import logging
@@ -60,6 +65,7 @@ class _Command:
     pad: int = 0
     reason: str = ""
     of: object = None
+    height_m: float = 0.0
 
 
 class Session:
@@ -145,6 +151,25 @@ class Session:
         if high and not self._launch_high:
             self.command("throw")
         self._launch_high = high
+
+    def target(self, action: str, height_m: float = 0.0) -> None:
+        """Fly the vehicle as a target: "hover" `height_m` above its pad, or "land" (in order,
+        after any command before it: a reset first respawns it)."""
+        self._commands.put(_Command("target", reason=action, height_m=height_m))
+
+    def hit(
+        self,
+        part: str,
+        motor: int | None,
+        impulse_ned: tuple[float, float, float],
+        at_frd: tuple[float, float, float],
+    ) -> None:
+        """A bullet struck the vehicle (protocol.HitMsg): straight to the physics."""
+        if self._physics:
+            self._physics.send(
+                {"t": "hit", "part": part, "motor": motor, "impulse_ned": list(impulse_ned),
+                 "at_frd": list(at_frd)}
+            )
 
     def set_ground(self, lat: float, lon: float, alt: float) -> None:
         if self._physics:
@@ -232,6 +257,8 @@ class Session:
         elif cmd.action == "throw":
             if self._physics:
                 self._physics.send({"t": "throw"})
+        elif cmd.action == "target":
+            self._target(cmd.reason, cmd.height_m)
         elif cmd.action == "lost":
             if cmd.of is self._firmware and self.state == "ready":
                 self._fail(cmd.reason)
@@ -240,6 +267,22 @@ class Session:
             self.state, self.step, self.location, self.vehicle = "idle", "", None, None
             self.origin = None
             self._status()
+
+    def _target(self, action: str, height_m: float) -> None:
+        firmware, physics = self._firmware, self._physics
+        why = ""
+        if self.state != "ready" or firmware is None:
+            why = "nothing ready to fly"
+        elif physics is not None and physics.status.get("phase") == "crashed":
+            why = "it has crashed: reset it first"
+        if why or firmware is None:
+            self.events.publish(
+                {"ch": "log", "level": "warn", "source": "session", "text": f"{action}: {why}"}
+            )
+        elif action == "hover":
+            firmware.hover(height_m)
+        else:
+            firmware.land()
 
     def _spawn(self, vehicle_id: str) -> None:
         self._teardown()

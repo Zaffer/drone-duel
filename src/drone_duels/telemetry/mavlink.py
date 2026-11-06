@@ -57,6 +57,12 @@ EKF_NEEDED = (
 """What the EKF must have before the vehicle can fly a position mode."""
 
 
+ACM_MODES = {name: number for number, name in mavutil.mode_mapping_acm.items()}
+"""ArduCopter's flight modes by name: GUIDED 4, LAND 9..."""
+POSITION_ONLY = 0x0DF8
+"""SET_POSITION_TARGET's type mask: use the position, ignore velocity, acceleration and yaw."""
+
+
 def mode_name(custom_mode: int) -> str:
     return mavutil.mode_mapping_acm.get(custom_mode, str(custom_mode))
 
@@ -153,6 +159,8 @@ class VehicleLink:
         self._send_lock = threading.Lock()
         self._plans = PlanReader(self._plan_sender())
         self._plan_version = 0
+        self._acks: dict[int, tuple[int, float]] = {}
+        """The last COMMAND_ACK to the game for each command: its result, and when heard."""
 
     # Lifecycle.
 
@@ -215,6 +223,43 @@ class VehicleLink:
         self._send(
             lambda mav: mav.command_long_send(
                 self.sysid, apm.MAV_COMP_ID_AUTOPILOT1, command, 0, *p
+            )
+        )
+
+    def command_ack(self, command: int, *params: float, timeout: float = 1.5) -> int | None:
+        """Send a command and wait for its COMMAND_ACK: the result (MAV_RESULT), or None if none
+        came within `timeout` s."""
+        sent = time.monotonic()
+        self.command(command, *params)
+        heard: list[int] = []
+
+        def acked() -> bool:
+            got = self._acks.get(command)
+            if got is not None and got[1] >= sent:
+                heard.append(got[0])
+                return True
+            return False
+
+        return heard[-1] if self.wait(acked, timeout) else None
+
+    def set_mode(self, mode: str, timeout: float = 1.5) -> int | None:
+        """Switch to ArduCopter flight mode `mode` (GUIDED, LAND...): MAV_CMD_DO_SET_MODE's
+        result, or None if unanswered."""
+        number = ACM_MODES[mode]
+        return self.command_ack(
+            apm.MAV_CMD_DO_SET_MODE, apm.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, number,
+            timeout=timeout,
+        )
+
+    def go_to(self, lat: float, lon: float, alt_rel: float) -> None:
+        """In GUIDED, fly to a point `alt_rel` m above home (SET_POSITION_TARGET_GLOBAL_INT,
+        position only)."""
+        self._send(
+            lambda mav: mav.set_position_target_global_int_send(
+                0, self.sysid, apm.MAV_COMP_ID_AUTOPILOT1,
+                apm.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, POSITION_ONLY,
+                round(lat * 1e7), round(lon * 1e7), alt_rel,
+                0, 0, 0, 0, 0, 0, 0, 0,
             )
         )
 
@@ -340,6 +385,11 @@ class VehicleLink:
                 {"ch": "log", "level": log_level(int(st_text.severity)), "source": "ardupilot",
                  "text": text}
             )
+        elif kind == "COMMAND_ACK":
+            ack = cast(apm.MAVLink_command_ack_message, msg)
+            if int(getattr(ack, "target_system", 0) or 0) not in (0, GAME_SYSID):
+                return  # QGroundControl's
+            self._acks[int(ack.command)] = (int(ack.result), now)
         elif kind == "MISSION_CURRENT":
             total = int(getattr(msg, "total", 0) or 0)
             self._plans.mission_total_seen(total, now)

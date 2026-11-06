@@ -150,39 +150,49 @@ def radio_axes() -> np.ndarray:
     return np.column_stack([[-1.0, 0.0, 0.0], up, face])
 
 
+def reach(pose: Pose, side: str, wrist: np.ndarray, pole: np.ndarray) -> None:
+    """Two-bone IK: the upper arm and forearm turn so the wrist comes to `wrist` (or as near as
+    the arm reaches), the elbow bent toward `pole`."""
+    shoulder, elbow, hand = (pose.at(f"{b}_{side}") for b in ("upperarm", "lowerarm", "hand"))
+    upper, lower = np.linalg.norm(elbow - shoulder), np.linalg.norm(hand - elbow)
+    span = wrist - shoulder
+    d = min(np.linalg.norm(span), upper + lower - 1e-3)
+    toward = span / np.linalg.norm(span)
+    pole = unit((pole - (pole @ toward) * toward)[None])[0]
+    bend = np.arccos(np.clip((upper**2 + d**2 - lower**2) / (2 * upper * d), -1, 1))
+    new_elbow = shoulder + upper * (np.cos(bend) * toward + np.sin(bend) * pole)
+    pose.rotate(f"upperarm_{side}", align(elbow - shoulder, new_elbow - shoulder))
+    elbow, hand = pose.at(f"lowerarm_{side}"), pose.at(f"hand_{side}")
+    pose.rotate(f"lowerarm_{side}", align(hand - elbow, wrist - elbow))
+
+
+def turn_hand(pose: Pose, side: str, target: np.ndarray) -> None:
+    """Turn the hand to `target` (hand_frame's columns), sharing the roll about the forearm out
+    along its twist bones so the wrist does not wring."""
+    rotation = target @ hand_frame(pose, side).T
+    forearm = pose.at(f"hand_{side}") - pose.at(f"lowerarm_{side}")
+    roll = twist_about(rotation, forearm)
+    pose.rotate(f"hand_{side}", rotation)
+    for bone, share in (
+        (f"lowerarm_twist_01_{side}", 2 / 3),
+        (f"lowerarm_twist_02_{side}", 1 / 3),
+    ):
+        pose.rotate(bone, axis_angle(forearm, roll * share))
+
+
 def hold_radio(pose: Pose) -> None:
     axes = radio_axes()
     up, face = axes[:, 1], axes[:, 2]
     for side, out in (("l", 1.0), ("r", -1.0)):
         sideways = np.array([out, 0.0, 0.0])
         wrist = RADIO_CENTRE + WRIST_OUT * sideways + 1.5 * face - 4.0 * up
-        shoulder, elbow, hand = (pose.at(f"{b}_{side}") for b in ("upperarm", "lowerarm", "hand"))
-        upper, lower = np.linalg.norm(elbow - shoulder), np.linalg.norm(hand - elbow)
-        reach = wrist - shoulder
-        d = min(np.linalg.norm(reach), upper + lower - 1e-3)
-        toward = reach / np.linalg.norm(reach)
-        pole = ELBOW_POLE * np.array([out, 1.0, 1.0])
-        pole = unit((pole - (pole @ toward) * toward)[None])[0]
-        bend = np.arccos(np.clip((upper**2 + d**2 - lower**2) / (2 * upper * d), -1, 1))
-        new_elbow = shoulder + upper * (np.cos(bend) * toward + np.sin(bend) * pole)
-        pose.rotate(f"upperarm_{side}", align(elbow - shoulder, new_elbow - shoulder))
-        elbow, hand = pose.at(f"lowerarm_{side}"), pose.at(f"hand_{side}")
-        pose.rotate(f"lowerarm_{side}", align(hand - elbow, wrist - elbow))
+        reach(pose, side, wrist, ELBOW_POLE * np.array([out, 1.0, 1.0]))
 
         # The hand: its heel at the radio's lower corner, palm against the side, fingers up
         # the side and round the back, so the thumb (toward the face) comes over the sticks.
         along = unit((up - 0.6 * face)[None])[0]
         palm = -sideways
-        target = np.column_stack([along, palm, np.cross(along, palm)])
-        rotation = target @ hand_frame(pose, side).T
-        forearm = pose.at(f"hand_{side}") - pose.at(f"lowerarm_{side}")
-        roll = twist_about(rotation, forearm)
-        pose.rotate(f"hand_{side}", rotation)
-        for bone, share in (
-            (f"lowerarm_twist_01_{side}", 2 / 3),
-            (f"lowerarm_twist_02_{side}", 1 / 3),
-        ):
-            pose.rotate(bone, axis_angle(forearm, roll * share))
+        turn_hand(pose, side, np.column_stack([along, palm, np.cross(along, palm)]))
 
         frame = hand_frame(pose, side)
         curl_axis = np.cross(frame[:, 0], frame[:, 1])

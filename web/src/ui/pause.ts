@@ -1,6 +1,7 @@
-// The pause and options menu (Esc; DESIGN.md §11), in tabs: Vehicle, View, Video, Wind,
+// The pause and options menu (Esc; DESIGN.md §11), in tabs: Vehicle, View, Video, Wind, Rifle,
 // Controls, Inputs, Graphics, Audio and Session. From the main menu (no flight) it holds only the
-// options. The sim keeps running while it is open: the firmware and physics are real time.
+// options; on foot (Shoot Down) not the Vehicle, View and Video tabs. The sim keeps running while
+// it is open: the firmware and physics are real time.
 
 import { effect } from "alien-signals";
 import { type Flight, sendWind } from "../flight.ts";
@@ -14,7 +15,7 @@ import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { vehicleCard } from "./app.ts";
 import { calibrationWizard, forgetCalibration } from "./calibrate.ts";
 import { h } from "./h.ts";
-import { inputsTab } from "./inputs.ts";
+import { hotkeyTable, inputsTab, shooterKeys } from "./inputs.ts";
 
 type Tab = { id: string; name: string; body: () => HTMLElement; flight?: boolean };
 
@@ -354,6 +355,103 @@ export function openPause(
       },
     },
     {
+      id: "rifle",
+      name: "Rifle",
+      body: () =>
+        h(
+          "div",
+          null,
+          h("h4", null, "Rifle (Shoot Down)"),
+          opt(
+            "Sight",
+            segmented<"holo" | "irons">(
+              [
+                ["holo", "Holographic"],
+                ["irons", "Iron sights"],
+              ],
+              () => prefs().shoot.sight,
+              (v) => setP("shoot", { sight: v }),
+            ),
+          ),
+          opt(
+            "Holo brightness",
+            ...slider(
+              0,
+              1,
+              0.05,
+              () => prefs().shoot.holoBright,
+              (v) => setP("shoot", { holoBright: v }),
+              (v) => `${Math.round(v * 100)}%`,
+            ),
+          ),
+          opt(
+            "Tracers",
+            segmented<Prefs["shoot"]["tracers"]>(
+              [
+                ["loaded", "As loaded"],
+                ["every", "Every round"],
+                ["none", "None"],
+              ],
+              () => prefs().shoot.tracers,
+              (v) => setP("shoot", { tracers: v }),
+            ),
+          ),
+          opt(
+            "Aiming",
+            segmented<"hold" | "toggle">(
+              [
+                ["hold", "Hold to aim"],
+                ["toggle", "Press to aim"],
+              ],
+              () => (prefs().shoot.adsHold ? "hold" : "toggle"),
+              (v) => setP("shoot", { adsHold: v === "hold" }),
+            ),
+          ),
+          opt(
+            "Mouse",
+            ...slider(
+              0.2,
+              4,
+              0.05,
+              () => prefs().shoot.mouseMrad,
+              (v) => setP("shoot", { mouseMrad: v }),
+              (v) => `${v.toFixed(2)} mrad a count`,
+            ),
+          ),
+          opt(
+            "Gamepad",
+            ...slider(
+              40,
+              360,
+              5,
+              () => prefs().shoot.padDegS,
+              (v) => setP("shoot", { padDegS: v }),
+              (v) => `${v.toFixed(0)}°/s at full stick`,
+            ),
+          ),
+          opt(
+            "On the sight",
+            ...slider(
+              0.5,
+              1,
+              0.05,
+              () => prefs().shoot.adsZoom,
+              (v) => setP("shoot", { adsZoom: v }),
+              (v) => (v >= 0.999 ? "no zoom" : `view ${Math.round(v * 100)}% wide`),
+            ),
+          ),
+          opt(
+            "Wind meter",
+            check(
+              () => prefs().shoot.windMeter,
+              (v) => setP("shoot", { windMeter: v }),
+            ),
+          ),
+          h("h4", { style: "margin-top:18px" }, "Keys"),
+          hotkeyTable(shooterKeys()),
+        ),
+    },
+    {
       id: "controls",
       name: "Controls",
       body: () => {
@@ -583,7 +681,10 @@ export function openPause(
     },
   ];
 
-  const shown = tabs.filter((t) => flight || !t.flight);
+  const onFoot = flight?.ownsView ?? false;
+  const shown = tabs.filter(
+    (t) => (flight || !t.flight) && !(onFoot && ["vehicle", "view", "video"].includes(t.id)),
+  );
   let current = shown.find((t) => t.id === tab) ?? shown[0]!;
   const body = h("div", { class: "tab-body" });
   const buttons = shown.map((t) => h("button", { onclick: () => select(t) }, t.name));

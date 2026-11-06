@@ -47,6 +47,9 @@ class Radio extends EventTarget {
   private last = performance.now();
   /** Fly by the keyboard even with a controller plugged in (Options → Controls). */
   keyboard = false;
+  /** The player is on foot (Shoot Down): the server's radio must not fly the vehicle, which is
+   * the target, flying itself (an arm switch moved would disarm it). */
+  onFoot = false;
   /** The latest raw controller, for the calibration wizard. */
   raw: RawController | null = null;
 
@@ -114,7 +117,7 @@ class Radio extends EventTarget {
     this.last = now;
     const raw = this.pick();
     this.raw = raw;
-    const serverFlies = !this.keyboard && raw?.source === "server";
+    const serverFlies = !this.keyboard && !this.onFoot && raw?.source === "server";
     if (serverFlies !== this.serverFlies) {
       this.serverFlies = serverFlies;
       link.send({ ch: "radio_source", on: true, fly: serverFlies });

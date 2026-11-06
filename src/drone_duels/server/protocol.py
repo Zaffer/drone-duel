@@ -10,13 +10,14 @@ disk is stale.
 import struct
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from drone_duels.content.schema import (
     Controller,
     Course,
     Location,
     Vehicle,
+    Weapon,
     Wind,
 )
 
@@ -88,8 +89,59 @@ class RadioSourceMsg(Msg):
     fly: bool = False
 
 
+class TargetMsg(Msg):
+    """Fly the session's ArduCopter as a ground station would, for a target to shoot at: "hover"
+    takes off from its pad (GUIDED, armed over MAVLink, a takeoff) and holds `height_m` above
+    it, or climbs or sinks to it if already up; "land" lands where it is (LAND). The page sends
+    no `rc` meanwhile: an idle receiver is played (firmware/ardupilot.py)."""
+
+    ch: Literal["target"] = "target"
+    action: Literal["hover", "land"]
+    height_m: float = Field(ge=2, le=120, description="above the pad, m")
+
+
+HitPart = Literal["prop", "motor", "arm", "battery", "stack", "camera", "frame"]
+ROTOR_PARTS = ("prop", "motor", "arm")
+"""The parts that belong to one rotor: a hit on one names its motor."""
+
+
+class HitMsg(Msg):
+    """A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.
+    The physics takes what the part did away (physics/quad/model.py: a prop's blade, a motor,
+    the power) and the impulse at the point it struck; the firmware flies on with what is left.
+    """
+
+    ch: Literal["hit"] = "hit"
+    part: HitPart
+    motor: int | None = Field(
+        default=None, ge=1, le=4,
+        description="ArduPilot's motor number (1 front right, 2 rear left, 3 front left, "
+        "4 rear right) for a prop, motor or arm; None otherwise",
+    )
+    impulse_ned: tuple[float, float, float] = Field(
+        description="the momentum the bullet leaves in the vehicle, N·s, north, east, down"
+    )
+    at_frd: tuple[float, float, float] = Field(
+        description="where it struck, m from the centre of mass, body forward, right, down"
+    )
+
+    @model_validator(mode="after")
+    def _motor_for_rotor_parts(self) -> "HitMsg":
+        if self.part in ROTOR_PARTS and self.motor is None:
+            raise ValueError(f"a {self.part} hit needs its motor (1-4)")
+        return self
+
+
 ClientMsg = Annotated[
-    SessionMsg | RcMsg | GroundMsg | WindMsg | VideoMsg | DynamicsMsg | RadioSourceMsg,
+    SessionMsg
+    | RcMsg
+    | GroundMsg
+    | WindMsg
+    | VideoMsg
+    | DynamicsMsg
+    | RadioSourceMsg
+    | TargetMsg
+    | HitMsg,
     Field(discriminator="ch"),
 ]
 client_msg = TypeAdapter[ClientMsg](ClientMsg)
@@ -179,13 +231,28 @@ class LogMsg(Msg):
     text: str
 
 
+class Damage(Msg):
+    """What hits have taken from the quad so far (HitMsg)."""
+
+    thrust: list[float] = Field(
+        description="each motor's (1-4, ArduPilot's) thrust left at a given speed: 1 whole, "
+        "2/3 and 1/3 with a prop's blades shot off, 0 its prop gone or the motor dead"
+    )
+    power: Literal["on", "failing", "off"] = Field(
+        description="the motors' power: a pierced pack holds briefly (failing), a hit stack or "
+        "a dead pack stops every motor (off)"
+    )
+    hits: int = Field(description="hits taken since the last reset")
+
+
 class PhysicsMsg(Msg):
     """What the physics says the vehicle is doing, on each change: "ground", "hand", "flying",
-    "crashed"; and whether its firmware is stepping it."""
+    "crashed"; whether its firmware is stepping it; and what hits have taken from it."""
 
     ch: Literal["physics"] = "physics"
     phase: str
     connected: bool
+    damage: Damage | None = Field(default=None, description="None: not hit since the reset")
 
 
 class RadioMsg(Msg):
@@ -213,6 +280,7 @@ class ContentMsg(Msg):
     vehicles: dict[str, Vehicle]
     courses: dict[str, Course]
     controllers: dict[str, Controller]
+    weapons: dict[str, Weapon]
 
 
 class MapKeys(Msg):
@@ -276,6 +344,8 @@ def schema() -> dict[str, Any]:
         VideoMsg,
         DynamicsMsg,
         RadioSourceMsg,
+        TargetMsg,
+        HitMsg,
         StatusMsg,
         TelemetryMsg,
         OsdMsg,

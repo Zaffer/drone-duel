@@ -1,4 +1,4 @@
-"""What content/*.toml holds: places, vehicles, race courses and radio profiles.
+"""What content/*.toml holds: places, vehicles, race courses, radio profiles and weapons.
 
 Each file is one model. Every key is checked: an unknown key or a missing one is an error naming
 the file and the key, so a typo never becomes a silent default (DESIGN.md §5).
@@ -164,3 +164,38 @@ class Controller(Strict):
         min_length=4, max_length=16, description="channel 1, 2, 3 ... in AETR order"
     )
     notes: str = ""
+
+
+Sight = Literal["holo", "irons"]
+
+
+class Cartridge(Strict):
+    """The round a weapon fires: what the ballistics (web/src/shoot/ballistics.ts) and the recoil
+    (web/src/shoot/recoil.ts) need of it."""
+
+    name: str
+    bullet_g: float = Field(gt=0, description="the bullet's mass, g")
+    diameter_mm: float = Field(gt=0, description="the bullet's diameter, mm")
+    length_mm: float = Field(gt=0, description="the bullet's length, mm (its spin stability)")
+    bc_g7: float = Field(gt=0, lt=1, description="ballistic coefficient against G7, lb/in²")
+    muzzle_ms: float = Field(gt=0, description="muzzle speed from this weapon's barrel, m/s")
+    powder_g: float = Field(gt=0, description="the powder charge, g: its gas recoils too")
+    tracer_every: int = Field(
+        ge=0,
+        description="a tracer every this many rounds as loaded; 0: none (the menu may change it)",
+    )
+
+
+class Weapon(Strict):
+    id: str
+    name: str
+    model: str = Field(description="the first-person model, under web/public/models")
+    mass_kg: float = Field(gt=0, description="loaded, with its sight")
+    barrel_in: float = Field(gt=0)
+    twist_in: float = Field(gt=0, description="the rifling's turn, inches per turn, right hand")
+    magazine: int = Field(ge=1)
+    reload_s: float = Field(gt=0, description="a magazine change, s")
+    sights: list[Sight] = Field(min_length=1, description="the sights it has, the first fitted")
+    zero_m: float = Field(gt=0, description="the range its sights are zeroed at, m")
+    cartridge: Cartridge
+    blurb: str = ""

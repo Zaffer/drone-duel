@@ -31,6 +31,9 @@ export interface ModeDef {
   places?(all: Location[]): Location[];
   /** Duel and Race: draw the lobby into `host`, under the vehicles; returns its teardown. */
   lobby?(host: HTMLElement, ctx: ModeContext): () => void;
+  /** The mode places the camera itself and nobody flies the vehicle from this page (Shoot
+   * Down: the player is on the ground; the vehicle is the target). */
+  ownsView?: boolean;
   /** Free Fly: the runtime for a flight. */
   run?(flight: Flight): ModeRuntime;
 }

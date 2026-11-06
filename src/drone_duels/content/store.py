@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from drone_duels.content.schema import Controller, Course, Location, Vehicle
+from drone_duels.content.schema import Controller, Course, Location, Vehicle, Weapon
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTENT = ROOT / "content"
@@ -43,6 +43,7 @@ class Content:
     vehicles: dict[str, Vehicle]
     courses: dict[str, Course]
     controllers: dict[str, Controller]
+    weapons: dict[str, Weapon]
 
     def location(self, location_id: str) -> Location:
         try:
@@ -63,6 +64,7 @@ def load(directory: Path = CONTENT) -> Content:
         vehicles=_load_dir(Vehicle, directory / "vehicles"),
         courses=_load_dir(Course, directory / "courses"),
         controllers=_load_dir(Controller, directory / "controllers"),
+        weapons=_load_dir(Weapon, directory / "weapons"),
     )
     _check_references(content)
     return content

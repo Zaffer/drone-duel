@@ -5,9 +5,10 @@ import { content, mode } from "../state/app.ts";
 import { duel } from "./duel/duel.ts";
 import { freefly } from "./freefly.ts";
 import { race } from "./race/race.ts";
+import { shoot } from "./shoot/shoot.ts";
 import type { ModeDef } from "./types.ts";
 
-export const MODES: ModeDef[] = [freefly, duel, race];
+export const MODES: ModeDef[] = [freefly, duel, race, shoot];
 
 /** The vehicles the current mode lets the player fly. */
 export function modeVehicles(m = MODES.find((x) => x.id === mode())): Vehicle[] {

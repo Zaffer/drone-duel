@@ -1,9 +1,11 @@
-"""Just enough binary FBX reading for the operator's model (tools.models.operatormodel).
+"""Just enough binary FBX reading for the operator's and the rifle's models
+(tools.models.operatormodel, tools.models.riflemodel).
 
 An FBX file is a tree of records, each a name, a list of typed values and its children. The
 scene is in two of them: Objects (models, geometry, materials, skin deformers) and Connections
 (which object belongs to which). This reads skinned meshes and their skeleton as they stand in
-the bind pose; animation curves, textures and everything else are left alone.
+the bind pose, and static meshes where their models' transforms put them; animation curves,
+textures and everything else are left alone.
 """
 
 import struct
@@ -203,12 +205,19 @@ class Scene:
                 continue
             (geometry,) = self._connected(id, "Geometry")
             materials = [_name(m) for m in self._connected(id, "Material")]
-            out.append(self._mesh(_name(model), geometry, materials, _geometric(model)))
+            out.append(self._mesh(id, geometry, materials))
         return out
 
-    def _mesh(
-        self, name: str, geometry: Record, materials: list[str], geometric: np.ndarray
-    ) -> SkinnedMesh:
+    def _global(self, id: int) -> np.ndarray:
+        """A model's global transform: its own (local) under its parent models'."""
+        local = _local(self.objects[id])
+        for parent in self.parents[id]:
+            above = self.objects.get(parent)
+            if above is not None and above.name == "Model":
+                return self._global(parent) @ local
+        return local
+
+    def _mesh(self, model: int, geometry: Record, materials: list[str]) -> SkinnedMesh:
         points = geometry.array("Vertices").reshape(-1, 3).astype(np.float64)
         polygon = geometry.array("PolygonVertexIndex").astype(np.int64)
         ends = polygon < 0
@@ -233,8 +242,9 @@ class Scene:
         slot = slots[polygon_of] if by_polygon else np.full(len(fan), slots[0])
 
         # The mesh's global transform at bind time: each cluster holds its bone's (TransformLink)
-        # and the mesh's relative to that bone (Transform).
-        bind = np.eye(4)
+        # and the mesh's relative to that bone (Transform). A mesh with no skin stands where its
+        # model's transform puts it. Either way the geometric offset comes on top.
+        bind: np.ndarray | None = None
         weights: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for skin in self._connected(_id(geometry), "Deformer"):
             for cluster in self._connected(_id(skin), "Deformer"):
@@ -247,10 +257,10 @@ class Scene:
                 except FbxFormatError:
                     continue  # a cluster that moves nothing
                 weights[_name(bone)] = (indices, values)
-        bind = bind @ geometric
+        bind = (self._global(model) if bind is None else bind) @ _geometric(self.objects[model])
         linear = bind[:3, :3]
         return SkinnedMesh(
-            name,
+            _name(self.objects[model]),
             points @ linear.T + bind[:3, 3],
             corners[fan],
             _unit(normals[normal_at][fan] @ np.linalg.inv(linear)),
@@ -267,6 +277,27 @@ def euler_xyz(degrees: list[float]) -> np.ndarray:
     ry = np.array([[np.cos(y), 0, np.sin(y)], [0, 1, 0], [-np.sin(y), 0, np.cos(y)]])
     rz = np.array([[np.cos(z), -np.sin(z), 0], [np.sin(z), np.cos(z), 0], [0, 0, 1]])
     return rz @ ry @ rx
+
+
+def _local(model: Record) -> np.ndarray:
+    """A model's transform relative to its parent: translation, pre-rotation, rotation, the
+    post-rotation undone, then scale. Pivots and offsets are taken as zero."""
+    p = model.properties()
+    if int(p.get("RotationOrder", [0])[0]) != 0:  # pyright: ignore[reportArgumentType]
+        raise FbxFormatError(f"{_name(model)}: only XYZ rotation order is supported")
+    for key in ("RotationPivot", "ScalingPivot", "RotationOffset", "ScalingOffset"):
+        if key in p and any(float(v) != 0.0 for v in p[key][:3]):  # pyright: ignore[reportArgumentType]
+            raise FbxFormatError(f"{_name(model)}: {key} not supported")
+
+    def floats(key: str, default: float) -> list[float]:
+        return [float(v) for v in p[key][:3]] if key in p else [default] * 3  # pyright: ignore[reportArgumentType]
+
+    m = np.eye(4)
+    rotation = euler_xyz(floats("PreRotation", 0.0)) @ euler_xyz(floats("Lcl Rotation", 0.0))
+    rotation = rotation @ euler_xyz(floats("PostRotation", 0.0)).T
+    m[:3, :3] = rotation * floats("Lcl Scaling", 1.0)
+    m[:3, 3] = floats("Lcl Translation", 0.0)
+    return m
 
 
 def _geometric(model: Record) -> np.ndarray:

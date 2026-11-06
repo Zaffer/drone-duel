@@ -51,6 +51,31 @@ export const flightKeys = (): Hotkey[] => [
   },
 ];
 
+/** Shoot Down's keys (shoot/shooter.ts). */
+export const shooterKeys = (): Hotkey[] => [
+  { keys: ["Click"], does: "Take the mouse (Esc gives it back)" },
+  { keys: ["Mouse", "Right stick"], does: "Look and aim" },
+  {
+    keys: ["Right button", "LT"],
+    does: "On the sight (held, or a toggle: the Rifle tab)",
+    strip: "aim",
+  },
+  { keys: ["Left button", "RT"], does: "Fire: one press a shot", strip: "fire" },
+  { keys: ["R", "X"], does: "Reload", strip: "reload" },
+  { keys: ["W A S D", "Left stick"], does: "Walk" },
+  { keys: ["Shift", "L3"], does: "With forward: sprint (the rifle comes down)", strip: "sprint" },
+  { keys: ["Space", "A"], does: "Jump (standing)", strip: "jump" },
+  { keys: ["Shift", "RB"], does: "On the sight: hold your breath", strip: "breath" },
+  { keys: ["C"], does: "Kneel or stand", strip: "kneel" },
+  { keys: ["Z"], does: "Prone or stand", strip: "prone" },
+  { keys: ["B (pad)"], does: "Standing, kneeling, prone in turn" },
+  { keys: ["F", "LB"], does: "The rangefinder: the range to what the sight is on", strip: "range" },
+  { keys: ["I", "Y"], does: "Holo or iron sights", strip: "sight" },
+  { keys: ["G"], does: "A gust now, as the Wind tab sets it" },
+  { keys: ["H"], does: "The key strip, shown or hidden" },
+  { keys: ["Esc"], does: "Pause menu", strip: "menu" },
+];
+
 const overlayKeys = (): Hotkey[] => [
   {
     keys: [`Shift+1–${LAYERS.length}`],
@@ -74,7 +99,7 @@ const kbd = (k: string) => h("span", { class: "kbd" }, k);
 const keyCell = (keys: string[]) =>
   h("td", { class: "keys" }, ...keys.flatMap((k, i) => (i ? [" ", kbd(k)] : [kbd(k)])));
 
-function hotkeyTable(keys: Hotkey[]): HTMLElement {
+export function hotkeyTable(keys: Hotkey[]): HTMLElement {
   return h(
     "table",
     { class: "keys-table" },

@@ -2,7 +2,9 @@
 // server for the vehicle, measures where the map's ground meets the sim's, draws the vehicle,
 // runs the view's camera, the camera feed, the HUD's minimap and dials, and the dynamics overlay
 // each frame, sends the pilot's sticks to the firmware and the map's ground to the physics.
-// The mode (modes/*) rides on top, through `mode`.
+// The mode (modes/*) rides on top, through `mode`. A mode that owns the view (Shoot Down: the
+// player is on the ground, the vehicle the target) places the camera itself, and nobody here flies
+// the vehicle: no rig, no camera feed, no operator, no sticks, no motor in the player's ears.
 
 import { effect, signal } from "alien-signals";
 import { rotorNorm, truckEngine } from "./audio/levels.ts";
@@ -44,6 +46,9 @@ export interface ModeRuntime {
   tick(now: number, pose: Pose | null): void;
   /** Marks for the minimap (gates, the other player, the truck). */
   marks(): Parameters<Minimap["setMarks"]>[0];
+  /** What the mode draws that is not ground (Shoot Down's rifle, tracers, dust): ground
+   * sampling looks through it. */
+  primitives?(): object[];
   dispose(): void;
 }
 
@@ -72,10 +77,14 @@ export class Flight {
   private lastFrame = 0;
   private disposers: (() => void)[] = [];
 
+  readonly ownsView: boolean;
+
   constructor(
     readonly world: World,
     hud: { feed: HTMLElement; minimap: HTMLElement; dynamics: HTMLElement },
+    opts: { ownsView?: boolean } = {},
   ) {
+    this.ownsView = opts.ownsView ?? false;
     this.feed = new CameraFeed(world, hud.feed);
     this.minimap = new Minimap(hud.minimap);
     this.mapLayer = new MapLayer(world);
@@ -209,7 +218,7 @@ export class Flight {
     const h = await this.world.groundHeightSettled(origin[0], origin[1]);
     if (this.bodyKey !== key || this.abort.signal.aborted) return;
     mapOffset(h - origin[2]);
-    if (spec.kind !== "ground") {
+    if (spec.kind !== "ground" && !this.ownsView) {
       const at = { lat: origin[0], lon: origin[1], heading_deg: pad.heading_deg };
       const spot = await operatorSpot(this.world, at, mapOffset());
       if (this.bodyKey !== key || this.abort.signal.aborted) return;
@@ -255,6 +264,13 @@ export class Flight {
   }
 
   private setView(id: ViewId): void {
+    if (this.ownsView) {
+      this.feed.setOn(false);
+      this.mapLayer.setOn(false);
+      this.body()?.setVisible(true);
+      this.world.mouseCamera = false;
+      return;
+    }
     const ctx = this.rigContext();
     if (!ctx) return;
     this.rig?.leave(ctx);
@@ -295,6 +311,7 @@ export class Flight {
   }
 
   private motorSound(pose: Pose | null): void {
+    if (this.ownsView) return;
     const v = currentVehicle();
     if (!v || !pose || phase() === "crashed") {
       sounds.stopMotor();
@@ -319,7 +336,7 @@ export class Flight {
   private sticks(ch: number[]): void {
     const v = currentVehicle();
     const body = this.body();
-    if (!v) return;
+    if (!v || this.ownsView) return;
     if (body instanceof Truck) {
       if (paused()) return;
       const pads = navigator
@@ -356,6 +373,7 @@ export class Flight {
         ...body.primitives,
         ...(this.operator?.primitives ?? []),
         ...this.dynamics.primitives,
+        ...(this.mode?.primitives?.() ?? []),
       ]);
       if (h !== undefined) link.send({ ch: "ground", lat, lon, alt: h - mapOffset() });
     } finally {

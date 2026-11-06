@@ -6,7 +6,7 @@ import type { ConfigMsg, ContentMsg, Course, Location, Vehicle } from "../net/pr
 import type { ViewId } from "./prefs.ts";
 
 export type Screen = "loading" | "menu" | "lobby" | "flying";
-export type ModeId = "freefly" | "duel" | "race";
+export type ModeId = "freefly" | "duel" | "race" | "shoot";
 
 export const content = signal<ContentMsg | null>(null);
 export const config = signal<ConfigMsg | null>(null);

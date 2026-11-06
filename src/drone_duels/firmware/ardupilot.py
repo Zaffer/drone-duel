@@ -19,6 +19,19 @@ arm switch low, the rest centred) at 50 Hz; then only the page's sticks go. When
 quiet (`rc_lost`), nothing more is sent and SIM_RC_FAIL 1 makes SITL's receiver stop its pulses,
 so ArduPilot's own radio failsafe runs after RC_FS_TIMEOUT, as on a real lost link; the page's
 next sticks put it back (SIM_RC_FAIL 0).
+
+Flying itself (`hover`, `land`: a target to shoot at), the game flies it as a ground station
+would, over MAVLink, with nobody on the sticks: the idle receiver plays on, and nothing about
+the RC changes. GUIDED (MAV_CMD_DO_SET_MODE), arm (MAV_CMD_COMPONENT_ARM_DISARM: GUIDED allows
+arming from a GCS, ModeGuided::allows_arming; the arm switch, RC5_OPTION 153, acts only when it
+moves, RC_Channel::init_position_on_first_radio_read, so held low it never disarms it), then
+MAV_CMD_NAV_TAKEOFF to the height above home, the pad (Mode::do_user_takeoff_U_m: armed, landed,
+upwards). Each waits for its COMMAND_ACK, and the whole is tried again until telemetry shows it
+climbing. Up already, GUIDED and a position target at the height. Landing is LAND. The idle
+receiver's 1000 µs throttle sits above FS_THR_VALUE (975), so no throttle failsafe; the mode
+switch (1500 µs, STABILIZE) acts only when it moves, so GUIDED stays. A takeoff is not
+landed, so the auto-disarm (DISARM_DELAY, landed and throttle low) does not cut in; if it
+does not leave the ground, ArduPilot disarms it after 10 s and the next try arms it again.
 """
 
 import logging
@@ -30,6 +43,8 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
+
+from pymavlink.dialects.v20 import ardupilotmega as apm
 
 from drone_duels import ports
 from drone_duels.server.protocol import VideoSystem
@@ -61,9 +76,30 @@ centred."""
 OSD_MIN_GAP_S = 0.05
 """At most 20 OSD screens a second to the page (ArduPilot draws 10)."""
 PREARM_POLL_S = 5.0
+FLY_TRY_S = 60.0
+"""How long a hover or land keeps trying before it says it could not."""
+CLIMB_SEEN_S = 6.0
+"""After the takeoff is accepted, how long to wait for telemetry to show it climbing."""
+CLIMB_SEEN_M = 0.5
+"""Above home by this, m (telemetry's alt_rel), it has left the pad; or climbing CLIMB_SEEN_MS."""
+CLIMB_SEEN_MS = 0.3
+RETRY_S = 1.0
 
 ROUTER_CONF = ROOT / "router" / "sitl.conf"
 """mavlink-router's configuration for slot 0; `router_conf` moves it to a slot's port."""
+
+
+def _result(result: int | None) -> str:
+    """A MAV_RESULT, as a ground station would say it."""
+    if result is None:
+        return "no answer"
+    entry = apm.enums["MAV_RESULT"].get(result)
+    return entry.name.removeprefix("MAV_RESULT_").lower() if entry else str(result)
+
+
+def _climbing(link: VehicleLink) -> bool:
+    s = link.state
+    return (s.alt_rel or 0.0) > CLIMB_SEEN_M or s.climb > CLIMB_SEEN_MS
 
 
 def rc_packet(us: Sequence[int]) -> bytes:
@@ -150,6 +186,9 @@ class ArduCopter(Firmware):
         self._rc_source = "idle"
         """Who feeds SITL's receiver: "idle" (nobody yet), "page", or "lost"."""
         self._stopped = False
+        self._fly_lock = threading.Lock()
+        self._fly_gen = 0
+        """Each hover or land is one more: an older one still running sees it is overtaken."""
         self._display = DisplayPort(analog=ctx.video == "analog")
         self.osd_screens = 0
 
@@ -301,6 +340,92 @@ class ArduCopter(Firmware):
             with self._rc_lock:
                 if self._rc_source == "idle":
                     self._send_rc(IDLE_US)
+
+    # Flying itself, as a ground station would (the module's docstring).
+
+    def hover(self, height_m: float) -> None:
+        self._fly(lambda gen: self._hover(gen, height_m), "ardupilot-hover")
+
+    def land(self) -> None:
+        self._fly(self._land, "ardupilot-land")
+
+    def _fly(self, run: Callable[[int], None], name: str) -> None:
+        with self._fly_lock:
+            self._fly_gen += 1
+            gen = self._fly_gen
+        self._thread(lambda: run(gen), name)
+
+    def _current(self, gen: int) -> bool:
+        """Still the latest hover or land, and running."""
+        return gen == self._fly_gen and not self._stop.is_set()
+
+    def _say(self, level: str, text: str) -> None:
+        getattr(log, "warning" if level == "warn" else level)("%s", text)
+        self.events.publish({"ch": "log", "level": level, "source": "session", "text": text})
+
+    def _hover(self, gen: int, height_m: float) -> None:
+        link = self.link
+        if link is None:
+            return
+        deadline = time.monotonic() + FLY_TRY_S
+        why = ""
+        said = ""
+        while self._current(gen):
+            if time.monotonic() > deadline:
+                self._say("error", f"could not take off: {why or 'no answer'}")
+                return
+            if why and why != said:
+                said = why
+                self._say("warn", f"taking off: {why}; trying again")
+            s = link.state
+            up = s.armed and (s.alt_rel or 0.0) > CLIMB_SEEN_M
+            result = link.set_mode("GUIDED")
+            if result != apm.MAV_RESULT_ACCEPTED:
+                why = f"GUIDED refused ({_result(result)})"
+                self._stop.wait(RETRY_S)
+                continue
+            if not self._current(gen):
+                return
+            if up:
+                assert s.lat is not None and s.lon is not None
+                link.go_to(s.lat, s.lon, height_m)
+                self._say("info", f"holding {height_m:.0f} m above the pad")
+                return
+            result = link.command_ack(apm.MAV_CMD_COMPONENT_ARM_DISARM, 1)
+            if result != apm.MAV_RESULT_ACCEPTED:
+                blockers = s.blocker_list(time.monotonic())
+                why = f"arming refused ({_result(result)})" + (
+                    f": {blockers[0]}" if blockers else ""
+                )
+                self._stop.wait(RETRY_S)
+                continue
+            if not self._current(gen):
+                return
+            result = link.command_ack(apm.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, height_m)
+            if result != apm.MAV_RESULT_ACCEPTED:
+                why = f"takeoff refused ({_result(result)})"
+                self._stop.wait(RETRY_S)
+                continue
+            if link.wait(lambda: not self._current(gen) or _climbing(link), CLIMB_SEEN_S):
+                if self._current(gen):
+                    self._say("info", f"taking off to {height_m:.0f} m above the pad")
+                return
+            why = "it did not climb"
+
+    def _land(self, gen: int) -> None:
+        link = self.link
+        if link is None:
+            return
+        deadline = time.monotonic() + FLY_TRY_S
+        while self._current(gen):
+            result = link.set_mode("LAND")
+            if result == apm.MAV_RESULT_ACCEPTED:
+                self._say("info", "landing")
+                return
+            if time.monotonic() > deadline:
+                self._say("error", f"could not land: LAND refused ({_result(result)})")
+                return
+            self._stop.wait(RETRY_S)
 
     # OSD.
 

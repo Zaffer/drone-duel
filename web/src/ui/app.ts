@@ -390,7 +390,8 @@ export function mountApp(root: HTMLElement, world: World): void {
     paused(false);
     try {
       const slots = hudSlots();
-      const f = new Flight(world, slots);
+      const def = MODES.find((m) => m.id === mode());
+      const f = new Flight(world, slots, { ownsView: def?.ownsView ?? false });
       flight = f;
       teardown = mountHud(root, f, slots, () => {
         f.dispose();

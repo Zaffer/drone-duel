@@ -69,5 +69,17 @@ class QuadBackend:
     def throw(self) -> None:
         pass
 
+    def hit(
+        self,
+        part: str,
+        motor: int | None,
+        impulse_ned: tuple[float, float, float],
+        at_frd: tuple[float, float, float],
+    ) -> None:
+        self.model.hit(part, motor, impulse_ned, at_frd)
+
+    def damage(self) -> dict[str, Any] | None:
+        return self.model.damage_summary()
+
     def dynamics(self) -> dict[str, Any] | None:
         return None

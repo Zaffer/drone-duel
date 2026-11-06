@@ -237,21 +237,32 @@ export class World {
     lon: number,
     exclude: object[] = [],
   ): Promise<number | undefined> {
+    const [h] = await this.groundHeights([[lat, lon]], exclude);
+    return h;
+  }
+
+  /** The ground heights at several points (lat, lon), in one look. */
+  async groundHeights(
+    points: [number, number][],
+    exclude: object[] = [],
+  ): Promise<(number | undefined)[]> {
     await this.ready;
-    const carto = C.Cartographic.fromDegrees(lon, lat);
+    const cartos = points.map(([lat, lon]) => C.Cartographic.fromDegrees(lon, lat));
     try {
       if (this.groundIsTiles) {
-        const [hit] = await this.scene.sampleHeightMostDetailed([carto], exclude);
+        const hits = await this.scene.sampleHeightMostDetailed(cartos, exclude);
         // Through a slit between tiles, down to the backstop: no ground there, as before it.
-        return hit?.height !== undefined && hit.height > BACKSTOP_M + 1 ? hit.height : undefined;
+        return hits.map((hit) =>
+          hit?.height !== undefined && hit.height > BACKSTOP_M + 1 ? hit.height : undefined,
+        );
       }
       const provider = this.viewer.terrainProvider;
-      if (provider instanceof C.EllipsoidTerrainProvider) return 0;
-      const [hit] = await C.sampleTerrainMostDetailed(provider, [carto]);
-      return hit?.height;
+      if (provider instanceof C.EllipsoidTerrainProvider) return points.map(() => 0);
+      const hits = await C.sampleTerrainMostDetailed(provider, cartos);
+      return hits.map((hit) => hit?.height);
     } catch (err) {
       console.warn("ground height lookup failed", err);
-      return undefined;
+      return points.map(() => undefined);
     }
   }
 

@@ -8,6 +8,7 @@ import type {
   DynamicsData,
   DynamicsMsg,
   GroundMsg,
+  HitMsg,
   LogMsg,
   OsdMsg,
   PhysicsMsg,
@@ -17,6 +18,7 @@ import type {
   RcMsg,
   SessionMsg,
   StatusMsg,
+  TargetMsg,
   TelemetryMsg,
   VideoMsg,
   WindMsg,
@@ -38,7 +40,9 @@ export type ClientMsg =
   | WindMsg
   | VideoMsg
   | DynamicsMsg
-  | RadioSourceMsg;
+  | RadioSourceMsg
+  | TargetMsg
+  | HitMsg;
 type ByCh<C extends ServerMsg["ch"]> = Extract<ServerMsg, { ch: C }>;
 
 /** protocol.POSE_FIELDS, the order of the doubles in a pose frame. */

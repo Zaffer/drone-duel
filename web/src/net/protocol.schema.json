@@ -263,6 +263,119 @@
       "title": "RadioSourceMsg",
       "type": "object"
     },
+    "TargetMsg": {
+      "additionalProperties": false,
+      "description": "Fly the session's ArduCopter as a ground station would, for a target to shoot at: \"hover\"\ntakes off from its pad (GUIDED, armed over MAVLink, a takeoff) and holds `height_m` above\nit, or climbs or sinks to it if already up; \"land\" lands where it is (LAND). The page sends\nno `rc` meanwhile: an idle receiver is played (firmware/ardupilot.py).",
+      "properties": {
+        "ch": {
+          "const": "target",
+          "default": "target",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "hover",
+            "land"
+          ],
+          "type": "string"
+        },
+        "height_m": {
+          "description": "above the pad, m",
+          "maximum": 120,
+          "minimum": 2,
+          "type": "number"
+        }
+      },
+      "required": [
+        "ch",
+        "action",
+        "height_m"
+      ],
+      "title": "TargetMsg",
+      "type": "object"
+    },
+    "HitMsg": {
+      "additionalProperties": false,
+      "description": "A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.\nThe physics takes what the part did away (physics/quad/model.py: a prop's blade, a motor,\nthe power) and the impulse at the point it struck; the firmware flies on with what is left.",
+      "properties": {
+        "ch": {
+          "const": "hit",
+          "default": "hit",
+          "type": "string"
+        },
+        "part": {
+          "enum": [
+            "prop",
+            "motor",
+            "arm",
+            "battery",
+            "stack",
+            "camera",
+            "frame"
+          ],
+          "type": "string"
+        },
+        "motor": {
+          "anyOf": [
+            {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ArduPilot's motor number (1 front right, 2 rear left, 3 front left, 4 rear right) for a prop, motor or arm; None otherwise"
+        },
+        "impulse_ned": {
+          "description": "the momentum the bullet leaves in the vehicle, N\u00b7s, north, east, down",
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "at_frd": {
+          "description": "where it struck, m from the centre of mass, body forward, right, down",
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        }
+      },
+      "required": [
+        "ch",
+        "part",
+        "motor",
+        "impulse_ned",
+        "at_frd"
+      ],
+      "title": "HitMsg",
+      "type": "object"
+    },
     "StatusMsg": {
       "additionalProperties": false,
       "properties": {
@@ -717,9 +830,42 @@
       "title": "RadioMsg",
       "type": "object"
     },
+    "Damage": {
+      "additionalProperties": false,
+      "description": "What hits have taken from the quad so far (HitMsg).",
+      "properties": {
+        "thrust": {
+          "description": "each motor's (1-4, ArduPilot's) thrust left at a given speed: 1 whole, 2/3 and 1/3 with a prop's blades shot off, 0 its prop gone or the motor dead",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "power": {
+          "description": "the motors' power: a pierced pack holds briefly (failing), a hit stack or a dead pack stops every motor (off)",
+          "enum": [
+            "on",
+            "failing",
+            "off"
+          ],
+          "type": "string"
+        },
+        "hits": {
+          "description": "hits taken since the last reset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thrust",
+        "power",
+        "hits"
+      ],
+      "title": "Damage",
+      "type": "object"
+    },
     "PhysicsMsg": {
       "additionalProperties": false,
-      "description": "What the physics says the vehicle is doing, on each change: \"ground\", \"hand\", \"flying\",\n\"crashed\"; and whether its firmware is stepping it.",
+      "description": "What the physics says the vehicle is doing, on each change: \"ground\", \"hand\", \"flying\",\n\"crashed\"; whether its firmware is stepping it; and what hits have taken from it.",
       "properties": {
         "ch": {
           "const": "physics",
@@ -731,12 +877,25 @@
         },
         "connected": {
           "type": "boolean"
+        },
+        "damage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Damage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None: not hit since the reset"
         }
       },
       "required": [
         "ch",
         "phase",
-        "connected"
+        "connected",
+        "damage"
       ],
       "title": "PhysicsMsg",
       "type": "object"
@@ -869,6 +1028,63 @@
         "offset_m"
       ],
       "title": "CameraSpec",
+      "type": "object"
+    },
+    "Cartridge": {
+      "additionalProperties": false,
+      "description": "The round a weapon fires: what the ballistics (web/src/shoot/ballistics.ts) and the recoil\n(web/src/shoot/recoil.ts) need of it.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "bullet_g": {
+          "description": "the bullet's mass, g",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "diameter_mm": {
+          "description": "the bullet's diameter, mm",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "length_mm": {
+          "description": "the bullet's length, mm (its spin stability)",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "bc_g7": {
+          "description": "ballistic coefficient against G7, lb/in\u00b2",
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "muzzle_ms": {
+          "description": "muzzle speed from this weapon's barrel, m/s",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "powder_g": {
+          "description": "the powder charge, g: its gas recoils too",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "tracer_every": {
+          "description": "a tracer every this many rounds as loaded; 0: none (the menu may change it)",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "bullet_g",
+        "diameter_mm",
+        "length_mm",
+        "bc_g7",
+        "muzzle_ms",
+        "powder_g",
+        "tracer_every"
+      ],
+      "title": "Cartridge",
       "type": "object"
     },
     "Controller": {
@@ -1288,6 +1504,84 @@
       "title": "Vehicle",
       "type": "object"
     },
+    "Weapon": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "model": {
+          "description": "the first-person model, under web/public/models",
+          "type": "string"
+        },
+        "mass_kg": {
+          "description": "loaded, with its sight",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "barrel_in": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "twist_in": {
+          "description": "the rifling's turn, inches per turn, right hand",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "magazine": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "reload_s": {
+          "description": "a magazine change, s",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "sights": {
+          "description": "the sights it has, the first fitted",
+          "items": {
+            "enum": [
+              "holo",
+              "irons"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "zero_m": {
+          "description": "the range its sights are zeroed at, m",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "cartridge": {
+          "$ref": "#/$defs/Cartridge"
+        },
+        "blurb": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "model",
+        "mass_kg",
+        "barrel_in",
+        "twist_in",
+        "magazine",
+        "reload_s",
+        "sights",
+        "zero_m",
+        "cartridge",
+        "blurb"
+      ],
+      "title": "Weapon",
+      "type": "object"
+    },
     "ContentMsg": {
       "additionalProperties": false,
       "properties": {
@@ -1314,13 +1608,20 @@
             "$ref": "#/$defs/Controller"
           },
           "type": "object"
+        },
+        "weapons": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Weapon"
+          },
+          "type": "object"
         }
       },
       "required": [
         "locations",
         "vehicles",
         "courses",
-        "controllers"
+        "controllers",
+        "weapons"
       ],
       "title": "ContentMsg",
       "type": "object"
@@ -1393,6 +1694,9 @@
     "CameraSpec": {
       "$ref": "#/$defs/CameraSpec"
     },
+    "Cartridge": {
+      "$ref": "#/$defs/Cartridge"
+    },
     "ConfigMsg": {
       "$ref": "#/$defs/ConfigMsg"
     },
@@ -1404,6 +1708,9 @@
     },
     "Course": {
       "$ref": "#/$defs/Course"
+    },
+    "Damage": {
+      "$ref": "#/$defs/Damage"
     },
     "DynamicsData": {
       "$ref": "#/$defs/DynamicsData"
@@ -1422,6 +1729,9 @@
     },
     "GroundMsg": {
       "$ref": "#/$defs/GroundMsg"
+    },
+    "HitMsg": {
+      "$ref": "#/$defs/HitMsg"
     },
     "Location": {
       "$ref": "#/$defs/Location"
@@ -1465,6 +1775,9 @@
     "StatusMsg": {
       "$ref": "#/$defs/StatusMsg"
     },
+    "TargetMsg": {
+      "$ref": "#/$defs/TargetMsg"
+    },
     "TelemetryMsg": {
       "$ref": "#/$defs/TelemetryMsg"
     },
@@ -1473,6 +1786,9 @@
     },
     "VideoMsg": {
       "$ref": "#/$defs/VideoMsg"
+    },
+    "Weapon": {
+      "$ref": "#/$defs/Weapon"
     },
     "Wind": {
       "$ref": "#/$defs/Wind"

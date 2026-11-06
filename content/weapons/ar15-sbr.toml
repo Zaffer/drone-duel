@@ -1,0 +1,29 @@
+# A short-barrelled AR-15 with a holographic sight, firing M193: the ground shooter's rifle in
+# Shoot Down (DESIGN.md §7). The numbers are the ballistics' and the recoil's, with their sources.
+name = "AR-15, 11.5 inch"
+blurb = "Short-barrelled AR-15, holographic sight and flip-up irons, M193 ball."
+model = "models/rifle.glb"
+# EST: an 11.5" AR-15 upper and lower, a loaded 30-round magazine (0.5 kg) and an EOTech
+# (0.3 kg).
+mass_kg = 3.2
+barrel_in = 11.5
+twist_in = 7.0
+magazine = 30
+reload_s = 2.4
+sights = ["holo", "irons"]
+zero_m = 50.0
+
+[cartridge]
+name = "M193 55 gr FMJ"
+# 55 gr, 0.224 in; the M193 bullet is 0.74 in long (TM 43-0001-27).
+bullet_g = 3.564
+diameter_mm = 5.70
+length_mm = 18.8
+# Published only as calculations: 0.120 (US 11815334), 0.127 (Sellier & Bellot); their middle.
+bc_g7 = 0.124
+# From an 11.5" barrel: 2752 fps (Oehler 35P, sigforum) and 2847 fps (GunMag Warehouse); about
+# 2800 fps.
+muzzle_ms = 853.0
+# 26 gr of WC844 (EST: the M193 load's usual charge).
+powder_g = 1.68
+tracer_every = 1

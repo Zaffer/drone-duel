@@ -1,7 +1,8 @@
 """Just enough glTF 2.0 binary (GLB) reading and writing for the viewer's models.
 
 tools.models.fpvmodel and tools.models.truckmodel read their Sketchfab sources with read_glb and
-scene_primitives, and write the COP's models with GltfWriter.
+scene_primitives, and write the COP's models with GltfWriter, as the operator's and the rifle's
+converters do theirs.
 """
 
 import io
@@ -247,18 +248,25 @@ class GltfWriter:
 
     def mesh_node(self, part: Primitive) -> int:
         """A mesh of `part` alone and a node holding it, both named after it."""
-        attributes = {}
-        for key, values in part.attributes.items():
-            kind = FLOAT_ATTRIBUTES.get(key, "VEC2")
-            attributes[key] = self.accessor(values, kind, ARRAY_BUFFER, key == "POSITION")
-        primitive: dict[str, object] = {
-            "attributes": attributes,
-            "indices": self.accessor(part.indices, "SCALAR", ELEMENT_ARRAY_BUFFER, False),
-        }
-        if part.material is not None:
-            primitive["material"] = part.material
-        self.meshes.append({"name": part.name, "primitives": [primitive]})
-        self.nodes.append({"name": part.name, "mesh": len(self.meshes) - 1})
+        return self.parts_node(part.name, [part])
+
+    def parts_node(self, name: str, parts: list[Primitive]) -> int:
+        """A mesh of `parts`, a primitive each, and a node holding it, both named `name`."""
+        primitives = []
+        for part in parts:
+            attributes = {}
+            for key, values in part.attributes.items():
+                kind = FLOAT_ATTRIBUTES.get(key, "VEC2")
+                attributes[key] = self.accessor(values, kind, ARRAY_BUFFER, key == "POSITION")
+            primitive: dict[str, object] = {
+                "attributes": attributes,
+                "indices": self.accessor(part.indices, "SCALAR", ELEMENT_ARRAY_BUFFER, False),
+            }
+            if part.material is not None:
+                primitive["material"] = part.material
+            primitives.append(primitive)
+        self.meshes.append({"name": name, "primitives": primitives})
+        self.nodes.append({"name": name, "mesh": len(self.meshes) - 1})
         return len(self.nodes) - 1
 
     def images(
@@ -273,14 +281,25 @@ class GltfWriter:
             out.append({"bufferView": self.view(data, None), "mimeType": image["mimeType"]})
         return out
 
-    def to_glb(self, root: int, asset: Mapping[str, object], **extra: object) -> bytes:
-        """The GLB with scene root node `root`. `extra` adds top-level properties (images,
-        textures, samplers, extensionsUsed). Empty lists are left out, as glTF requires."""
+    def to_glb(
+        self,
+        root: int,
+        asset: Mapping[str, object],
+        scene_extras: Mapping[str, object] | None = None,
+        /,
+        **extra: object,
+    ) -> bytes:
+        """The GLB with scene root node `root`, `scene_extras` the scene's extras if given.
+        `extra` adds top-level properties (images, textures, samplers, extensionsUsed). Empty
+        lists are left out, as glTF requires."""
         self.buffer.extend(b"\0" * (-len(self.buffer) % 4))
+        scene: dict[str, object] = {"nodes": [root]}
+        if scene_extras is not None:
+            scene["extras"] = dict(scene_extras)
         doc = {
             "asset": {"version": "2.0", **asset},
             "scene": 0,
-            "scenes": [{"nodes": [root]}],
+            "scenes": [scene],
             "nodes": self.nodes,
             "meshes": self.meshes,
             "materials": self.materials,

@@ -30,10 +30,12 @@ from drone_duels.server.protocol import (
     ContentMsg,
     DynamicsMsg,
     GroundMsg,
+    HitMsg,
     MapKeys,
     RadioSourceMsg,
     RcMsg,
     SessionMsg,
+    TargetMsg,
     VideoMsg,
     WindMsg,
     client_msg,
@@ -183,6 +185,7 @@ def create_app(
             vehicles=content.vehicles,
             courses=content.courses,
             controllers=content.controllers,
+            weapons=content.weapons,
         )
 
     @app.get("/api/config")
@@ -295,6 +298,10 @@ def handle(session: Session, text: str) -> object:
             session.set_video(msg.system)
         case DynamicsMsg():
             session.set_dynamics(msg.on)
+        case TargetMsg():
+            session.target(msg.action, msg.height_m)
+        case HitMsg():
+            session.hit(msg.part, msg.motor, msg.impulse_ned, msg.at_frd)
         case RadioSourceMsg():
             pass  # the connection's own (ws_endpoint)
     return msg
