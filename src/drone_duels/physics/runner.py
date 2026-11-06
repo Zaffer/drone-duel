@@ -1,14 +1,14 @@
-"""The physics process: one vehicle's flight model, playing the world to its firmware in lockstep,
-and talking to the server over a UDP pair (DESIGN.md §3).
+"""The physics process: one vehicle's flight model, playing the world to its firmware in lockstep
+(or in real time, for Betaflight), and talking to the server over a UDP pair (DESIGN.md §3).
 
     python -m drone_duels.physics.runner --kind quad --airframe racer5in --slot 0 \\
-        --origin LAT,LON,ALT --heading DEG --wind JSON
+        --origin LAT,LON,ALT --heading DEG --wind JSON --firmware ardupilot-copter
 
-The backend (quad: ArduPilot's JSON physics; wing: X-Plane's protocol for INAV) runs its own
-lockstep loop on a thread. This loop, at LOOP_HZ, takes the server's control datagrams (JSON,
-`t` names each: rc, ground, wind, reset, throw, hit, dynamics, stop) and sends back the true
-pose (b"P" + protocol.POSE), the status (twice a second, and on change: its phase, and what hits
-have taken) and, when asked, the dynamics.
+The backend (quad: ArduPilot's JSON physics, or Betaflight's simulator protocol; wing: X-Plane's
+protocol for INAV) runs its own loop with the firmware on a thread. This loop, at LOOP_HZ, takes
+the server's control datagrams (JSON, `t` names each: rc, ground, wind, reset, throw, hit,
+dynamics, stop) and sends back the true pose (b"P" + protocol.POSE), the status (twice a second,
+and on change: its phase, and what hits have taken) and, when asked, the dynamics.
 """
 
 import argparse
@@ -103,11 +103,12 @@ def make_backend(
     origin: tuple[float, float, float],
     heading_deg: float,
     wind: dict[str, Any],
+    firmware: str = "ardupilot-copter",
 ) -> Backend:
     if kind == "quad":
         from drone_duels.physics.quad.backend import QuadBackend
 
-        return QuadBackend(airframe, ports.slot(slot), origin, heading_deg, wind)
+        return QuadBackend(airframe, ports.slot(slot), origin, heading_deg, wind, firmware)
     if kind == "wing":
         from drone_duels.physics.wing.backend import WingBackend
 
@@ -212,12 +213,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--origin", required=True, help="LAT,LON,ALT (ground, m above sea level)")
     parser.add_argument("--heading", type=float, default=0.0)
     parser.add_argument("--wind", default="{}", help="the location's wind, as JSON")
+    parser.add_argument("--firmware", default="ardupilot-copter",
+                        help="the firmware flying it (content's FirmwareKind)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s",
                         stream=sys.stdout)
     lat, lon, alt = (float(x) for x in args.origin.split(","))
     backend = make_backend(args.kind, args.airframe, args.slot, (lat, lon, alt), args.heading,
-                           json.loads(args.wind))
+                           json.loads(args.wind), args.firmware)
     run(backend, args.slot)
 
 

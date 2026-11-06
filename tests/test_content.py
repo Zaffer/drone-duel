@@ -10,8 +10,9 @@ from drone_duels.content.store import CONTENT, ContentError, load
 def test_the_shipped_content_loads() -> None:
     c = load()
     assert {"billy-bishop", "area-xo"} <= set(c.locations)
-    assert {"quad5", "chupito", "truck"} <= set(c.vehicles)
+    assert {"quad5", "quad5-betaflight", "chupito", "truck"} <= set(c.vehicles)
     assert c.vehicles["quad5"].firmware.kind == "ardupilot-copter"
+    assert c.vehicles["quad5-betaflight"].firmware.kind == "betaflight"
     assert c.vehicles["chupito"].firmware.kind == "inav"
     for course in c.courses.values():
         assert len(course.gates) >= 2

@@ -1,0 +1,28 @@
+# The Betaflight 5" quad (content/vehicles/quad5-betaflight.toml) in SITL: Betaflight's own
+# defaults (its PIDs and rates), and what the game needs on top. drone_duels.firmware.betaflight
+# types this into a fresh eeprom with SITL's --config, then the video system's file
+# (quad5.analog.cli or quad5.digital.cli).
+
+# The radio: the pilot's sticks over UDP (SITL's RX_UDP), AETR. AUX1 (channel 5) high arms;
+# AUX2 (channel 6) is the mode switch: low ANGLE, middle HORIZON, high neither (ACRO).
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 900 1300 0 0
+aux 2 2 1 1300 1700 0 0
+# The radio link lost (the page gone): Betaflight's failsafe lands it where it is, holding the
+# throttle it had through the guard time (not dropping it to low), and disarms on touchdown
+# (its impact detection: 100 g/s of jerk, with the sticks let go or the altitude held).
+set failsafe_procedure = AUTO-LAND
+rxfail 3 h
+set landing_disarm_threshold = 10
+
+# GPS and the compass: SITL's own, fed from the physics' true state.
+feature GPS
+set gps_provider = VIRTUAL
+set trust_mag = ON
+
+# UART2: MSP for the game's ground station (telemetry). UART3: MSP DisplayPort, the OSD, as to a
+# DJI air unit (functions MSP + VTX_MSP).
+serial 1 1 115200 57600 0 115200
+serial 2 131073 115200 57600 0 115200
+set osd_displayport_device = MSP
+set osd_units = METRIC

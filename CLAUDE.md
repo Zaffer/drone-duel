@@ -1,10 +1,11 @@
 # drone-duels
 
 A flight simulator game and practice sim: real flight controller firmware in SITL (ArduPilot,
-INAV) on our own physics, drawn over real places in Chrome. DESIGN.md is the architecture,
-ROADMAP.md what comes next. Python package `drone_duels` (src layout, uv); the page is TypeScript
-in `web/` (bun). ArduPilot, INAV SITL and mavlink-router live in `external/` via
-`scripts/setup.sh`.
+INAV, Betaflight) on our own physics, drawn over real places in Chrome. DESIGN.md is the
+architecture, ROADMAP.md what comes next. Python package `drone_duels` (src layout, uv); the page
+is TypeScript in `web/` (bun). ArduPilot, INAV and Betaflight SITL and mavlink-router live in
+`external/` via `scripts/setup.sh`; Betaflight is built there with `scripts/betaflight-sitl.patch`
+(change the patch, not the checkout).
 
 - Run everything with `uv run`; never bare `python`. The game is `uv run duels` (serves the page
   on port 8600 and opens Chrome); `uv run duels doctor` says what is missing.
@@ -18,8 +19,8 @@ in `web/` (bun). ArduPilot, INAV SITL and mavlink-router live in `external/` via
   the generated `web/src/net/protocol.ts` (never edit that by hand).
 - Places, vehicles, race courses and radio profiles are TOML in `content/`
   (`drone_duels.content`), not code. Every key is checked; add a file to add one.
-- Every port is in `src/drone_duels/ports.py`. INAV must stay off 5760 (mavlink-router connects
-  there for ArduPilot).
+- Every port is in `src/drone_duels/ports.py`. INAV and Betaflight must stay off 5760
+  (mavlink-router connects there for ArduPilot) and Betaflight off 9001-9004, its own defaults.
 - ArduCopter is 4.7.x. Use 4.7 parameter names (`MAV_GCS_SYSID`, `LOIT_SPEED_MS`, `WP_SPD`).
   Check `external/ardupilot` source when unsure. The game is MAVLink system 254;
   QGroundControl is 255. Do not use 255.

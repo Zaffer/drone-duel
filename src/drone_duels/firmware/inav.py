@@ -236,8 +236,9 @@ def _crc8_dvb_s2(data: bytes) -> int:
     return crc
 
 
-class Msp:
-    """An MSP v2 link to INAV over TCP, one request at a time from any thread."""
+class MspLink:
+    """An MSP v2 link to a flight controller over TCP, one request at a time from any thread
+    (Betaflight's too: it answers any command in MSP v2's frames)."""
 
     def __init__(self, port: int) -> None:
         self.sock = socket.create_connection(("127.0.0.1", port), timeout=2)
@@ -272,6 +273,17 @@ class Msp:
             data += chunk
         return data
 
+    def boxes(self) -> tuple[int, ...]:
+        """The permanent ids of the flight controller's boxes, in the order its mode flags give
+        them."""
+        if self._boxes is None:
+            self._boxes = tuple(self.request(MSP_BOXIDS))
+        return self._boxes
+
+
+class Msp(MspLink):
+    """INAV over MSP: its state, as a ground station reads it."""
+
     def status(self) -> Status:
         return _status(self.request(MSP2_INAV_STATUS))
 
@@ -279,12 +291,6 @@ class Msp:
         """INAV's estimate: roll (right wing down), pitch (nose up) and heading, degrees."""
         roll, pitch, heading = struct.unpack_from("<hhh", self.request(MSP_ATTITUDE))
         return roll / 10, -pitch / 10, float(heading)
-
-    def boxes(self) -> tuple[int, ...]:
-        """The permanent ids of INAV's boxes, in the order its mode flags give them."""
-        if self._boxes is None:
-            self._boxes = tuple(self.request(MSP_BOXIDS))
-        return self._boxes
 
     def telemetry(self) -> dict[str, Any]:
         """What a ground station sees, as protocol.TelemetryMsg (with its `ch`)."""
@@ -364,8 +370,9 @@ class AirUnit:
     its OSD over MSP DisplayPort on the UART TBS gives it (UART3, SITL's TCP `port`), but only
     to an air unit it hears: the unit polls the flight controller over MSP, and so does this
     (MSP_FC_VARIANT and MSP_STATUS, ten times a second). `screen`: the last INAV drew, on
-    `video`'s grid (OSD_GRIDS); `on_screen` gets each screen drawn, no more than `max_hz` a
-    second (the latest)."""
+    `video`'s grid in `grids` (OSD_GRIDS: INAV's); `on_screen` gets each screen drawn, no more
+    than `max_hz` a second (the latest). Betaflight's OSD comes the same way
+    (firmware/betaflight.py)."""
 
     POLL = b"$M<\x00\x02\x02$M<\x00\x65\x65"
     POLL_S = 0.1
@@ -376,9 +383,11 @@ class AirUnit:
         on_screen: Callable[[OsdScreen], None] | None = None,
         max_hz: float = 20.0,
         video: VideoSystem = "digital",
+        grids: dict[VideoSystem, dict[int, tuple[int, int]]] = OSD_GRIDS,
     ) -> None:
         self.port = port
         self.video: VideoSystem = video
+        self.grids = grids
         self.on_screen = on_screen
         self.min_gap = 1 / max_hz
         self.screen: OsdScreen | None = None
@@ -404,7 +413,7 @@ class AirUnit:
 
     def _listen(self, sock: socket.socket) -> None:
         reader, display = MspReader(), DisplayPort(
-            OSD_GRIDS[self.video], analog=self.video == "analog"
+            self.grids[self.video], analog=self.video == "analog"
         )
         polled = sent = 0.0
         fresh = False

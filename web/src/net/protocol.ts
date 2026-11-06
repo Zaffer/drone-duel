@@ -270,7 +270,7 @@ export interface Vehicle {
  * via the `definition` "FirmwareSpec".
  */
 export interface FirmwareSpec {
-  kind: "ardupilot-copter" | "inav" | "none";
+  kind: "ardupilot-copter" | "betaflight" | "inav" | "none";
   /**
    * parameter / CLI files, relative to firmware/
    */

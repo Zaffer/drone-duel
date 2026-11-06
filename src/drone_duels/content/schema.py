@@ -61,7 +61,7 @@ class Location(Strict):
     blurb: str = ""
 
 
-FirmwareKind = Literal["ardupilot-copter", "inav", "none"]
+FirmwareKind = Literal["ardupilot-copter", "betaflight", "inav", "none"]
 PhysicsKind = Literal["quad", "wing", "browser-truck"]
 VehicleKind = Literal["multirotor", "fixedwing", "ground"]
 Launch = Literal["ground", "hand", "drive"]

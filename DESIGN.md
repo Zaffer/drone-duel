@@ -4,7 +4,7 @@ Status: built on branch `v2` (2026-10-29). Where the build found something the d
 text below says what was done instead.
 
 Drone Duels is a flight simulator game and practice sim. Every aircraft flies on its real flight
-controller firmware in SITL (ArduPilot or INAV, later Betaflight), on the best physics we can
+controller firmware in SITL (ArduPilot, INAV or Betaflight), on the best physics we can
 model, over real places on Earth drawn from Google Photorealistic 3D Tiles. You can fly around
 on your own, fight a 1v1 duel, or race a friend through gates. You can switch vehicle at any
 time, see the firmware's real OSD through an analog or digital video link, and change the wind
@@ -15,8 +15,9 @@ for real.
 
 **Goals for v1**
 
-- The real firmware flies every aircraft: ArduCopter 4.7 SITL for the 5" quad and INAV 9.1 SITL
-  for the TBS Chupito. Nothing we write stands in for the flight controller.
+- The real firmware flies every aircraft: ArduCopter 4.7 SITL or Betaflight 2026.6 SITL for the
+  5" quad (two vehicles, one airframe) and INAV 9.1 SITL for the TBS Chupito. Nothing we write
+  stands in for the flight controller.
 - Physics we own and can defend: `wingsim` (strips over a vortex lattice, MIL-F-8785C wind) for
   the Chupito, and SkyFlow-Dynamics' `racer5in` plant for the quad. One wind model drives both.
 - Modes: **Free Fly**, **Duel** (a drone or the Chupito against the truck) and **Race** (live
@@ -82,11 +83,12 @@ the truck, Windows/WSL and macOS, and flying real hardware.
    ├─ Pilot            the radio read through Linux (evdev), flown straight to the firmware
    ├─ RcSink           sticks (the server's radio, or the page's) → the firmware's RC input,
    │                   with failsafe on silence
-   ├─ TelemetryClient  MAVLink via mavlink-router (sysid 254) │ MSP for INAV
+   ├─ TelemetryClient  MAVLink via mavlink-router (sysid 254) │ MSP for INAV, Betaflight
    ├─ OsdClient        MSP DisplayPort from the firmware → grid screens
    └─ per vehicle slot:
         Firmware process  ⇄  bridge protocol  ⇄  Physics process
         ArduCopter SITL   ⇄  ArduPilot JSON   ⇄  quad (SkyFlow-Dynamics plant)
+        Betaflight SITL   ⇄  its sim UDP      ⇄  quad (the same plant)
         INAV SITL         ⇄  X-Plane UDP      ⇄  wing (wingsim)
         (truck: no firmware; physics runs in the page)
 
@@ -101,10 +103,15 @@ can come back without redesign.
 
 **Ports** live in one module, `drone_duels.ports`, as a block per slot: firmware MAVLink/MSP, CLI,
 OSD, RC in, physics bridge and physics control. Nothing else hard-codes a port. Today ArduPilot's
-SITL serial0 and INAV's CLI both default to 5760; the port map ends that clash.
+SITL serial0 and INAV's CLI both default to 5760; the port map ends that clash. Betaflight's
+SITL fixes its own (TCP 5760 up, UDP 9001-9004: ArduPilot's), so it is built with
+`scripts/betaflight-sitl.patch`, which makes them arguments.
 
 **Time.** ArduPilot's JSON backend and INAV's X-Plane link both run in lockstep: the physics
 steps when the firmware sends its outputs, so the sim never drifts from the firmware's clock.
+Betaflight's SITL does not wait: its clock runs at the rate the physics' timestamps advance
+against the wall clock. So under Betaflight the physics paces itself, 1000 frames a second in
+real time, and Betaflight follows (§6.2).
 The physics streams the true pose to the server at 120 Hz, each stamped with its sim time `t`.
 
 ### 3.1 Timing and latency
@@ -185,14 +192,16 @@ drone-duels/
   DESIGN.md  ROADMAP.md  CLAUDE.md  README.md
   content/
     locations/              billy-bishop.toml, area-xo.toml          (place, ground, start pads)
-    vehicles/               quad5.toml, chupito.toml, truck.toml
+    vehicles/               quad5.toml, quad5-betaflight.toml, chupito.toml, truck.toml
     courses/                areaxo-1.toml                            (race gates)
     controllers/            literadio2.toml, tx15.toml, t8l.toml     (default channel maps)
   firmware/
     ardupilot/              copter-quad5.parm, sitl.parm, json-frame notes
     inav/                   chupito.cli                              (INAV CLI settings)
+    betaflight/             quad5.cli (+ .analog/.digital: the OSD)  (Betaflight CLI settings)
   router/sitl.conf
-  scripts/setup.sh          ArduPilot, INAV, mavlink-router, bun, web deps, Chupito GLB
+  scripts/setup.sh          ArduPilot, INAV, Betaflight (built with betaflight-sitl.patch),
+                            mavlink-router, bun, web deps, Chupito GLB
   tools/                    gen_protocol_ts.py (pydantic → web/src/net/protocol.ts),
                             models/ (fpvmodel, truckmodel, operatormodel, operatortextures,
                             gltf, fbx: GLB asset builders)
@@ -202,8 +211,8 @@ drone-duels/
     content/                pydantic schemas + loader for content/*.toml, prefs
     server/                 FastAPI app, /ws protocol (pydantic models), REST, static files
     session/                Session, slots, vehicle lifecycle, mode hooks on the server side
-    firmware/               base.py (Firmware protocol), ardupilot.py, inav.py
-    bridges/                ardupilot_json.py, xplane.py
+    firmware/               base.py (Firmware protocol), ardupilot.py, inav.py, betaflight.py
+    bridges/                ardupilot_json.py, xplane.py, betaflight.py
     physics/
       core/                 (stdlib only) rigidbody, atmosphere, weather (MIL-F-8785C), ground
       wing/                 (stdlib only) today's wingsim: strips, aero, propulsion, airframe
@@ -237,7 +246,8 @@ drone-duels/
   tests/                    pytest (physics goldens, bridges, content, session, protocol)
 ```
 
-`external/` (git-ignored, from `scripts/setup.sh`) keeps ArduPilot, INAV and mavlink-router.
+`external/` (git-ignored, from `scripts/setup.sh`) keeps ArduPilot, INAV, Betaflight and
+mavlink-router.
 The web libraries (Cesium, Rapier, Trystero, milsymbol, alien-signals) become bun dependencies
 pinned in `web/package.json`, no longer tarballs copied by hand. analog-vision is a git
 dependency, `github:Synetic-Labs/Analog-Vision#<commit>` (its `package.json` exports
@@ -352,6 +362,34 @@ quad yaws away, tumbles and falls (SITL, from 30 m: 18 m/s into the ground 4 s l
 The prop's imbalance (vibration) is not modelled. A reset mends it all; the physics' status
 carries the damage, and `physics` (§8) passes it to the page.
 
+**On Betaflight** (`quad5-betaflight`, the same airframe and plant): Betaflight 2026.6's SITL,
+built from source by `scripts/setup.sh` with `scripts/betaflight-sitl.patch`. The patch makes
+its ports arguments, keeps it to 127.0.0.1, builds in the OSD (MSP DisplayPort; stock SITL has
+none), and drops state that arrives before its virtual sensors exist (which crashed it as it
+booted, the physics already running). Its settings (`firmware/betaflight/quad5.cli`, then the
+video system's OSD layout) go into a fresh eeprom by SITL's own `--config` before it boots;
+Betaflight's own PIDs and rates fly it. `bridges/betaflight.py`:
+
+- Betaflight keeps its own clock, scaled to the rate the state's timestamps advance against the
+  wall clock, and sends its motors once for each state packet. So the physics paces itself at
+  1000 frames a second in real time, steps with the motors last sent, and sends the state.
+  Measured (2026-11-06): Betaflight 3 % of a core, the physics process about 50 %.
+- The frames are those of Gazebo's BetaflightPlugin, which the default SITL build reads, held
+  by `tests/test_bridge_betaflight.py` to Betaflight's own SITL harness for any attitude: gyro
+  (p, q, −r); the accelerometer the negated FLU specific force; the attitude FLU to NWU, turned
+  −90° and conjugated by a half turn about x; velocity ENU; GPS mirrored about the pad (the first
+  fix Betaflight takes, and mirrors back about); the barometer from the height.
+- Its motors come as µs (1000 stopped, 1055 armed idle, 2000 full), the range the ESC map reads,
+  reordered from Betaflight's quad X (rear right first) to ArduPilot's.
+- RC goes over UDP from the adapter (an idle receiver until the page's sticks come), telemetry
+  over MSP, the OSD over MSP DisplayPort polled as a DJI air unit polls it (INAV's `AirUnit`).
+- A link lost (§8): Betaflight's own failsafe lands it where it is (AUTO-LAND, holding the
+  throttle through the guard time) and disarms on the touchdown's jerk. SITL has no battery: no
+  pack voltage. A reset leaves it running (no EKF to upset). It cannot fly itself here, so Shoot
+  Down's target stays ArduCopter.
+- Measured (2026-11-06, SITL): ready 8 s after the start; Betaflight's attitude within 2° of the
+  truth in flight (its compass has a 2° declination).
+
 ### 6.3 Truck
 
 Today's Rapier ray-cast vehicle (car.js and drivesession.js) on colliders built from the tiles,
@@ -365,7 +403,8 @@ in the page, with no firmware. It gets the same Vehicle interface in the page as
 1. stop the slot's current firmware and physics, if any;
 2. start the physics at the location's start pad;
 3. start the firmware with its params and wait until it is ready (ArduPilot: EKF and prearm
-   checks; INAV: no arming blockers on two polls in a row, a known quirk);
+   checks; INAV: no arming blockers on two polls in a row, a known quirk; Betaflight: none but
+   the arm switch, twice);
 4. report `ready`.
 
 Switching vehicle is a spawn at the location's start. Reset re-spawns the same vehicle. Destroy
@@ -500,7 +539,8 @@ RC failsafe: if no sticks arrive for 200 ms (the radio unplugged; or, while the 
 flies, the tab hidden or crashed; or the page gone), the session tells the firmware its link is
 lost, and the firmware's own failsafe runs, as on a real link. ArduPilot
 SITL would hold the last pulses forever, so the adapter sets `SIM_RC_FAIL`; INAV's X-Plane link
-stops reporting a joystick, and its receiver times out. Both come back with the next sticks.
+stops reporting a joystick, and its receiver times out; Betaflight's adapter stops sending its
+RC packets (RXLOSS). All come back with the next sticks.
 
 The WebSocket takes only the game's own page (a local Origin), so another site open in the same
 browser cannot fly the sim.
@@ -540,9 +580,10 @@ Toolchain: bun builds and serves the bundle (`bun build`, with watch in dev). Ty
   link breakup.
 - Switching the video system changes the firmware's OSD resolution. ArduPilot takes it in flight
   (it reads `OSD1_TXT_RES` each time it clears the screen), so its vehicle flies on. INAV takes
-  it only at boot, so the switch respawns that vehicle at the start, as a vehicle switch does.
-- The OSD fonts are the firmware's own (ArduPilot's OSD_FONT and INAV's), rendered from their
-  .mcm files as `swarm.osd` does today.
+  it only at boot, so the switch respawns that vehicle at the start, as a vehicle switch does;
+  so does Betaflight (NTSC's 30×13 for analog, its 53×20 HD canvas for digital).
+- The OSD fonts are the firmware's own (ArduPilot's OSD_FONT, and Betaflight's, in which INAV's
+  DisplayPort draws too), rendered from their .mcm files as `swarm.osd` does today.
 
 ## 11. UI
 

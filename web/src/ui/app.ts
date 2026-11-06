@@ -418,9 +418,12 @@ export function mountApp(root: HTMLElement, world: World): void {
 }
 
 export function vehicleCard(v: Vehicle, onPick: () => void): HTMLButtonElement {
-  const fw = { "ardupilot-copter": "ArduCopter 4.7", inav: "INAV 9.1", none: "no FC" }[
-    v.firmware.kind
-  ];
+  const fw = {
+    "ardupilot-copter": "ArduCopter 4.7",
+    betaflight: "Betaflight 2026.6",
+    inav: "INAV 9.1",
+    none: "no FC",
+  }[v.firmware.kind];
   const phys = { quad: "SkyFlow racer5in", wing: "strips + VLM", "browser-truck": "Rapier" }[
     v.physics.kind
   ];

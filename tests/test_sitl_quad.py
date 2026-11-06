@@ -204,8 +204,10 @@ def test_arm_climb_land_disarm(flight: Flight) -> None:
         wait_for(
             "landed", lambda: (p := events.pose()) is not None and p[ALT] < origin_alt + 0.1, 30
         )
-        assert session._physics is not None  # pyright: ignore[reportPrivateUsage]
-        assert session._physics.status.get("phase") == "ground"  # pyright: ignore[reportPrivateUsage]
+        physics = session._physics  # pyright: ignore[reportPrivateUsage]
+        assert physics is not None
+        # Within 0.1 m it may be a few ms yet from its legs touching (0.03 m at 2.5 m/s).
+        wait_for("on the ground", lambda: physics.status.get("phase") == "ground", 1)
         time.sleep(2)
         radio.set(arm=1000)
         wait_for("disarmed", lambda: (t := events.telemetry()) is not None and not t.armed, 10)

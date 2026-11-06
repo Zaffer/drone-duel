@@ -4,6 +4,7 @@ A vehicle slot is one vehicle at a time: its firmware, its physics and the links
 v1 flies slot 0 only; the swarm (ROADMAP) will use more. ArduPilot SITL fixes its own ports
 from its instance number (`-I`), ten apart: the slot is the instance. INAV SITL takes a TCP base
 port, so it gets a block of its own, clear of ArduPilot's 5760, where mavlink-router connects.
+Betaflight SITL, patched to take its ports, gets blocks of its own too.
 """
 
 from dataclasses import dataclass
@@ -67,6 +68,50 @@ class SlotPorts:
     def inav_xplane(self) -> int:
         """UDP: the physics plays X-Plane here; INAV connects to it."""
         return 49000 + SLOT_STRIDE * self.slot
+
+    # Betaflight SITL (scripts/betaflight-sitl.patch makes its ports arguments; its own defaults,
+    # 9001-9004 and TCP 5760, are ArduPilot's).
+    @property
+    def betaflight_sim_base(self) -> int:
+        """UDP, Betaflight's --simport: raw motor PWM out here, normalised motors +1 (both to the
+        physics), the physics' state in +2, RC in +3."""
+        return 9601 + SLOT_STRIDE * self.slot
+
+    @property
+    def betaflight_pwm_raw(self) -> int:
+        return self.betaflight_sim_base
+
+    @property
+    def betaflight_pwm(self) -> int:
+        return self.betaflight_sim_base + 1
+
+    @property
+    def betaflight_state(self) -> int:
+        return self.betaflight_sim_base + 2
+
+    @property
+    def betaflight_rc(self) -> int:
+        return self.betaflight_sim_base + 3
+
+    @property
+    def betaflight_config_sim_base(self) -> int:
+        """UDP: --simport while Betaflight types its settings in (--config), where nothing sends:
+        state arriving from the physics as it does crashes it."""
+        return self.betaflight_sim_base + 4
+
+    @property
+    def betaflight_tcp_base(self) -> int:
+        """TCP, Betaflight's --tcpbaseport: UARTn on this + n. UART1 the CLI and MSP, UART2 MSP
+        (the ground station), UART3 MSP DisplayPort (the OSD, as to a DJI air unit)."""
+        return 7760 + SLOT_STRIDE * self.slot
+
+    @property
+    def betaflight_msp(self) -> int:
+        return self.betaflight_tcp_base + 2
+
+    @property
+    def betaflight_osd(self) -> int:
+        return self.betaflight_tcp_base + 3
 
     # Our own physics process.
     @property

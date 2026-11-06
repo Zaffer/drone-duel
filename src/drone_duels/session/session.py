@@ -54,6 +54,10 @@ def make_firmware(ctx: SpawnContext, events: Events, physics: PhysicsProcess) ->
         from drone_duels.firmware.inav import Inav
 
         return Inav(ctx, events, physics)
+    if kind == "betaflight":
+        from drone_duels.firmware.betaflight import Betaflight
+
+        return Betaflight(ctx, events, physics)
     return NoFirmware(ctx, events, physics)
 
 

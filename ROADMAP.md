@@ -4,8 +4,11 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 
 ## Vehicles and firmware
 
-- **Betaflight SITL for the 5" quad**, as a firmware choice per vehicle. SkyFlow already closes
-  the loop through Betaflight (`cudaflight`), and the JSON/MSP seams are the same shape.
+- **Betaflight's 5" as a firmware choice on the 5" quad's card**, not a second card: it is a
+  vehicle of its own today (`quad5-betaflight`).
+- Betaflight flying itself (its AUTOPILOT / POS HOLD over the game's RC), so Shoot Down can hover
+  it as a target.
+- A battery for Betaflight SITL: its simulator protocol carries none, so it reads no pack.
 - **ArduPilot Rover on the truck.** Rapier stays the physics (tile collisions). A lockstep link
   between the page and Rover SITL's JSON backend, for practising rover missions.
 - **Our own 5" build** as a second SkyFlow-Dynamics parameter row (750 g, 6S, 2207 1950 KV), if

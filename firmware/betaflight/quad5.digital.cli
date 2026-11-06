@@ -1,0 +1,23 @@
+# The Betaflight 5" quad's OSD for digital video (drone_duels.firmware.betaflight: typed in
+# after quad5.cli when the video system is digital). Betaflight draws it on 53 x 20, Betaflight's HD canvas,
+# and sends it over MSP DisplayPort (UART3, quad5.cli). Each position is
+# OSD_POS(x, y) | OSD_PROFILE_1_FLAG (osd/osd.h): x & 31 | (x & 32) << 5 | y << 5 | 2048.
+set vcd_video_system = HD
+set osd_gps_sats_pos = 2081     # 1, 1
+set osd_home_dir_pos = 2104     # 24, 1
+set osd_home_dist_pos = 2105    # 25, 1
+set osd_tim_2_pos = 3116        # 44, 1
+set osd_nheading_pos = 2136     # 24, 2
+set osd_compass_bar_pos = 2166  # 22, 3
+set osd_disarmed_pos = 2294     # 22, 7
+set osd_ah_pos = 2233           # 25, 5
+set osd_crosshairs_pos = 2360   # 24, 9
+set osd_ah_sbar_pos = 2361      # 25, 9
+set osd_flymode_pos = 2338      # 2, 9
+set osd_altitude_pos = 3371     # 43, 9
+set osd_nvario_pos = 3404       # 44, 10
+set osd_warnings_pos = 2484     # 20, 13
+set osd_throttle_pos = 3468     # 44, 12
+set osd_gps_lat_pos = 2547      # 19, 15
+set osd_gps_speed_pos = 2562    # 2, 16
+set osd_gps_lon_pos = 2579      # 19, 16

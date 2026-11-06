@@ -1,9 +1,11 @@
-"""The quad behind ArduPilot's JSON physics backend: physics.runner's Backend for kind "quad".
+"""The quad behind its firmware's simulator protocol: physics.runner's Backend for kind "quad".
 
-QuadModel (model.py) is the vehicle and its world; JsonBridge (bridges/ardupilot_json.py) steps
-it in lockstep with ArduCopter SITL on the slot's JSON port. ArduPilot takes its RC over its own
-UDP port (firmware/ardupilot.py), so `rc` here does nothing. The plant is built and jitted
-before the bridge listens, so the first frame is not kept waiting.
+QuadModel (model.py) is the vehicle and its world. Under ArduCopter, JsonBridge
+(bridges/ardupilot_json.py) steps it in lockstep with SITL on the slot's JSON port; under
+Betaflight, BetaflightBridge (bridges/betaflight.py) steps it in real time and Betaflight
+follows. Both firmwares take their RC over their own UDP ports (firmware/ardupilot.py,
+firmware/betaflight.py), so `rc` here does nothing. The plant is built and jitted before the
+bridge listens, so the first frame is not kept waiting.
 """
 
 import logging
@@ -12,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from drone_duels.bridges.ardupilot_json import JsonBridge
+from drone_duels.bridges.betaflight import BetaflightBridge
 from drone_duels.physics.quad.model import QuadModel
 from drone_duels.physics.quad.plant import Plant, airframe
 from drone_duels.ports import SlotPorts
@@ -27,16 +30,25 @@ class QuadBackend:
         origin: tuple[float, float, float],
         heading_deg: float,
         wind: dict[str, Any],
+        firmware: str = "ardupilot-copter",
     ) -> None:
         frame = airframe(airframe_name)
         plant = Plant(frame)
         plant.warm()
         self.model = QuadModel(frame, origin, heading_deg, wind, plant=plant)
         self.model.esc.command(np.zeros(4), 25.2)  # jit the ESC map too
-        self.bridge = JsonBridge(self.model, slot_ports.ardupilot_json)
+        self.bridge: JsonBridge | BetaflightBridge
+        if firmware == "betaflight":
+            self.bridge = BetaflightBridge(
+                self.model, slot_ports.betaflight_pwm_raw, slot_ports.betaflight_state, origin
+            )
+            link = f"Betaflight's motors on UDP {slot_ports.betaflight_pwm_raw}"
+        else:
+            self.bridge = JsonBridge(self.model, slot_ports.ardupilot_json)
+            link = f"JSON on UDP {slot_ports.ardupilot_json}"
         log.info(
-            "quad %s at %.6f, %.6f, %.1f m, heading %.0f; JSON on UDP %d",
-            airframe_name, *origin, heading_deg, slot_ports.ardupilot_json,
+            "quad %s at %.6f, %.6f, %.1f m, heading %.0f; %s",
+            airframe_name, *origin, heading_deg, link,
         )
 
     def start(self) -> None:
@@ -55,7 +67,7 @@ class QuadBackend:
         return self.model.pose()
 
     def rc(self, us: list[int] | None) -> None:
-        pass  # ArduPilot reads its RC on its own UDP port
+        pass  # the firmware reads its RC on its own UDP port
 
     def ground(self, lat: float, lon: float, alt: float) -> None:
         self.model.set_ground(alt)

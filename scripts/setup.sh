@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-time setup: the Python env, ArduPilot and INAV SITL, mavlink-router, bun and the page.
+# One-time setup: the Python env, ArduPilot, INAV and Betaflight SITL, mavlink-router, bun and the
+# page.
 # QGroundControl is optional (WITH_QGC=1); nothing in the stack needs it.
 # Everything lands in external/ (git-ignored). Re-running skips finished steps.
 set -euo pipefail
@@ -90,6 +91,23 @@ if [ ! -x "$EXT/inav/inav_SITL" ]; then
     chmod +x "$EXT/inav/inav_SITL"
     rm -f "$zip"
 fi
+# Betaflight SITL, the Betaflight 5" quad's firmware (drone_duels.firmware.betaflight): built from
+# source (gcc and make), with scripts/betaflight-sitl.patch (its ports as arguments, the OSD).
+# Submodules are fetched first, one at a time: the build's own fetching runs them in parallel,
+# and they race on .git/config.
+BF_TAG="${BF_TAG:-2026.6.2}"
+BF="$EXT/betaflight"
+if [ ! -d "$BF/.git" ]; then
+    git clone --branch "$BF_TAG" --depth 1 https://github.com/betaflight/betaflight.git "$BF"
+    git -C "$BF" submodule update --init --depth 1
+fi
+if ! grep -q tcpBasePort "$BF/src/main/drivers/serial_tcp.c"; then
+    git -C "$BF" apply "$ROOT/scripts/betaflight-sitl.patch"
+fi
+if [ ! -x "$BF/obj/main/betaflight_SITL.elf" ]; then
+    make -C "$BF" TARGET=SITL -j"$(nproc)"
+fi
+
 # The quad's and truck's models are committed (web/public/models/, built by tools/models/).
 
 echo "setup complete"

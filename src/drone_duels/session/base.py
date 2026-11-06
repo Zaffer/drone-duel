@@ -128,6 +128,8 @@ class PhysicsProcess:
             f"{ctx.pad.heading_deg:.1f}",
             "--wind",
             ctx.wind.model_dump_json(),
+            "--firmware",
+            ctx.vehicle.firmware.kind,
         ]
         ctx.workdir.mkdir(parents=True, exist_ok=True)
         out = (ctx.workdir / "physics.log").open("ab")

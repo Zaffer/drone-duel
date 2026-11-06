@@ -1,0 +1,148 @@
+drone-duels' changes to Betaflight's SITL (scripts/setup.sh applies them; drone_duels.firmware.betaflight).
+
+- Its ports are arguments: --simport (the simulator's four UDP ports, from 9001) and --tcpbaseport
+  (UARTn on TCP base + n, from 5760). Its own are ArduPilot's (5760, 9002), and every slot needs
+  its own (drone_duels.ports).
+- It listens on 127.0.0.1 only: its RC port would take sticks from the network.
+- The OSD, sent over MSP DisplayPort as to a DJI air unit: stock SITL builds without one.
+- State arriving before its virtual sensors exist is dropped: it crashed SITL as it booted.
+
+diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
+index a922cc7..c20cc99 100644
+--- a/src/main/drivers/serial_tcp.c
++++ b/src/main/drivers/serial_tcp.c
+@@ -38,7 +38,9 @@
+ #include "io/serial.h"
+ #include "serial_tcp.h"
+ 
+-#define BASE_PORT 5760
++// drone-duels: the base port is an argument (--tcpbaseport), so several SITLs can run.
++uint16_t tcpBasePort = 5760;
++#define BASE_PORT tcpBasePort
+ 
+ static const struct serialPortVTable tcpVTable; // Forward
+ static tcpPort_t tcpSerialPorts[SERIAL_PORT_COUNT];
+@@ -116,7 +118,7 @@ static tcpPort_t* tcpReconfigure(tcpPort_t *s, int id)
+     dyad_setNoDelay(s->serv, 1);
+     dyad_addListener(s->serv, DYAD_EVENT_ACCEPT, onAccept, s);
+ 
+-    if (dyad_listenEx(s->serv, NULL, BASE_PORT + id + 1, 10) == 0) {
++    if (dyad_listenEx(s->serv, "127.0.0.1", BASE_PORT + id + 1, 10) == 0) {
+         fprintf(stderr, "bind port %u for UART%u\n", (unsigned)BASE_PORT + id + 1, (unsigned)id + 1);
+     } else {
+         fprintf(stderr, "bind port %u for UART%u failed!!\n", (unsigned)BASE_PORT + id + 1, (unsigned)id + 1);
+diff --git a/src/main/drivers/serial_tcp.h b/src/main/drivers/serial_tcp.h
+index a391e10..4902306 100644
+--- a/src/main/drivers/serial_tcp.h
++++ b/src/main/drivers/serial_tcp.h
+@@ -48,6 +48,8 @@ serialPort_t *serTcpOpen(serialPortIdentifier_e id, serialReceiveCallbackPtr rxC
+ void tcpDataIn(tcpPort_t *instance, uint8_t* ch, int size);
+ void tcpDataOut(tcpPort_t *instance);
+ 
++extern uint16_t tcpBasePort;
++
+ bool tcpIsStart(void);
+ bool* tcpGetUsed(void);
+ tcpPort_t* tcpGetPool(void);
+diff --git a/src/platform/SIMULATOR/sitl.c b/src/platform/SIMULATOR/sitl.c
+index ee216ef..018de19 100644
+--- a/src/platform/SIMULATOR/sitl.c
++++ b/src/platform/SIMULATOR/sitl.c
+@@ -198,10 +198,12 @@ static void gpxTrackClose(void)
+     }
+ }
+ 
+-#define PORT_PWM_RAW    9001    // Out
+-#define PORT_PWM        9002    // Out
+-#define PORT_STATE      9003    // In
+-#define PORT_RC         9004    // In
++// drone-duels: the four simulator ports run on from a base port (--simport), 9001 by default.
++static int simPortBase = 9001;
++#define PORT_PWM_RAW    (simPortBase + 0)   // Out
++#define PORT_PWM        (simPortBase + 1)   // Out
++#define PORT_STATE      (simPortBase + 2)   // In
++#define PORT_RC         (simPortBase + 3)   // In
+ 
+ int targetParseArgs(int argc, char * argv[])
+ {
+@@ -215,6 +217,8 @@ int targetParseArgs(int argc, char * argv[])
+             printf("  --config <file>    Load CLI config file, save to EEPROM, and exit\n");
+ #endif
+             printf("  --gpx              Write GPS track to sitl_track.gpx\n");
++            printf("  --simport <port>   Raw PWM out here, PWM +1, FDM in +2, RC in +3 (default 9001)\n");
++            printf("  --tcpbaseport <port>  UARTn on TCP port + n (default 5760)\n");
+             printf("  --help, -h         Show this help message\n");
+             exit(0);
+ #ifdef CONFIG_IN_FILE
+@@ -226,6 +230,10 @@ int targetParseArgs(int argc, char * argv[])
+             simulator_ip[sizeof(simulator_ip) - 1] = '\0';
+         } else if (strcmp(argv[i], "--gpx") == 0) {
+             gpxEnabled = true;
++        } else if (strcmp(argv[i], "--simport") == 0 && i + 1 < argc) {
++            simPortBase = atoi(argv[++i]);
++        } else if (strcmp(argv[i], "--tcpbaseport") == 0 && i + 1 < argc) {
++            tcpBasePort = (uint16_t)atoi(argv[++i]);
+         } else {
+             fprintf(stderr, "[SITL] Unknown argument: %s (use --help for usage)\n", argv[i]);
+             exit(1);
+@@ -274,6 +282,12 @@ static void sendMotorUpdate(void)
+ 
+ static void updateState(const fdm_packet* pkt)
+ {
++    // drone-duels: state from a simulator already running as SITL boots would be written through
++    // the virtual sensors' devices before they exist.
++    if (!virtualAccDev || !virtualGyroDev) {
++        return;
++    }
++
+     static double last_timestamp = 0; // in seconds
+     static uint64_t last_realtime = 0; // in uS
+     static struct timespec last_ts; // last packet
+@@ -613,10 +627,10 @@ void systemInit(void)
+     ret = udpInit(&pwmRawLink, simulator_ip, PORT_PWM_RAW, false);
+     printf("[SITL] init PwmOut UDP link to RF9 %s:%d...%d\n", simulator_ip, PORT_PWM_RAW, ret);
+ 
+-    ret = udpInit(&stateLink, NULL, PORT_STATE, true);
++    ret = udpInit(&stateLink, "127.0.0.1", PORT_STATE, true);  // drone-duels: this machine only
+     printf("[SITL] start UDP server @%d...%d\n", PORT_STATE, ret);
+ 
+-    ret = udpInit(&rcLink, NULL, PORT_RC, true);
++    ret = udpInit(&rcLink, "127.0.0.1", PORT_RC, true);
+     printf("[SITL] start UDP server for RC input @%d...%d\n", PORT_RC, ret);
+ 
+     ret = pthread_create(&udpWorker, NULL, udpThread, NULL);
+diff --git a/src/platform/SIMULATOR/target/SITL/target.h b/src/platform/SIMULATOR/target/SITL/target.h
+index 69d3250..cd70fb7 100644
+--- a/src/platform/SIMULATOR/target/SITL/target.h
++++ b/src/platform/SIMULATOR/target/SITL/target.h
+@@ -99,6 +99,14 @@
+ 
+ #define USABLE_TIMER_CHANNEL_COUNT 0
+ 
++// drone-duels: the OSD, over MSP DisplayPort as to a DJI air unit (no MAX7456 here).
++#define USE_OSD
++#define USE_OSD_SD
++#define USE_OSD_HD
++#define USE_CMS
++#define USE_MSP_DISPLAYPORT
++#define USE_OSD_OVER_MSP_DISPLAYPORT
++
+ #define USE_UART1
+ #define USE_UART2
+ #define USE_UART3
+@@ -135,7 +143,6 @@
+ #undef USE_TELEMETRY_LTM
+ #undef USE_ADC
+ #undef USE_VCP
+-#undef USE_OSD
+ #undef USE_RX_PPM
+ #undef USE_RX_PWM
+ #undef USE_SERIALRX
+@@ -152,7 +159,6 @@
+ #undef USE_TELEMETRY_HOTT
+ #undef USE_TELEMETRY_SMARTPORT
+ #undef USE_RESOURCE_MGMT
+-#undef USE_CMS
+ #undef USE_TELEMETRY_CRSF
+ #undef USE_TELEMETRY_GHST
+ #undef USE_TELEMETRY_IBUS
