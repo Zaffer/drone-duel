@@ -202,10 +202,16 @@ def hover_at(session: Session, events: Recorder, h: float) -> None:
     wait_for("armed", lambda: telemetry(events).armed, 15)
     wait_for(f"{h:.0f} m up", lambda: position(session, events)[2] > h - 1.0, 40)
     print(f"\n{h:.0f} m reached {time.monotonic() - asked:.1f} s after asking")
-    time.sleep(4)
+    # Betaflight's alt hold sags a metre or two after it gets there (it trails the climb), and
+    # the pilot nudges it back: wait for it to settle rather than sample one moment of the dip.
+    def held() -> bool:
+        t = telemetry(events)
+        return abs((t.alt_rel or 0) - h) < 1.0 and abs(t.climb) < 0.5
+
+    wait_for(f"held at {h:.0f} m", held, 20)
+    print(f"held at {h:.0f} m {time.monotonic() - asked:.1f} s after asking")
     t = telemetry(events)
     assert t.mode == "POSHOLD" and t.armed
-    assert abs((t.alt_rel or 0) - h) < 1.5 and abs(t.climb) < 0.7
     north, east, height = position(session, events)
     assert abs(height - h) < 1.5  # the truth agrees
     time.sleep(3)
