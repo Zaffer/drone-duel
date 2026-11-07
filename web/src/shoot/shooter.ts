@@ -29,12 +29,13 @@
 import * as C from "cesium";
 import type { Ground } from "../engine/ground.ts";
 import { Spring } from "../engine/spring.ts";
+import { Controls, input } from "../input/actions.ts";
 import type { Weapon } from "../net/protocol.ts";
-import { paused } from "../state/app.ts";
 import { prefs, updatePrefs } from "../state/prefs.ts";
 import { bodyAxesEnu, type Quat, quatOf, rotate, type Vec3 } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
 import { type Load, loadOf, type Setting, zeroAngle } from "./ballistics.ts";
+import { type ShooterAction, shooterBindings } from "./controls.ts";
 import { gunSounds } from "./gunsounds.ts";
 import { type Effort, Hold } from "./hold.ts";
 import {
@@ -159,10 +160,8 @@ export class Shooter {
   private eyeH = EYE_M.standing;
   private eyeFrom = EYE_M.standing;
   ads = 0;
-  /** On the sight wanted: toggled, or held on the mouse or the pad. */
+  /** On the sight wanted, as a toggle (held, it is the aim button: `wantsAds`). */
   private adsWanted = false;
-  private adsMouse = false;
-  private adsPad = false;
   sight: "holo" | "irons";
   /** Rounds in the magazine, and one in the chamber. */
   mag: number;
@@ -175,11 +174,8 @@ export class Shooter {
   /** Shots fired, for the tracers' count. */
   fired = 0;
   private pending: number[] = [];
-  private keys = new Set<string>();
-  private dx = 0;
-  private dy = 0;
+  private readonly controls: Controls<ShooterAction>;
 
-  private padWas: boolean[] = [];
   private ask: Ask = { fwd: 0, side: 0, run: false, breath: false };
   private bob = 0;
   private effort: Effort = "still";
@@ -227,7 +223,6 @@ export class Shooter {
   private readonly impulse: number;
   private readonly zero: Record<"holo" | "irons", number>;
   readonly rifle: RifleModel;
-  private readonly abort = new AbortController();
   private readonly near: number;
   /** The rangefinder was pressed. */
   onLase: (() => void) | null = null;
@@ -278,7 +273,7 @@ export class Shooter {
     this.rifle = new RifleModel(world, `/${weapon.model}`, geometry);
     this.rifle.setSight(this.sight);
     this.near = (world.viewer.camera.frustum as C.PerspectiveFrustum).near;
-    this.listen();
+    this.controls = this.listen();
   }
 
   /** The recoil's momentum, N·s (for the HUD's notes). */
@@ -288,97 +283,30 @@ export class Shooter {
 
   // Input.
 
-  private listen(): void {
-    const signal = this.abort.signal;
-    const canvas = this.world.scene.canvas;
-    window.addEventListener(
-      "keydown",
-      (e) => {
-        if (paused() || (e.target as HTMLElement).tagName === "INPUT") return;
-        // Not a press of whatever button last had the focus, nor a scroll.
-        if (e.code === "Space") e.preventDefault();
-        this.keys.add(e.code);
-        if (e.repeat) return;
-        if (e.code === "KeyR") this.reload();
-        else if (e.code === "KeyC")
-          this.toStance(this.stance === "kneeling" ? "standing" : "kneeling");
-        else if (e.code === "KeyZ") this.toStance(this.stance === "prone" ? "standing" : "prone");
-        else if (e.code === "KeyF") this.onLase?.();
-        else if (e.code === "KeyI") this.switchSight();
-        else if (e.code === "Space") this.jump();
-      },
-      { signal },
-    );
-    window.addEventListener("keyup", (e) => this.keys.delete(e.code), { signal });
-    window.addEventListener("blur", () => this.keys.clear(), { signal });
-    // Pointer events, not mouse events: Cesium cancels pointerdown on its canvas, and a cancelled
-    // pointerdown takes the mouse events with it. A second button pressed while one is held comes
-    // as a pointermove with new `buttons`, so presses and releases are read from that mask.
-    let held = 0;
-    const buttons = (e: PointerEvent) => {
-      const was = held;
-      held = e.buttons;
-      if (document.pointerLockElement !== canvas || paused()) return;
-      const pressed = held & ~was;
-      const released = was & ~held;
-      if (pressed & 1) this.pull();
-      if (pressed & 2) this.aim(true);
-      if (released & 2) this.aim(false);
+  /** The controls (shoot/controls.ts), and the mouse locked to the map on a click. */
+  private listen(): Controls<ShooterAction> {
+    input.lockMouseTo(this.world.scene.canvas);
+    const next: Record<Stance, Stance> = {
+      standing: "kneeling",
+      kneeling: "prone",
+      prone: "standing",
     };
-    window.addEventListener(
-      "pointerdown",
-      (e) => {
-        if (e.target !== canvas || paused() || e.pointerType !== "mouse") return;
-        // Locked, the press is the rifle's alone: Cesium's own handler would try to capture a
-        // locked pointer, which Chrome refuses (an error every shot). Caught here, before it.
-        if (document.pointerLockElement === canvas) e.stopPropagation();
-        else {
-          // The first click takes the mouse; it does not fire. Asked once Cesium has had the
-          // press, so its pointer capture comes before the lock and not after it.
-          held = e.buttons;
-          setTimeout(() => {
-            if (signal.aborted) return;
-            void (canvas.requestPointerLock as (o?: object) => Promise<void>)
-              .call(canvas, { unadjustedMovement: true })
-              ?.catch?.(() => canvas.requestPointerLock());
-          });
-          return;
-        }
-        buttons(e);
-      },
-      { signal, capture: true },
-    );
-    window.addEventListener("pointerup", buttons, { signal });
-    window.addEventListener(
-      "pointermove",
-      (e) => {
-        if (e.buttons !== held) buttons(e);
-        if (document.pointerLockElement !== canvas || paused()) return;
-        this.dx += e.movementX;
-        this.dy += e.movementY;
-      },
-      { signal },
-    );
-    // Losing the mouse (Esc, the pause menu) lets go of the sight.
-    document.addEventListener(
-      "pointerlockchange",
-      () => {
-        if (document.pointerLockElement === canvas) return;
-        held = 0;
-        this.aim(false);
-      },
-      { signal },
-    );
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault(), { signal });
-  }
-
-  private aim(down: boolean): void {
-    if (prefs().shoot.adsHold) this.adsMouse = down;
-    else if (down) this.adsWanted = !this.adsWanted;
+    return new Controls(shooterBindings)
+      .on("fire", () => this.pull())
+      .on("aim", () => {
+        if (!prefs().shoot.adsHold) this.adsWanted = !this.adsWanted;
+      })
+      .on("reload", () => this.reload())
+      .on("kneel", () => this.toStance(this.stance === "kneeling" ? "standing" : "kneeling"))
+      .on("prone", () => this.toStance(this.stance === "prone" ? "standing" : "prone"))
+      .on("stance", () => this.toStance(next[this.stance]))
+      .on("range", () => this.onLase?.())
+      .on("sight", () => this.switchSight())
+      .on("jump", () => this.jump());
   }
 
   private get wantsAds(): boolean {
-    return prefs().shoot.adsHold ? this.adsMouse || this.adsPad : this.adsWanted;
+    return prefs().shoot.adsHold ? this.controls.held("aim") : this.adsWanted;
   }
 
   private pull(): void {
@@ -444,41 +372,6 @@ export class Shooter {
     this.recoil.stance = s;
   }
 
-  private pad(dt: number): { move: [number, number]; run: boolean; breath: boolean } {
-    const out = { move: [0, 0] as [number, number], run: false, breath: false };
-    const gp = navigator.getGamepads().find((p): p is Gamepad => !!p && p.mapping === "standard");
-    if (!gp) return out;
-    const dz = (x: number) =>
-      Math.abs(x) < 0.12 ? 0 : Math.sign(x) * ((Math.abs(x) - 0.12) / 0.88);
-    const b = (i: number) => (gp.buttons[i]?.value ?? 0) > 0.5;
-    const pressed = (i: number) => b(i) && !this.padWas[i];
-    const rate = ((prefs().shoot.padDegS * Math.PI) / 180) * this.zoomK();
-    const rx = dz(gp.axes[2] ?? 0);
-    const ry = dz(gp.axes[3] ?? 0);
-    this.heading += Math.sign(rx) * Math.abs(rx) ** 2.2 * rate * dt;
-    this.pitch -= Math.sign(ry) * Math.abs(ry) ** 2.2 * rate * dt;
-    out.move = [dz(gp.axes[0] ?? 0), -dz(gp.axes[1] ?? 0)];
-    out.run = b(10);
-    out.breath = b(5);
-    this.adsPad = b(6);
-    if (!prefs().shoot.adsHold && pressed(6)) this.adsWanted = !this.adsWanted;
-    if (pressed(7)) this.pull();
-    if (pressed(2)) this.reload();
-    if (pressed(1)) {
-      const next: Record<Stance, Stance> = {
-        standing: "kneeling",
-        kneeling: "prone",
-        prone: "standing",
-      };
-      this.toStance(next[this.stance]);
-    }
-    if (pressed(3)) this.switchSight();
-    if (pressed(4)) this.onLase?.();
-    if (pressed(0)) this.jump();
-    this.padWas = gp.buttons.map((x) => x.value > 0.5);
-    return out;
-  }
-
   /** The view's narrowing on the sight: mouse and stick turn slower with it. */
   private zoomK(): number {
     return 1 - this.ads * (1 - prefs().shoot.adsZoom);
@@ -495,14 +388,17 @@ export class Shooter {
       this.rifle.setSight(this.sight);
     }
     const headingWas = this.heading;
-    const pad = paused()
-      ? { move: [0, 0] as [number, number], run: false, breath: false }
-      : this.pad(dt);
-    // Look.
+    const c = this.controls;
+    // Look: the mouse, and the right stick (its rate, curved for fine aim near the centre).
+    const [dx, dy] = input.takeMouse();
     const k = (p.mouseMrad / 1000) * this.zoomK();
-    this.heading += this.dx * k;
-    this.pitch -= this.dy * k;
-    this.dx = this.dy = 0;
+    this.heading += dx * k;
+    this.pitch -= dy * k;
+    const rate = ((p.padDegS * Math.PI) / 180) * this.zoomK();
+    const rx = input.stick(2);
+    const ry = input.stick(3);
+    this.heading += Math.sign(rx) * Math.abs(rx) ** 2.2 * rate * dt;
+    this.pitch -= Math.sign(ry) * Math.abs(ry) ** 2.2 * rate * dt;
     if (this.stance === "prone") {
       const turn = PRONE_TURN * dt;
       this.heading = headingWas + Math.max(-turn, Math.min(turn, this.heading - headingWas));
@@ -510,16 +406,14 @@ export class Shooter {
     const [lo, hi] = PITCH[this.stance];
     this.pitch = Math.max(lo, Math.min(hi, this.pitch));
     // What they ask of the body.
-    const key = (c: string) => !paused() && this.keys.has(c);
-    let fwd = (key("KeyW") ? 1 : 0) - (key("KeyS") ? 1 : 0) + pad.move[1];
-    let side = (key("KeyD") ? 1 : 0) - (key("KeyA") ? 1 : 0) + pad.move[0];
+    let fwd = c.axis("back", "forward") - input.stick(1);
+    let side = c.axis("left", "right") + input.stick(0);
     const len = Math.hypot(fwd, side);
     if (len > 1) {
       fwd /= len;
       side /= len;
     }
-    const shift = key("ShiftLeft") || key("ShiftRight");
-    this.ask = { fwd, side, run: shift || pad.run, breath: shift || pad.breath };
+    this.ask = { fwd, side, run: c.held("sprint"), breath: c.held("breath") };
   }
 
   /** The body, `h` s on: a fixed-rate step. */
@@ -535,7 +429,7 @@ export class Shooter {
       this.ads < 0.1 &&
       this.reloading === null &&
       fwd > 0.5;
-    if (sprinting) this.adsWanted = this.adsMouse = false;
+    if (sprinting) this.adsWanted = false;
     this.sprintK = Math.max(0, Math.min(1, this.sprintK + (sprinting ? h : -h) / SPRINT_POSE_S));
     this.move(h, moving ? fwd : 0, moving ? side : 0, sprinting);
     this.groundSvc.focus("shooter", [this.e, this.n, this.feet]);
@@ -719,7 +613,7 @@ export class Shooter {
     this.vz = 0;
     this.vel = [0, 0];
     this.leaning = 0;
-    this.adsWanted = this.adsMouse = false;
+    this.adsWanted = false;
   }
 
   /** On through getting over something: the feet's path, the stoop and where the eye looks,
@@ -985,9 +879,9 @@ export class Shooter {
   }
 
   dispose(): void {
-    this.abort.abort();
+    this.controls.dispose();
+    input.lockMouseTo(null);
     this.rifle.dispose();
-    if (document.pointerLockElement) document.exitPointerLock();
     const frustum = this.world.viewer.camera.frustum as C.PerspectiveFrustum;
     frustum.near = this.near;
   }

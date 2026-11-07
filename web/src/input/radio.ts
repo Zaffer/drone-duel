@@ -13,9 +13,10 @@
 // page's own controllers.
 
 import { link } from "../net/server.ts";
-import { content, paused } from "../state/app.ts";
+import { content } from "../state/app.ts";
 import { channels, controllerName, inputSource } from "../state/input.ts";
 import { prefs } from "../state/prefs.ts";
+import { Controls, input } from "./actions.ts";
 import {
   gamepadChannels,
   type KeyState,
@@ -34,13 +35,18 @@ export interface RawController {
   source: "radio" | "gamepad" | "server";
 }
 
+/** The keyboard's switches when it flies (the Inputs tab lists them with the sticks). */
+const KEYBOARD_SWITCHES = {
+  arm: { does: "Arm or disarm (flying by the keyboard)", codes: ["Enter"] },
+  mode: { does: "The next flight mode (flying by the keyboard)", codes: ["KeyM"] },
+};
+
 class Radio extends EventTarget {
   /** The server's reading of the radio, newest, with its channels as the server maps them. */
   private server: { name: string | null; axes: number[]; channels: number[]; at: number } | null =
     null;
   /** Whether the server's radio flies (as last told to the server). */
   private serverFlies = false;
-  private keys = new Set<string>();
   private keyState: KeyState = { throttle: -1, armed: false, modePos: 0 };
   private padArm = { armed: false, modePos: 0, a: false, x: false };
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -60,14 +66,14 @@ class Radio extends EventTarget {
     link.on("radio").subscribe((m) => {
       this.server = { name: m.name, axes: m.axes, channels: m.channels, at: performance.now() };
     });
-    window.addEventListener("keydown", (e) => {
-      this.keys.add(e.code);
-      if (inputSource() !== "keyboard" || paused()) return;
-      if (e.code === "Enter") this.keyState.armed = !this.keyState.armed;
-      if (e.code === "KeyM") this.keyState.modePos = (this.keyState.modePos + 1) % 3;
-    });
-    window.addEventListener("keyup", (e) => this.keys.delete(e.code));
-    window.addEventListener("blur", () => this.keys.clear());
+    // Flying by the keyboard: its switches (the sticks are the keys held, input/mapping.ts).
+    new Controls(KEYBOARD_SWITCHES)
+      .on("arm", () => {
+        if (inputSource() === "keyboard") this.keyState.armed = !this.keyState.armed;
+      })
+      .on("mode", () => {
+        if (inputSource() === "keyboard") this.keyState.modePos = (this.keyState.modePos + 1) % 3;
+      });
     this.timer = setInterval(() => this.sample(), 1000 / RATE_HZ);
   }
 
@@ -77,7 +83,7 @@ class Radio extends EventTarget {
 
   /** The keys held now (the truck reads them too). */
   get held(): ReadonlySet<string> {
-    return this.keys;
+    return input.codes;
   }
 
   /** Every sample: the channels, -1..1 from channel 1. */
@@ -125,7 +131,7 @@ class Radio extends EventTarget {
     let out: number[];
     if (this.keyboard || !raw) {
       // The keyboard: chosen in Controls, or the only controller there is.
-      out = keyboardChannels(this.keys, this.keyState, dt);
+      out = keyboardChannels(input.codes, this.keyState, dt);
       if (inputSource() !== "keyboard") inputSource("keyboard");
       if (controllerName() !== "Keyboard") controllerName("Keyboard");
     } else if (raw.source === "server" && this.server?.channels.length) {

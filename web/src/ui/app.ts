@@ -7,6 +7,7 @@ import { effect, signal } from "alien-signals";
 import * as C from "cesium";
 import { sounds } from "../audio/sounds.ts";
 import { Flight, type ModeRuntime } from "../flight.ts";
+import { Controls } from "../input/actions.ts";
 import { radio } from "../input/radio.ts";
 import { MODES, modePicks, modePlaces } from "../modes/registry.ts";
 import type { ModeContext, ModeDef } from "../modes/types.ts";
@@ -31,6 +32,7 @@ import type { World } from "../world/world.ts";
 import { h, render, untracked } from "./h.ts";
 import { hudSlots, mountHud } from "./hud.ts";
 import { icons } from "./icons.ts";
+import { menuBindings } from "./keys.ts";
 import { openPause } from "./pause.ts";
 
 const svg = (markup: string): HTMLElement => {
@@ -341,19 +343,20 @@ export function mountApp(root: HTMLElement, world: World): void {
       toastBox,
     );
     render(root, node);
-    const keys = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === "INPUT" || root.querySelector(".pause")) return;
-      const m = MODES[Number(e.key) - 1];
-      if (m) pickMode(m);
-      if (e.code === "KeyO") openPause(root, null, "controls");
-      if (e.key === "Escape") back();
-    };
-    window.addEventListener("keydown", keys);
+    // The menu's keys (ui/keys.ts); not while the options are open over it.
+    const free = () => !root.querySelector(".pause");
+    const keys = new Controls(menuBindings(MODES.map((m) => m.name)))
+      .on("mode", (code) => {
+        const m = MODES[Number(code.slice(5)) - 1];
+        if (m && free()) pickMode(m);
+      })
+      .on("options", () => free() && openPause(root, null, "controls"))
+      .on("back", () => free() && back());
     teardown = () => {
       chips.dispose();
       exit.dispose();
       disposeToasts();
-      window.removeEventListener("keydown", keys);
+      keys.dispose();
       closeLobby();
     };
     const current = MODES.find((m) => m.id === mode());

@@ -20,7 +20,9 @@
 // wing goes far), the wing at the true pose's place with its body axes from the pose's attitude.
 
 import * as C from "cesium";
+import { Controls } from "../input/actions.ts";
 import type { Pose } from "../net/server.ts";
+import { overlayBindings } from "../ui/keys.ts";
 import { bodyAxesEnu, toFixed } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
 import "./dynamics.css";
@@ -475,7 +477,7 @@ export class DynamicsOverlay {
   private stripRows: { name: HTMLElement; cells: HTMLElement[] }[] = [];
   private span!: HTMLCanvasElement;
   private hist!: HTMLCanvasElement;
-  private readonly onKey = (e: KeyboardEvent): void => this.key(e);
+  private readonly controls: Controls<"layer" | "bigger" | "smaller">;
 
   constructor(
     private readonly world: World,
@@ -536,7 +538,7 @@ export class DynamicsOverlay {
     }
     this.buildNumbers();
     this.buildLegend();
-    window.addEventListener("keydown", this.onKey, { capture: true });
+    this.controls = this.keys();
   }
 
   /** Its primitives. */
@@ -581,28 +583,19 @@ export class DynamicsOverlay {
   }
 
   dispose(): void {
-    window.removeEventListener("keydown", this.onKey, { capture: true });
+    this.controls.dispose();
     for (const p of this.all) this.world.remove(p);
     for (const panel of [this.numbersEl, this.historyEl, this.legendEl]) panel.remove();
   }
 
   // -- controls --------------------------------------------------------------------------------
 
-  private key(e: KeyboardEvent): void {
-    if (!this.on || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-    const target = e.target as HTMLElement | null;
-    if (target?.closest("input, select, textarea")) return;
-    const digit = /^Digit([1-5])$/.exec(e.code);
-    if (digit && e.shiftKey) {
-      this.toggleLayer(Number(digit[1]) - 1);
-    } else if (e.code === "BracketLeft" || e.code === "BracketRight") {
-      this.resize(e.code === "BracketRight");
-    } else {
-      return;
-    }
-    // Ours: Shift+digit is not the view keys' digit.
-    e.preventDefault();
-    e.stopPropagation();
+  /** Its keys (ui/keys.ts), while it is on. */
+  private keys(): Controls<"layer" | "bigger" | "smaller"> {
+    return new Controls(overlayBindings(LAYERS.map((l) => l.name)))
+      .on("layer", (code) => this.on && this.toggleLayer(Number(code.slice(5)) - 1))
+      .on("bigger", () => this.on && this.resize(true))
+      .on("smaller", () => this.on && this.resize(false));
   }
 
   /** Layer `i` (0-4) on the wing shown or not. */

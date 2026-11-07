@@ -8,6 +8,7 @@ import { effect } from "alien-signals";
 import { type Flight, sendWind } from "../flight.ts";
 import { mountDials } from "../hud/dials.ts";
 import { mountPerf } from "../hud/perf.ts";
+import { Controls } from "../input/actions.ts";
 import { link } from "../net/server.ts";
 import {
   dynamicsOn,
@@ -27,6 +28,7 @@ import { phase, status, telemetry } from "../state/session.ts";
 import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { h } from "./h.ts";
 import { flightKeys, shooterKeys } from "./inputs.ts";
+import { flightBindings, footBindings } from "./keys.ts";
 import { openPause } from "./pause.ts";
 
 const MODE_NAMES = {
@@ -146,34 +148,30 @@ export function mountHud(
     keysHelp.classList.toggle("faded", performance.now() - lastActivity > 6000);
   }, 250);
 
-  const keys = (e: KeyboardEvent) => {
-    if (e.repeat || paused() || (e.target as HTMLElement).tagName === "INPUT") {
-      if (e.key === "Escape" && paused()) paused(false);
-      return;
-    }
-    wake();
-    const n = Number(e.key);
-    if (onFoot) {
-      if (e.key === "Escape") pause();
-      else if (e.code === "KeyH") keysHelp.classList.toggle("faded");
-      else if (e.code === "KeyG") sendWind(true);
-      else if (e.code === "KeyP") perfPanel.toggle();
-      return;
-    }
-    if (e.key === "Escape") pause();
-    else if (e.code === "KeyV") cycleView(e.shiftKey ? -1 : 1);
-    else if (n >= 1 && n <= VIEW_ORDER.length && !e.shiftKey) view(VIEW_ORDER[n - 1]!);
-    else if (e.code === "KeyR" && vehicle()?.kind !== "ground") flight.reset();
-    else if (e.code === "KeyB") pause("vehicle");
-    else if (e.code === "KeyT") flight.throw();
-    else if (e.code === "KeyD" && vehicle()?.kind !== "ground") dynamicsOn(!dynamicsOn());
-    else if (e.code === "KeyN")
-      updatePrefs((p) => ({ ...p, hud: { ...p.hud, minimap: !p.hud.minimap } }));
-    else if (e.code === "KeyH") keysHelp.classList.toggle("faded");
-    else if (e.code === "KeyG") sendWind(true);
-    else if (e.code === "KeyP") perfPanel.toggle();
-  };
-  window.addEventListener("keydown", keys);
+  // The keys (ui/keys.ts): on foot, the few that still mean something; Esc resumes from paused.
+  const toggleHelp = () => keysHelp.classList.toggle("faded");
+  const controls = onFoot
+    ? new Controls(footBindings())
+        .on("menu", () => pause())
+        .on("help", toggleHelp)
+        .on("gust", () => sendWind(true))
+        .on("perf", () => perfPanel.toggle())
+    : new Controls(flightBindings(VIEW_ORDER.map((v) => VIEW_NAMES[v])))
+        .on("menu", () => pause())
+        .on("nextView", () => cycleView(1))
+        .on("lastView", () => cycleView(-1))
+        .on("view", (code) => view(VIEW_ORDER[Number(code.slice(5)) - 1]!))
+        .on("reset", () => vehicle()?.kind !== "ground" && flight.reset())
+        .on("vehicle", () => pause("vehicle"))
+        .on("throw", () => flight.throw())
+        .on("dynamics", () => vehicle()?.kind !== "ground" && dynamicsOn(!dynamicsOn()))
+        .on("minimap", () =>
+          updatePrefs((p) => ({ ...p, hud: { ...p.hud, minimap: !p.hud.minimap } })),
+        )
+        .on("help", toggleHelp)
+        .on("gust", () => sendWind(true))
+        .on("perf", () => perfPanel.toggle());
+  window.addEventListener("keydown", wake);
 
   const disposers = [
     effect(() => {
@@ -278,7 +276,8 @@ export function mountHud(
     perfPanel.dispose();
     for (const d of disposers) d();
     clearInterval(fadeTimer);
-    window.removeEventListener("keydown", keys);
+    controls.dispose();
+    window.removeEventListener("keydown", wake);
     window.removeEventListener("mousemove", wake);
     clearHud();
     link.send({ ch: "dynamics", on: false });

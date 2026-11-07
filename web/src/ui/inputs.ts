@@ -1,14 +1,18 @@
 // The Inputs tab (Options): every key, and how to fly or drive each vehicle on a radio, a
-// gamepad or the keyboard. It says what the code that reads them does: ui/app.ts (the menu's
-// keys), ui/hud.ts (flight's), dynamics/overlay.ts, input/mapping.ts and input/radio.ts (the
-// aircraft's sticks) and vehicles/truck/controls.ts (the truck's). Change one, change this.
+// gamepad or the keyboard. The hotkeys are drawn from the very tables the code mounts
+// (ui/keys.ts, shoot/controls.ts: input/actions.ts). The sticks' rows say what input/mapping.ts
+// and input/radio.ts (the aircraft) and vehicles/truck/controls.ts (the truck) do: change one,
+// change this.
 
 import { LAYERS } from "../dynamics/overlay.ts";
+import { hotkeys } from "../input/actions.ts";
 import { MODES } from "../modes/registry.ts";
 import type { Vehicle } from "../net/protocol.ts";
+import { shooterAxes, shooterBindings } from "../shoot/controls.ts";
 import { content } from "../state/app.ts";
 import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { h } from "./h.ts";
+import { flightBindings, footBindings, menuBindings, overlayBindings } from "./keys.ts";
 
 /** A hotkey: the keys that do it (any one), what it does, and its word on the HUD's key strip. */
 export interface Hotkey {
@@ -17,75 +21,22 @@ export interface Hotkey {
   strip?: string;
 }
 
-export const menuKeys = (): Hotkey[] => [
-  {
-    keys: MODES.map((_, i) => String(i + 1)),
-    does: `Pick a mode: ${MODES.map((m, i) => `${i + 1} ${m.name}`).join(", ")}`,
-  },
-  { keys: ["O"], does: "Options, on the Controls tab" },
-  { keys: ["Esc"], does: "Back out of the chosen mode" },
-];
+// Each list is the table the code mounts (ui/keys.ts, shoot/controls.ts), as shown.
+
+export const menuKeys = (): Hotkey[] => hotkeys(menuBindings(MODES.map((m) => m.name)));
 
 /** In flight, in the HUD's order; those with `strip` are on its key strip too. */
-export const flightKeys = (): Hotkey[] => [
-  { keys: ["Esc"], does: "Pause menu (Esc again resumes)", strip: "menu" },
-  { keys: ["V", "Shift+V"], does: "Next / previous view", strip: "view" },
-  {
-    keys: [`1–${VIEW_ORDER.length}`],
-    does: `Jump to a view: ${VIEW_ORDER.map((v, i) => `${i + 1} ${VIEW_NAMES[v]}`).join(", ")}`,
-  },
-  { keys: ["R"], does: "Reset to the start (the truck: back on its wheels)", strip: "reset" },
-  { keys: ["B"], does: "Switch vehicle (the pause menu's Vehicle tab)", strip: "vehicle" },
-  { keys: ["T"], does: "Throw a hand-launched wing", strip: "throw" },
-  {
-    keys: ["D"],
-    does: "The dynamics overlay, on or off (aircraft that have it)",
-    strip: "dynamics",
-  },
-  { keys: ["N"], does: "The minimap, on or off", strip: "minimap" },
-  { keys: ["H"], does: "The key strip, shown or hidden", strip: "help" },
-  { keys: ["G"], does: "A gust now, as the Wind tab sets it" },
-  {
-    keys: ["P"],
-    does: "The performance panel: frame rate, frame time, how far the pose is carried on, where the sticks come from",
-  },
-];
+export const flightKeys = (): Hotkey[] =>
+  hotkeys(flightBindings(VIEW_ORDER.map((v) => VIEW_NAMES[v])));
 
-/** Shoot Down's keys (shoot/shooter.ts). */
+/** Shoot Down's: the shooter's, then the few of flight's that still mean something. */
 export const shooterKeys = (): Hotkey[] => [
-  { keys: ["Click"], does: "Take the mouse (Esc gives it back)" },
-  { keys: ["Mouse", "Right stick"], does: "Look and aim" },
-  {
-    keys: ["Right button", "LT"],
-    does: "On the sight (held, or a toggle: the Rifle tab)",
-    strip: "aim",
-  },
-  { keys: ["Left button", "RT"], does: "Fire: one press a shot", strip: "fire" },
-  { keys: ["R", "X"], does: "Reload", strip: "reload" },
-  {
-    keys: ["W A S D", "Left stick"],
-    does: "Walk; on into a low wall vaults it, leaning into a bush pushes through",
-  },
-  { keys: ["Shift", "L3"], does: "With forward: sprint (the rifle comes down)", strip: "sprint" },
-  { keys: ["Space", "A"], does: "Jump; at a wall, vault or climb it", strip: "jump · climb" },
-  { keys: ["Shift", "RB"], does: "On the sight: hold your breath", strip: "breath" },
-  { keys: ["C"], does: "Kneel or stand", strip: "kneel" },
-  { keys: ["Z"], does: "Prone or stand", strip: "prone" },
-  { keys: ["B (pad)"], does: "Standing, kneeling, prone in turn" },
-  { keys: ["F", "LB"], does: "The rangefinder: the range to what the sight is on", strip: "range" },
-  { keys: ["I", "Y"], does: "Holo or iron sights", strip: "sight" },
-  { keys: ["G"], does: "A gust now, as the Wind tab sets it" },
-  { keys: ["H"], does: "The key strip, shown or hidden" },
-  { keys: ["Esc"], does: "Pause menu", strip: "menu" },
+  ...shooterAxes,
+  ...hotkeys(shooterBindings),
+  ...hotkeys(footBindings()),
 ];
 
-const overlayKeys = (): Hotkey[] => [
-  {
-    keys: [`Shift+1–${LAYERS.length}`],
-    does: `A layer on or off: ${LAYERS.map((l, i) => `${i + 1} ${l.name}`).join(", ")}`,
-  },
-  { keys: ["]", "["], does: "Arrows 1.5× bigger / smaller" },
-];
+const overlayKeys = (): Hotkey[] => hotkeys(overlayBindings(LAYERS.map((l) => l.name)));
 
 /** What each flight mode name does, for the mode switch's row. */
 const MODE_NOTES: Record<string, string> = {
