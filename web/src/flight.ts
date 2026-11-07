@@ -10,6 +10,7 @@ import { effect, signal } from "alien-signals";
 import { rotorNorm, truckEngine } from "./audio/levels.ts";
 import { sounds } from "./audio/sounds.ts";
 import { DynamicsOverlay } from "./dynamics/overlay.ts";
+import { loop } from "./engine/loop.ts";
 import { Minimap } from "./hud/minimap.ts";
 import { perf } from "./hud/perf.ts";
 import { toFirmware } from "./input/mapping.ts";
@@ -30,7 +31,7 @@ import {
 import { inputSource } from "./state/input.ts";
 import { prefs, type ViewId } from "./state/prefs.ts";
 import { phase, sessionStarting, status } from "./state/session.ts";
-import { every, frames } from "./streams/time.ts";
+import { every } from "./streams/time.ts";
 import { makeBody } from "./vehicles/make.ts";
 import { truckControls } from "./vehicles/truck/controls.ts";
 import { Truck } from "./vehicles/truck/truck.ts";
@@ -92,7 +93,7 @@ export class Flight {
     const signal = this.abort.signal;
     world.mouseCamera = false;
 
-    frames().subscribe((now) => this.frame(now), { signal });
+    loop.each("flight", "place", (now) => this.frame(now), signal);
     radio.samples().subscribe((ch) => this.sticks(ch), { signal });
     every(GROUND_MS).subscribe(() => void this.reportGround(), { signal });
     let dynamicsData: Record<string, unknown> | null = null;

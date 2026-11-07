@@ -5,8 +5,8 @@
 
 import * as C from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
+import { loop } from "../engine/loop.ts";
 import type { MapKeys } from "../net/protocol.ts";
-import { drawEachFrame } from "../streams/time.ts";
 import { BACKSTOP_M, BACKSTOP_SSE, backstopTerrain } from "./backstop.ts";
 
 const ESRI_IMAGERY =
@@ -75,13 +75,13 @@ export class World {
       useDefaultRenderLoop: false,
     });
     const viewer = this.viewer;
-    drawEachFrame(() => {
+    loop.draw(() => {
       try {
         viewer.resize();
         viewer.render();
       } catch (err) {
         // As Cesium's own loop does: say so and stop, rather than throw every frame.
-        drawEachFrame(null);
+        loop.draw(null);
         console.error("rendering stopped", err);
         viewer.cesiumWidget.showErrorPanel("Rendering has stopped.", undefined, String(err));
       }

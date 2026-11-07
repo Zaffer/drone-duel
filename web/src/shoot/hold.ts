@@ -12,6 +12,7 @@
 // some 4–8 MOA standing, 2–4 kneeling, under 1 prone, unsupported, at rest), and breathing and
 // heart rates from physiology's round numbers.
 
+import { Spring } from "../engine/spring.ts";
 import type { Stance } from "./recoil.ts";
 
 /** rad per MOA. */
@@ -84,8 +85,8 @@ export class Hold {
   private phase = 0.3;
   private breathAmp = 1;
   private beat = 0;
-  private pulseV = 0;
-  private pulseX = 0;
+  /** The heart's nudge, rung down quickly. */
+  private pulse = new Spring(4, 0.6);
   private recover = 0;
   private wx = new Wander(WANDER_S);
   private wy = new Wander(WANDER_S);
@@ -155,24 +156,16 @@ export class Hold {
     this.beat += (this.heart / 60) * dt;
     if (this.beat >= 1) {
       this.beat -= 1;
-      this.pulseV += spec.pulse * 40 * (this.heart / HR_REST);
+      this.pulse.v += spec.pulse * 40 * (this.heart / HR_REST);
     }
-    // In small steps: stepped a frame at a time this 4 Hz spring grows instead of settling once
-    // a frame is over 2/ω (about 50 ms at its damping), and the aim with it.
-    const w = 2 * Math.PI * 4;
-    const n = Math.max(1, Math.ceil(dt / 0.004));
-    const h = dt / n;
-    for (let i = 0; i < n; i++) {
-      this.pulseV += (-w * w * this.pulseX - 2 * 0.6 * w * this.pulseV) * h;
-      this.pulseX += this.pulseV * h;
-    }
+    this.pulse.step(dt);
 
     // The trigger's jerk fades over a few tenths.
     const jf = Math.exp(-dt / 0.15);
     this.jerk = [this.jerk[0] * jf, this.jerk[1] * jf];
 
     this.yaw = wobbleX + this.jerk[0];
-    this.pitch = wobbleY + breath + this.pulseX + this.jerk[1];
+    this.pitch = wobbleY + breath + this.pulse.x + this.jerk[1];
   }
 
   /** The shot breaks: jerk the aim (before the bullet leaves). */

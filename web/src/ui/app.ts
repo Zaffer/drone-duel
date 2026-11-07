@@ -59,7 +59,7 @@ export function mountApp(root: HTMLElement, world: World): void {
   let chosenPlace: string | null = null;
   radio.start();
   // The channels for the UI (the Controls tab's bars, the HUD), in the menus as in flight.
-  frames().subscribe(() => radio.publish());
+  frames("radio to the UI", "input").subscribe(() => radio.publish());
   window.addEventListener("pointerdown", () => sounds.unlock(), { once: true });
   window.addEventListener("keydown", () => sounds.unlock(), { once: true });
 
@@ -71,7 +71,7 @@ export function mountApp(root: HTMLElement, world: World): void {
     let last = 0;
     let target: C.Cartesian3 | null = null;
     let at = "";
-    frames().subscribe(
+    frames("menu orbit").subscribe(
       (now) => {
         const loc = location() ?? Object.values(content()?.locations ?? {})[0];
         if (!loc) return;

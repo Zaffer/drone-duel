@@ -17,6 +17,8 @@
 // left each shot. Masses, levers and stiffnesses are EST (anthropometric round numbers; tuned
 // only so the times to settle are a shooter's, a few tenths of a second).
 
+import { Spring } from "../engine/spring.ts";
+
 export type Stance = "standing" | "kneeling" | "prone";
 
 /** Hatcher's: rifle powder gas leaves at about this times the bullet's speed. */
@@ -101,23 +103,6 @@ const ZETA = 0.75;
 /** How long a shot's leftover aim error takes to fade, s (EST). */
 const RESIDUAL_FADE_S = 3;
 
-/** A damped spring's state: where, how fast. */
-class Mode {
-  x = 0;
-  v = 0;
-  target = 0;
-  constructor(
-    public hz: number,
-    public zeta: number,
-  ) {}
-  step(dt: number, force = 0): void {
-    const w = 2 * Math.PI * this.hz;
-    const a = -w * w * (this.x - this.target) - 2 * this.zeta * w * this.v + force;
-    this.v += a * dt;
-    this.x += this.v * dt;
-  }
-}
-
 function gauss(rand: () => number): number {
   const u = 1 - rand();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
@@ -125,11 +110,11 @@ function gauss(rand: () => number): number {
 
 export class Recoil {
   /** The rifle back from where it was held (into the shoulder and with it), m. */
-  private rifleBack = new Mode(POCKET_HZ, POCKET_ZETA);
-  private torsoBack = new Mode(BODIES.standing.torsoHz, ZETA);
-  private torsoPitch = new Mode(BODIES.standing.pitchHz, ZETA);
-  private riflePitch = new Mode(RIFLE_HZ, ZETA);
-  private yaw = new Mode(BODIES.standing.yawHz, ZETA);
+  private rifleBack = new Spring(POCKET_HZ, POCKET_ZETA);
+  private torsoBack = new Spring(BODIES.standing.torsoHz, ZETA);
+  private torsoPitch = new Spring(BODIES.standing.pitchHz, ZETA);
+  private riflePitch = new Spring(RIFLE_HZ, ZETA);
+  private yaw = new Spring(BODIES.standing.yawHz, ZETA);
   private body: Body = BODIES.standing;
 
   constructor(
@@ -165,16 +150,11 @@ export class Recoil {
     const fade = Math.exp(-dt / RESIDUAL_FADE_S);
     this.torsoPitch.target *= fade;
     this.yaw.target *= fade;
-    // Small steps: the pocket rings at 14 Hz.
-    const n = Math.max(1, Math.ceil(dt / 0.002));
-    const h = dt / n;
-    for (let i = 0; i < n; i++) {
-      this.rifleBack.step(h);
-      this.torsoBack.step(h);
-      this.torsoPitch.step(h);
-      this.riflePitch.step(h);
-      this.yaw.step(h);
-    }
+    this.rifleBack.step(dt);
+    this.torsoBack.step(dt);
+    this.torsoPitch.step(dt);
+    this.riflePitch.step(dt);
+    this.yaw.step(dt);
   }
 
   /** The aim's offset now: up and right, rad. */

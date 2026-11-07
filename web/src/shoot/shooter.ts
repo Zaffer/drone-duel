@@ -21,6 +21,7 @@
 //   I / Y                     holo or iron sights
 
 import * as C from "cesium";
+import { Spring } from "../engine/spring.ts";
 import type { Weapon } from "../net/protocol.ts";
 import { paused } from "../state/app.ts";
 import { prefs, updatePrefs } from "../state/prefs.ts";
@@ -182,9 +183,8 @@ export class Shooter {
   private airborne = false;
   /** Over the ground, m/s: east, north. */
   private vel: [number, number] = [0, 0];
-  /** The knees taking a landing: the eye down, m, and how fast. */
-  private dip = 0;
-  private dipV = 0;
+  /** The knees taking a landing: the eye down, m. */
+  private dip = new Spring(DIP_HZ, DIP_ZETA);
   /** 0..1, the rifle down for a sprint. */
   private sprintK = 0;
   /** Ground heights looked up around them (sim), by cell of the local frame. */
@@ -648,12 +648,7 @@ export class Shooter {
 
   /** The knees taking a landing. */
   private knees(dt: number): void {
-    const w = 2 * Math.PI * DIP_HZ;
-    const n = Math.max(1, Math.ceil(dt / 0.004));
-    for (let i = 0; i < n; i++) {
-      this.dipV += (-w * w * this.dip - 2 * DIP_ZETA * w * this.dipV) * (dt / n);
-      this.dip += this.dipV * (dt / n);
-    }
+    this.dip.step(dt);
   }
 
   /** Walking on into something: a vault after a moment (at once from a run), a push through it
@@ -824,7 +819,7 @@ export class Shooter {
     this.feet = this.ground;
     this.vz = 0;
     this.airborne = false;
-    this.dipV += Math.min(impact, 12) * DIP_PER_MS;
+    this.dip.v += Math.min(impact, 12) * DIP_PER_MS;
     if (impact > HARD_MS) {
       this.stagger = Math.min(1.2, 0.3 + 0.1 * (impact - HARD_MS));
       this.vel = [this.vel[0] * 0.3, this.vel[1] * 0.3];
@@ -991,7 +986,7 @@ export class Shooter {
     const eye: Vec3 = [
       e0 + rightH[0] * bobSide - fwdH[0] * back,
       n0 + rightH[1] * bobSide - fwdH[1] * back,
-      this.feet - this.rounds.origin.alt + this.eyeH + bobUp - this.dip - this.stoop,
+      this.feet - this.rounds.origin.alt + this.eyeH + bobUp - this.dip.x - this.stoop,
     ];
     // The rifle: its eye point (holo or irons) at the eye on the sight, lower and ahead head up,
     // and back into the shoulder by the recoil.

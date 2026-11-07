@@ -1,8 +1,10 @@
-// The performance panel (P; DESIGN.md §3.1): the frame rate, the frame time, how far past the
+// The performance panel (P; DESIGN.md §3.1, §3.2): the frame rate, the frame time, the dearest
+// systems in the frame loop (engine/loop.ts) and the costs metered inside them, how far past the
 // newest pose the vehicle is drawn (carried on along its velocity), and where the sticks come
 // from. `perf` records every frame whether the panel shows or not, so a test can read it
 // (window.duels.perf).
 
+import { loop, type SystemStats } from "../engine/loop.ts";
 import { inputSource } from "../state/input.ts";
 import "./hud.css";
 
@@ -25,6 +27,8 @@ export interface PerfStats {
   aheadP50: number;
   aheadP95: number;
   sticks: string;
+  /** Every system and metered cost, dearest first (engine/loop.ts). */
+  systems: SystemStats[];
 }
 
 const quantile = (xs: number[], q: number): number =>
@@ -40,10 +44,10 @@ class Perf {
   }
 
   stats(): PerfStats {
-    const f = this.frames;
-    const gaps = f.slice(1).map((x, i) => x.at - f[i]!.at);
-    const span = f.length > 1 ? f[f.length - 1]!.at - f[0]!.at : 0;
-    const ahead = f.map((x) => x.ahead);
+    const f = loop.frames;
+    const gaps = f.slice(1).map((x, i) => x - f[i]!);
+    const span = f.length > 1 ? f[f.length - 1]! - f[0]! : 0;
+    const ahead = this.frames.map((x) => x.ahead);
     return {
       fps: span ? ((f.length - 1) * 1000) / span : 0,
       frameP50: quantile(gaps, 0.5),
@@ -51,6 +55,7 @@ class Perf {
       aheadP50: quantile(ahead, 0.5),
       aheadP95: quantile(ahead, 0.95),
       sticks: SOURCES[inputSource()],
+      systems: loop.stats(),
     };
   }
 }
@@ -69,6 +74,14 @@ export function mountPerf(el: HTMLElement): { toggle(): void; dispose(): void } 
       `frame ${s.frameP50.toFixed(0)} ms, 95% ${s.frameP95.toFixed(0)} ms`,
       `pose carried on ${s.aheadP50.toFixed(0)} ms, 95% ${s.aheadP95.toFixed(0)} ms`,
       `sticks: ${s.sticks}`,
+      "ms a frame, median / 95%:",
+      ...s.systems
+        .filter((x) => x.p95 >= 0.05)
+        .slice(0, 8)
+        .map(
+          (x) =>
+            `  ${x.name} ${x.p50.toFixed(1)} / ${x.p95.toFixed(1)}${x.dropped ? ` (dropped ${(x.dropped * 1000).toFixed(0)} ms)` : ""}`,
+        ),
     ].join("\n");
   }, 250);
   return {
