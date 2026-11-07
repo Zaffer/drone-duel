@@ -1,13 +1,16 @@
 """The page's frame time, played for real (DESIGN.md §3.2, §14): headless Chrome on the GPU at
 the user's window size, uncapped, through Shoot Down (walk, sprint, a quick string of shots) and
-the truck in Free Fly (drive). Each step's frames and the frame loop's dearest systems are
-printed, and a frame over budget fails it.
+the truck in Free Fly (drive). Each step's frames, the frame loop's dearest systems and the
+longest frame's make-up (Chrome's long-animation-frame record: which scripts, how long the
+render) are printed, and a frame over budget fails it.
 
-    uvx --with playwright python scripts/perf.py [shoot] [truck]
+    uvx --with playwright python scripts/perf.py [shoot] [truck] [--map free|google]
 
-Run by `scripts/check.sh --perf`. It serves the built page on port 8600 itself (Google's tiles
-answer only there; they cost money, so this is not in the ordinary checks) and stops it after.
-Shoot Down starts ArduCopter SITL: about a minute before the drone is up.
+The map: `free` (the default), Esri's imagery and terrain, no key, served on port 8610 with
+vehicle slot 6, so it runs beside the game; `google`, Google's 3D tiles, which answer only on
+port 8600 and cost money. Run by `scripts/check.sh --perf` (both). It serves the built page
+itself and stops it after. Shoot Down starts ArduCopter SITL: about a minute before the drone
+is up.
 """
 
 import json
@@ -21,16 +24,40 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-URL = "http://localhost:8600/"
+MAPS = {"free": (8610, 6), "google": (8600, 0)}
+URL = "http://localhost:8610/"
 W, H = 3440, 1400
 # Budgets, ms: the 95th percentile frame, the longest, and any one system's 95th percentile
 # (Cesium's own render is the frame's floor and is held only by the frame budgets).
 BUDGET = {"p95": 40.0, "max": 250.0, "system_p95": 6.0}
 NOT_SYSTEMS = {"cesium render"}
 
-LOG = """() => { window.__frames = []; let last = performance.now();
+LOG = """() => { window.__frames = []; window.__loaf = []; let last = performance.now();
   const tick = (t) => { window.__frames.push(t - last); last = t; requestAnimationFrame(tick); };
   requestAnimationFrame(tick); }"""
+
+# Chrome's record of each long animation frame (over 50 ms): when its scripts ran and what
+# called them, and when it rendered. From page load, so the first click's is caught.
+LOAF = """
+window.__loaf = [];
+new PerformanceObserver((list) => {
+  for (const e of list.getEntries()) {
+    window.__loaf.push({
+      at: Math.round(e.startTime),
+      ms: Math.round(e.duration),
+      block: Math.round(e.blockingDuration),
+      render: Math.round(e.renderStart ? e.startTime + e.duration - e.renderStart : 0),
+      style: Math.round(
+        e.styleAndLayoutStart ? e.startTime + e.duration - e.styleAndLayoutStart : 0),
+      scripts: e.scripts.map((x) => ({
+        ms: Math.round(x.duration),
+        what: `${x.invokerType} ${x.invoker} ${x.sourceFunctionName || ""}`.trim(),
+        where: `${(x.sourceURL || "").split("/").pop()}:${x.sourceCharPosition}`,
+      })).sort((a, b) => b.ms - a.ms).slice(0, 4),
+    });
+  }
+}).observe({ type: "long-animation-frame", buffered: true });
+"""
 
 
 def step(page: Page, label: str, fails: list[str]) -> None:
@@ -52,6 +79,15 @@ def step(page: Page, label: str, fails: list[str]) -> None:
         + (f" | longest: {worst['name']} {worst['max']:.0f}" if worst else ""),
         flush=True,
     )
+    loaf = page.evaluate("() => { const l = window.__loaf; window.__loaf = []; return l; }")
+    if loaf:
+        f = max(loaf, key=lambda x: x["ms"])
+        scripts = "; ".join(f"{x['what']} {x['where']} {x['ms']}" for x in f["scripts"])
+        print(
+            f"  longest frame {f['ms']} ms: render {f['render']} ms (style/layout {f['style']}),"
+            f" scripts: {scripts or 'none'}",
+            flush=True,
+        )
     if p95 > BUDGET["p95"]:
         fails.append(f"{label}: frame p95 {p95:.1f} ms > {BUDGET['p95']}")
     if most > BUDGET["max"]:
@@ -185,17 +221,29 @@ def served() -> bool:
 
 
 def main() -> int:
-    picked = [a for a in sys.argv[1:] if a in SCENARIOS] or list(SCENARIOS)
-    if served():
-        print("port 8600 is taken: stop the game first", file=sys.stderr)
+    global URL
+    args = sys.argv[1:]
+    which = args[args.index("--map") + 1] if "--map" in args else "free"
+    if which not in MAPS:
+        print(f"--map: one of {', '.join(MAPS)}", file=sys.stderr)
         return 2
-    log = open(ROOT / "logs" / "perf-server.log", "w")  # noqa: SIM115
+    port, slot = MAPS[which]
+    URL = f"http://localhost:{port}/"
+    picked = [a for a in args if a in SCENARIOS] or list(SCENARIOS)
+    if served():
+        print(f"port {port} is taken: stop what serves it first", file=sys.stderr)
+        return 2
+    print(f"map: {which}, port {port}", flush=True)
+    env = {**os.environ, "DRONE_DUELS_PREFS": str(ROOT / "logs" / "perf-prefs.json")}
+    if which == "free":
+        env.update(GOOGLE_MAPS_API_KEY="", CESIUM_ION_TOKEN="")
+    log = open(ROOT / "logs" / f"perf-server-{which}.log", "w")  # noqa: SIM115
     server = subprocess.Popen(
-        ["uv", "run", "duels", "serve", "--no-build"],
+        ["uv", "run", "duels", "serve", "--no-build", "--port", str(port), "--slot", str(slot)],
         cwd=ROOT,
         stdout=log,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "DRONE_DUELS_PREFS": str(ROOT / "logs" / "perf-prefs.json")},
+        env=env,
     )
     fails: list[str] = []
     try:
@@ -218,6 +266,7 @@ def main() -> int:
             )
             for name in picked:
                 page = browser.new_page(viewport={"width": W, "height": H})
+                page.add_init_script(LOAF)
                 errors: list[str] = []
                 page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
                 SCENARIOS[name](page, fails)

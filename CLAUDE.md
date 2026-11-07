@@ -38,8 +38,10 @@ is TypeScript in `web/` (bun). ArduPilot, INAV and Betaflight SITL and mavlink-r
   frame and asks `engine/ground.ts` (microseconds), never Cesium's `sampleHeight`/`pickPosition`
   (a render each; only `world.ts` may, metered); everything drawn goes through `world.add`;
   springs are `engine/spring.ts`; controls are tables mounted with `input/actions.ts`. A test
-  fences these. `scripts/check.sh --perf` plays the page on the GPU and holds frames to budget
-  (serves 8600, Google's tiles cost money: run it when the frame's work changes).
+  fences these. `scripts/check.sh --perf` plays the page on the GPU and holds frames to budget,
+  on the free map and Google's tiles (8600, costs money); `uvx --with playwright python
+  scripts/perf.py --map free` is free and runs beside the game: run it when the frame's work
+  changes.
 - The page's state is alien-signals; anything over time (the WebSocket, gamepad samples, frames,
   timers, peer messages) is a native Chrome Observable (`web/src/types/observable.d.ts`).
   Chrome only. Colours come from `web/src/theme/tokens.css` ("Dusk").

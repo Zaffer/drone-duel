@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Every check, Python and the page (DESIGN.md §14). `--fast` skips the tests that start real
 # firmware (pytest -m "not sitl"); `--perf` also plays the page headless on the GPU and holds its
-# frame time to budget (scripts/perf.py: it serves on 8600, so stop the game first).
+# frame time to budget (scripts/perf.py), on the free map and on Google's tiles (served on 8600,
+# so stop the game first; they cost money).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
@@ -17,6 +18,7 @@ cd web
 "$BUN" run build
 if [ "${1:-}" = "--perf" ]; then
   cd "$ROOT"
-  uvx --with playwright python scripts/perf.py
+  uvx --with playwright python scripts/perf.py --map free
+  uvx --with playwright python scripts/perf.py --map google
 fi
 echo "all checks passed"

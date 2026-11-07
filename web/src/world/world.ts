@@ -21,6 +21,26 @@ const MODEL_CREDITS = [
 
 export type GroundSource = "google" | "ion" | "esri";
 
+// Cesium 1.145 copies a 3D tileset's statistics into two scratch objects every frame, and with
+// them, by object spread, the reference count of every texture loaded: thousands on Google's
+// tiles, twice a frame, and nothing reads the copies' counts (only the tileset's own statistics
+// keep them). The copy is left out here; everything else is copied as Cesium does.
+type Stats = { texturesReferenceCounterById: Record<string, number> };
+const TilesetStatistics = (
+  C as unknown as { Cesium3DTilesetStatistics: { clone(s: Stats, r: Stats): void } }
+).Cesium3DTilesetStatistics;
+const cloneStatistics = TilesetStatistics.clone;
+const NO_COUNTS: Record<string, number> = Object.freeze({}) as Record<string, number>;
+TilesetStatistics.clone = (statistics: Stats, result: Stats): void => {
+  const counts = statistics.texturesReferenceCounterById;
+  statistics.texturesReferenceCounterById = NO_COUNTS;
+  try {
+    cloneStatistics(statistics, result);
+  } finally {
+    statistics.texturesReferenceCounterById = counts;
+  }
+};
+
 export class World {
   readonly viewer: C.Viewer;
   readonly scene: C.Scene;
@@ -97,9 +117,15 @@ export class World {
     viewer.scene.fog.enabled = true;
     viewer.camera.frustum.near = 0.05;
     for (const credit of MODEL_CREDITS) viewer.creditDisplay.addStaticCredit(new C.Credit(credit));
-    viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(
+    // Nothing in the game is picked by a click: the Viewer's own pick-and-select on every click
+    // is a render of its own (it held the click that takes Shoot Down's mouse 240 ms, measured
+    // 2026-11-07), and its double click flies to what it picks.
+    for (const click of [
+      C.ScreenSpaceEventType.LEFT_CLICK,
       C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK,
-    );
+    ]) {
+      viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(click);
+    }
     this.googleKey = keys.google_maps_api_key ?? null;
     this.globeSource = keys.cesium_ion_token ? "ion" : "esri";
     this.source = this.globeSource;

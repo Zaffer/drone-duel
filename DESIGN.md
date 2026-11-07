@@ -204,13 +204,17 @@ there, and a test fences them in. In `web/src/engine/`, `input/actions.ts` and `
 - **One local frame per place** (`engine/frame.ts`): east-north-up metres at the pad, from the
   pad's map height; it converts to and from earth-fixed, map heights and sim heights. What moves
   or collides works in it; `geo.ts` keeps the small lat/lon offsets (a pose carried on).
-- **One ground** (`engine/ground.ts`): each of Google's tiles drawn within 150 m of a focus (the
-  vehicle, the shooter, the truck) is read back into a Rapier trimesh, following Cesium's level
-  of detail and dropped 400 m from every focus. Rays, segments and heights are a walk of
-  Rapier's tree: microseconds, no render. Building is a few milliseconds a frame at most
-  ("ground build"). It owns the page's one physics world and steps it ("physics"); the truck
-  drives in it. Coarse tiles (metres out) are never built: past the built ground there is none
-  to ask, and the rounds stop looking (§7.1). Without 3D tiles it is a flat plane.
+- **One ground** (`engine/ground.ts`): the map drawn within 150 m of a focus (the vehicle, the
+  shooter, the truck) is read back into Rapier trimeshes, dropped 400 m from every focus. Rays,
+  segments and heights are a walk of Rapier's tree: microseconds, no render. Two builders:
+  Google's 3D tiles, each drawn tile's own triangles following Cesium's level of detail
+  (`engine/tiles.ts`); and on the free map, the globe's terrain, 64 m patches on a 2 m grid
+  sampled from the drawn terrain tiles' own heights (`engine/terrain.ts`: Esri's tiles are
+  131 072 triangles each, 40 ms to read and up to 630 ms for Rapier to take in; the globe's
+  `getHeight` is milliseconds a point; its tiles' data, interpolated, a microsecond). Building is
+  a few milliseconds a frame at most ("ground build"). It owns the page's one physics world and
+  steps it ("physics"); the truck drives in it. Coarse tiles or terrain (metres out) are never
+  built: past the built ground there is none to ask, and the rounds stop looking (§7.1).
 - **Cesium's own lookups** (`sampleHeight*`, `pickPosition`, `drillPick`, `globe.pick`) are each
   a render, and the ones that wait load the finest tiles first. They are only in `world.ts`,
   metered ("map lookup", "screen pick"), for where nothing is built yet: a pad before anything
@@ -225,11 +229,24 @@ there, and a test fences them in. In `web/src/engine/`, `input/actions.ts` and `
   `web/test/actions.test.ts` holds tables mounted together never to answer one press twice.
 - **Measured** (`scripts/perf.py`, `scripts/check.sh --perf`): headless Chrome on the GPU at
   3440×1400, uncapped, plays Shoot Down (stand, walk, sprint, ten quick shots, three into the
-  ground, which must stop there) and the truck (it must drive), and fails a frame over 40 ms at
-  the 95th percentile, any over 250 ms, a system over 6 ms at the 95th, or time dropped.
+  ground, which must stop there) and the truck (it must drive), on the free map (port 8610,
+  slot 6: beside the game, and free) and on Google's tiles (8600), and fails a frame over 40 ms
+  at the 95th percentile, any over 250 ms, a system over 6 ms at the 95th, or time dropped. Each
+  step prints its longest frame's make-up from Chrome's long-animation-frame record (which
+  scripts, how long the render).
   2026-11-06: Shoot Down ~110 fps walking; ten quick shots took the frame's own work from
   8.8 ms (rounds' ground picks) to 0.2 ms, and the longest frame from 150 ms to 19 ms (the
   tracer's shader kept, §7.1); the truck ~300 fps. Cesium's render is the rest of every frame.
+
+Two of Cesium's costs are taken out in `world.ts`: the Viewer's pick-and-select on every left
+click (a render of its own: the click that takes Shoot Down's mouse held a frame 240 ms), and a
+copy of every texture's reference count into two scratch objects each frame that nothing reads.
+One is left (2026-11-07): coming off the sight, the view widens over 0.22 s and some 700 tiles
+that left it come back into Cesium's selection within four frames, 40 to 60 ms each (7 ms
+steadily, with as many tiles): Cesium's traversal (visibility, transforms, the models'
+updates) for tiles coming back, not GC, the GPU, foveated loading or culled requests (each
+ruled out). It follows the sight's zoom (the Rifle tab): narrowed, the view draws 19 tiles where
+the full one draws 760.
 
 A later step (§3.1) moves the physics world into a Worker; the ground's questions are already
 the only way in.
@@ -792,8 +809,9 @@ speed and direction.
   reports. A Playwright smoke test (headless Chrome on the 4090 with `--use-angle=gl`, port 8600)
   runs menu → Free Fly → each vehicle → each view.
 - The page's frame time: `scripts/check.sh --perf` (`scripts/perf.py`, §3.2) plays Shoot Down
-  and the truck on the GPU at the user's window size and holds frames and systems to budget.
-  It serves on 8600 (Google's tiles: it costs money, so it is not in the ordinary checks).
+  and the truck on the GPU at the user's window size, on the free map and on Google's tiles,
+  and holds frames and systems to budget. Google's run serves on 8600 and costs money, so it is
+  not in the ordinary checks; `perf.py --map free` alone is free and runs beside the game.
 - Every flight is recorded to `logs/flights/` (today's FlightRecorder, generalised).
 
 ## 15. Decided in review (2026-10-29)

@@ -107,3 +107,18 @@ describe("the frame loop", () => {
     expect(n).toBe(1);
   });
 });
+
+describe("the frame loop's times", () => {
+  test("a system that stopped drops out of the stats after a while", () => {
+    const loop = new Loop();
+    const stop = new AbortController();
+    loop.each("gone", "sim", () => {}, stop.signal);
+    loop.each("stays", "sim", () => {});
+    loop.frame(0);
+    stop.abort();
+    for (let t = 16; t < 3000; t += 16) loop.frame(t);
+    const names = loop.stats().map((s) => s.name);
+    expect(names).toContain("stays");
+    expect(names).not.toContain("gone");
+  });
+});

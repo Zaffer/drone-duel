@@ -137,7 +137,13 @@ export class Loop {
   stats(): SystemStats[] {
     const out: SystemStats[] = [];
     for (const [name, t] of this.times) {
+      // A system that has stopped has no recent times: its old ones go too.
+      while (t.at.length && this.now - t.at[0]! > KEEP_MS) {
+        t.at.shift();
+        t.ms.shift();
+      }
       while (t.dropped.length && this.now - t.dropped[0]!.at > KEEP_MS) t.dropped.shift();
+      if (!t.ms.length && !t.dropped.length) continue;
       out.push({
         name,
         phase: t.phase,
