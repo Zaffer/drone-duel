@@ -28,6 +28,7 @@ const MIN_SPEED = 120;
 const MAX_RANGE = 3000;
 /** Past this far from the shooter a round meets no ground: none is built there, m. */
 const COLLIDE_M = 400;
+const TRACER_COLOR = C.Color.fromCssColorString("#ff7a2e");
 /** A tracer's streak, s of flight behind it; and it shows from this far, m (M196 lights near the
  * muzzle; nearer than this it is behind the shooter's eye anyway). */
 const TRACER_TAIL_S = 0.02;
@@ -66,6 +67,8 @@ export class Rounds {
   private sprites: { dust: HTMLCanvasElement; spark: HTMLCanvasElement; flash: HTMLCanvasElement };
   private flash: C.Billboard | null = null;
   private flashUntil = 0;
+  /** Whether the clear tracer and sprites are drawn (`keepShaders`). */
+  private kept = false;
   /** Where the shooter's ear is, the local frame, and their right (for panning). */
   ear: Vec3 = [0, 0, 1.6];
   earRight: Vec3 = [1, 0, 0];
@@ -99,11 +102,7 @@ export class Rounds {
       f.line = this.lines.add({
         positions: [this.fixed(muzzle), this.fixed(muzzle)],
         width: 3,
-        material: C.Material.fromType("PolylineGlow", {
-          color: C.Color.fromCssColorString("#ff7a2e"),
-          glowPower: 0.35,
-          taperPower: 0.6,
-        }),
+        material: tracerGlow(TRACER_COLOR),
         show: false,
       });
       f.head = this.puffs.add({
@@ -116,6 +115,30 @@ export class Rounds {
     }
     this.flying.push(f);
     this.muzzleFlash(muzzle, now);
+  }
+
+  /** A tracer, a muzzle flash, a spark and dust, clear (alpha 0), drawn ahead of the eye along
+   * `look` and kept for good. Cesium compiles a material's shaders the first time it is drawn,
+   * and frees them once nothing uses them: the first shot, and the first after a string's
+   * tracers had all burnt out, waited 150 to 350 ms for the tracer's to be linked again
+   * (measured 2026-11-06, headless on the 4090; less when the GPU's own cache had them).
+   * Called each frame from the first the eye is placed; does it once. */
+  keepShaders(eye: Vec3, look: Vec3): void {
+    if (this.kept) return;
+    this.kept = true;
+    const at = (d: number): C.Cartesian3 =>
+      this.fixed([eye[0] + look[0] * d, eye[1] + look[1] * d, eye[2] + look[2] * d]);
+    const clear = C.Color.WHITE.withAlpha(0);
+    this.lines.add({
+      positions: [at(30), at(31)],
+      width: 3,
+      material: tracerGlow(TRACER_COLOR.withAlpha(0)),
+    });
+    for (const kind of ["spark", "flash", "dust"] as const) {
+      const b = this.puffs.add({ image: this.sprites[kind], position: at(30), color: clear });
+      b.sizeInMeters = true;
+      b.width = b.height = 0.1;
+    }
   }
 
   /** Each frame: on to `now`, the drone and the ground in the way of each. */
@@ -340,6 +363,10 @@ export class Rounds {
     this.world.remove(this.puffs);
     this.flying = [];
   }
+}
+
+function tracerGlow(color: C.Color): C.Material {
+  return C.Material.fromType("PolylineGlow", { color, glowPower: 0.35, taperPower: 0.6 });
 }
 
 function conj(q: Quat): Quat {

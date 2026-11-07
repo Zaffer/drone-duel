@@ -261,6 +261,7 @@ class ShootRuntime implements ModeRuntime {
     this.air.step(dt);
     const before = s.fired;
     const picture = s.place(now);
+    this.rounds.keepShaders(s.eyeLocal, s.lookDir);
     if (s.fired > before) {
       this.stats.shots += s.fired - before;
       this.shotsAtThis += s.fired - before;
