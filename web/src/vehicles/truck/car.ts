@@ -169,4 +169,10 @@ export class Car {
     }
     vehicle.updateVehicle(dt, this.R.QueryFilterFlags.EXCLUDE_DYNAMIC);
   }
+
+  /** Out of `world` (the ground's, which outlives the truck). */
+  remove(world: RAPIER.World): void {
+    world.removeVehicleController(this.vehicle);
+    world.removeRigidBody(this.body);
+  }
 }

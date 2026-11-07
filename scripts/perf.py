@@ -44,10 +44,12 @@ def step(page: Page, label: str, fails: list[str]) -> None:
     p50, p95, most = dts[len(dts) // 2], dts[int(len(dts) * 0.95)], dts[-1]
     stats = page.evaluate("() => window.duels.perf.stats()")
     systems = [s for s in stats["systems"] if s["p95"] >= 0.1][:6]
+    worst = max(stats["systems"], key=lambda s: s["max"], default=None)
     print(
         f"{label:22s} {len(dts):4d} frames  {1000 / p50:5.0f} fps  p50 {p50:5.1f}  p95 {p95:5.1f}"
         f"  max {most:6.1f} ms | "
-        + ", ".join(f"{s['name']} {s['p50']:.1f}/{s['p95']:.1f}" for s in systems),
+        + ", ".join(f"{s['name']} {s['p50']:.1f}/{s['p95']:.1f}" for s in systems)
+        + (f" | longest: {worst['name']} {worst['max']:.0f}" if worst else ""),
         flush=True,
     )
     if p95 > BUDGET["p95"]:
@@ -78,6 +80,16 @@ def hold(page: Page, keys: list[str], seconds: float) -> None:
         page.keyboard.up(k)
 
 
+SHOOTER = "window.duels.flight.mode.shooter"
+
+
+def shooter(page: Page) -> dict[str, float]:
+    return page.evaluate(
+        f"() => {{ const s = {SHOOTER}; return {{ e: s.e, n: s.n, feet: s.feet, pitch: s.pitch,"
+        " hits: window.duels.flight.mode.rounds.groundHits }; }"
+    )
+
+
 def shoot(page: Page, fails: list[str]) -> None:
     menu(page, "Shoot Down", "AreaXO", "FPV quad")
     for _ in range(240):
@@ -93,9 +105,15 @@ def shoot(page: Page, fails: list[str]) -> None:
     page.mouse.click(W // 2, H // 2)
     time.sleep(2)
     step(page, "shoot: standing", fails)
+    was = shooter(page)
     hold(page, ["KeyW"], 3)
     hold(page, ["KeyA"], 1.5)
     step(page, "shoot: walking", fails)
+    now = shooter(page)
+    walked = ((now["e"] - was["e"]) ** 2 + (now["n"] - was["n"]) ** 2) ** 0.5
+    print(f"  walked {walked:.1f} m, feet {was['feet']:.2f} -> {now['feet']:.2f} m", flush=True)
+    if walked < 2:
+        fails.append(f"shoot: walked only {walked:.1f} m in 4.5 s")
     hold(page, ["ShiftLeft", "KeyW"], 3)
     step(page, "shoot: sprinting", fails)
     page.mouse.down(button="right")
@@ -109,6 +127,26 @@ def shoot(page: Page, fails: list[str]) -> None:
     time.sleep(3)
     page.mouse.up(button="right")
     step(page, "shoot: after", fails)
+    # Down at the ground a few metres ahead: the rounds must stop in it.
+    # (The mouse is locked: each move is read as how far it went, so it goes on down.)
+    page.mouse.move(W // 2, 0)
+    for i in range(1, 60):
+        if shooter(page)["pitch"] < -0.35:
+            break
+        page.mouse.move(W // 2, 20 * i)
+    hits = shooter(page)["hits"]
+    for _ in range(3):
+        page.mouse.down()
+        time.sleep(0.03)
+        page.mouse.up()
+        time.sleep(0.3)
+    time.sleep(1)
+    into = shooter(page)["hits"] - hits
+    print(
+        f"  3 shots at the ground (pitch {shooter(page)['pitch']:.2f}): {into} went in", flush=True
+    )
+    if into < 3:
+        fails.append(f"shoot: {into} of 3 shots at the ground met it")
 
 
 def truck(page: Page, fails: list[str]) -> None:
@@ -123,7 +161,13 @@ def truck(page: Page, fails: list[str]) -> None:
     page.evaluate(LOG)
     time.sleep(2)
     step(page, "truck: standing", fails)
-    hold(page, ["KeyW"], 4)
+    page.keyboard.down("KeyW")
+    time.sleep(4)
+    speed = page.evaluate("() => window.duels.flight.body().speed")
+    page.keyboard.up("KeyW")
+    print(f"  truck at {speed:.1f} m/s", flush=True)
+    if speed < 2:
+        fails.append(f"truck: only {speed:.1f} m/s after 4 s of throttle")
     step(page, "truck: driving", fails)
     hold(page, ["KeyW", "KeyD"], 3)
     step(page, "truck: turning", fails)

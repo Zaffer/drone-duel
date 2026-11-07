@@ -169,7 +169,7 @@ export class RifleModel {
           m.destroy();
           return;
         }
-        this.model = world.scene.primitives.add(m) as C.Model;
+        this.model = world.add(m) as C.Model;
         m.readyEvent.addEventListener(() => {
           for (const name of [
             "rifle",
@@ -189,10 +189,6 @@ export class RifleModel {
       },
       (err) => console.warn("rifle: model failed", err),
     );
-  }
-
-  get primitives(): object[] {
-    return this.model ? [this.model] : [];
   }
 
   /** The butt at `butt` (earth-fixed), the rifle's attitude `q` (body→NED). */
@@ -246,7 +242,7 @@ export class RifleModel {
 
   dispose(): void {
     this.disposed = true;
-    if (this.model) this.world.scene.primitives.remove(this.model);
+    if (this.model) this.world.remove(this.model);
     this.model = null;
   }
 }

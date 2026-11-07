@@ -70,8 +70,7 @@ const ARCS: { e1: V3; e2: V3; centre: V3; radius: number; start: number }[] = [
 const TRAIL = { seconds: 30, every: 50, jump: 30, px: 5 };
 const ARROW_PX = 9;
 const SCALE_STEP = 1.5;
-/** Every primitive's pick id: ground sampling leaves them out (`primitives`), or the wing would
- * fly into its own arrows. */
+/** Every primitive's pick id. */
 export const DYNAMICS_ID = "wing dynamics arrow";
 const PANEL_MS = 100;
 const HISTORY_S = 10;
@@ -482,7 +481,7 @@ export class DynamicsOverlay {
     private readonly world: World,
     host: HTMLElement,
   ) {
-    const add = <T extends object>(p: T): T => world.scene.primitives.add(p) as T;
+    const add = <T extends object>(p: T): T => world.add(p) as T;
     const collection = (): C.PolylineCollection =>
       add(new C.PolylineCollection({ modelMatrix: this.localToFixed, show: false }));
     this.lines = {
@@ -540,8 +539,8 @@ export class DynamicsOverlay {
     window.addEventListener("keydown", this.onKey, { capture: true });
   }
 
-  /** Its primitives, which ground sampling must look through. */
-  get primitives(): object[] {
+  /** Its primitives. */
+  private get all(): object[] {
     return [...Object.values(this.lines), this.labels];
   }
 
@@ -583,7 +582,7 @@ export class DynamicsOverlay {
 
   dispose(): void {
     window.removeEventListener("keydown", this.onKey, { capture: true });
-    for (const p of this.primitives) this.world.scene.primitives.remove(p);
+    for (const p of this.all) this.world.remove(p);
     for (const panel of [this.numbersEl, this.historyEl, this.legendEl]) panel.remove();
   }
 

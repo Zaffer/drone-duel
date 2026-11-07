@@ -1,6 +1,6 @@
 // The pilot in the world: a person standing just behind the start pad, facing the way the
 // vehicle starts, goggles on and radio in hand (tools/models/operatormodel.py). Drawn only:
-// nothing in the sim knows about them, but ground sampling must look through them.
+// nothing in the sim knows about them (world.add: never ground to a lookup).
 
 import * as C from "cesium";
 import { modelMatrix, moveBy, quatOf, toFixed } from "../world/geo.ts";
@@ -44,7 +44,6 @@ export async function operatorSpot(
 
 export class Operator {
   model: C.Model | null = null;
-  readonly primitives: object[] = [];
   private disposed = false;
   private visible = true;
 
@@ -61,8 +60,7 @@ export class Operator {
         if (this.disposed) return;
         this.model = model;
         model.show = this.visible;
-        world.scene.primitives.add(model);
-        this.primitives.push(model);
+        world.add(model);
       })
       .catch((err: unknown) => console.error(`model ${MODEL}`, err));
   }
@@ -75,8 +73,7 @@ export class Operator {
 
   dispose(): void {
     this.disposed = true;
-    if (this.model) this.world.scene.primitives.remove(this.model);
+    if (this.model) this.world.remove(this.model);
     this.model = null;
-    this.primitives.length = 0;
   }
 }

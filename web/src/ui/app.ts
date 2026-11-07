@@ -393,6 +393,8 @@ export function mountApp(root: HTMLElement, world: World): void {
       const def = MODES.find((m) => m.id === mode());
       const f = new Flight(world, slots, { ownsView: def?.ownsView ?? false });
       flight = f;
+      // For the browser tests (scripts/perf.py): the flight now.
+      (window as unknown as { duels: { flight?: Flight } }).duels.flight = f;
       teardown = mountHud(root, f, slots, () => {
         f.dispose();
         flight = null;

@@ -7,6 +7,12 @@
 // the eye rides on the stock (a cheek weld) and sees what the rifle does; head up, the eye looks
 // where the shooter means and the rifle moves in front of it.
 //
+// It runs in the frame loop's three phases (engine/loop.ts): `input` reads the controls and turns
+// the aim; `step` is the body, at a fixed rate (walking, the hold, the recoil); `place` puts the
+// eye, the rifle and the shot where the step left them. Where they are is the place's local
+// frame (engine/frame.ts); the ground they stand on, walk into and get over is the place's
+// colliders (engine/ground.ts), asked as they go.
+//
 // Controls (keyboard and mouse, or a standard gamepad):
 //   mouse / right stick      look and aim
 //   right button / LT         on the sight (held, or a toggle in the options)
@@ -21,20 +27,12 @@
 //   I / Y                     holo or iron sights
 
 import * as C from "cesium";
+import type { Ground } from "../engine/ground.ts";
 import { Spring } from "../engine/spring.ts";
 import type { Weapon } from "../net/protocol.ts";
 import { paused } from "../state/app.ts";
 import { prefs, updatePrefs } from "../state/prefs.ts";
-import {
-  bodyAxesEnu,
-  mapOffset,
-  moveBy,
-  neFrom,
-  type Quat,
-  quatOf,
-  rotate,
-  type Vec3,
-} from "../world/geo.ts";
+import { bodyAxesEnu, type Quat, quatOf, rotate, type Vec3 } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
 import { type Load, loadOf, type Setting, zeroAngle } from "./ballistics.ts";
 import { gunSounds } from "./gunsounds.ts";
@@ -97,13 +95,14 @@ const HARD_MS = 6;
 const DIP_PER_MS = 0.8;
 const DIP_HZ = 2.5;
 const DIP_ZETA = 0.8;
-/** The ground ahead, looked up as they move, in cells this big, m, good this long, ms. */
-const CELL_M = 0.5;
-const CELL_LIFE_MS = 5000;
-const PROBE_MS = 90;
-/** Under the feet: this many looks in a row say a wall before it is taken as the ground (the
- * tiles drawn sharper, not a wall walked into). */
-const WALL_LOOKS = 3;
+/** The ground is looked for down from this far over the feet, m: higher (a tree's crown, an
+ * overhang) is over their head, not in their way. Inside something taller (a building's walls),
+ * nothing is found below that, and its top is the ground there. */
+const OVERHEAD_M = 2.8;
+/** Found more than this below the feet from there, it is looked for from the top instead, m. */
+const DEEP_M = 30;
+/** Walking on into something is looked at no oftener than this, s. */
+const PLAN_EVERY_S = 0.15;
 /** The view and the rifle stay off straight up and down (past them the camera turns over). */
 const PITCH_MAX = Math.PI / 2 - 0.02;
 /** How fast the eye comes onto the sight and off it, s. */
@@ -120,7 +119,6 @@ const PITCH: Record<Stance, [number, number]> = {
 };
 /** Turning while prone means shuffling the body round, rad/s. */
 const PRONE_TURN = 0.9;
-const GROUND_MS = 120;
 
 function clampPitch(p: number): number {
   return Math.max(-PITCH_MAX, Math.min(PITCH_MAX, p));
@@ -131,17 +129,26 @@ function gauss(): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
 }
 
+/** Where they start: the local frame's east, north and the ground's up, m; facing, deg. */
 export interface Spot {
-  lat: number;
-  lon: number;
-  /** Ground, sim height (m above sea level). */
-  alt: number;
+  e: number;
+  n: number;
+  z: number;
   headingDeg: number;
 }
 
+/** What the controls ask of the body this frame. */
+interface Ask {
+  fwd: number;
+  side: number;
+  run: boolean;
+  breath: boolean;
+}
+
 export class Shooter {
-  lat: number;
-  lon: number;
+  /** Where they stand, the local frame: east, north, m; the ground under them, up, m. */
+  e: number;
+  n: number;
   ground: number;
   /** Where they mean to point: clockwise from north, up; rad. */
   heading: number;
@@ -173,11 +180,12 @@ export class Shooter {
   private dy = 0;
 
   private padWas: boolean[] = [];
+  private ask: Ask = { fwd: 0, side: 0, run: false, breath: false };
   private bob = 0;
   private effort: Effort = "still";
-  private groundBusy = false;
-  private lastGround = 0;
-  /** The feet's height (sim, m above sea level) and how fast it rises; off the ground or not. */
+  /** Their own clock, s: the steps taken. */
+  private t = 0;
+  /** The feet's height (local up, m) and how fast it rises; off the ground or not. */
   private feet: number;
   private vz = 0;
   private airborne = false;
@@ -187,14 +195,7 @@ export class Shooter {
   private dip = new Spring(DIP_HZ, DIP_ZETA);
   /** 0..1, the rifle down for a sprint. */
   private sprintK = 0;
-  /** Ground heights looked up around them (sim), by cell of the local frame. */
-  private cells = new Map<string, { h: number; at: number }>();
-  private probeBusy = false;
-  private lastProbe = 0;
-  /** Where the ground under the feet was last one they could stand on; looks since that said
-   * a wall; and whether it has been looked at yet. */
-  private lastGood: [number, number];
-  private walled = 0;
+  /** Whether the ground under them has been found yet. */
   private footed = false;
   /** Getting over something: what, from where (local east, north) along which way, how far
    * through it (s of `dur`), and the feet it started from; the eye's stoop and look meanwhile,
@@ -211,14 +212,11 @@ export class Shooter {
   private stoopLook = 0;
   private stow = 0;
   private slung = 0;
-  /** Bumped whenever they are put somewhere new, so ground looked up before it is not used. */
-  private epoch = 0;
   /** Walking on into something, s; the way they walk, unit (east, north). */
   private leaning = 0;
   private wantDir: [number, number] = [0, 0];
-  private planBusy = false;
-  private lastPlan = 0;
-  /** When they last left the ground for a jump, ms, and the feet they jumped from. */
+  private lastPlan = -1e9;
+  /** When they last left the ground for a jump (their clock, s), and the feet they jumped from. */
   private jumpedAt = -1e9;
   private jumpFeet = 0;
   /** Seconds left of a heavy landing's stagger. */
@@ -240,18 +238,17 @@ export class Shooter {
 
   constructor(
     private readonly world: World,
+    private readonly groundSvc: Ground,
     readonly weapon: Weapon,
     private readonly geometry: RifleGeometry,
     spot: Spot,
     private readonly rounds: Rounds,
     where: Setting,
-    private readonly exclude: () => object[],
   ) {
-    this.lat = spot.lat;
-    this.lon = spot.lon;
-    this.ground = spot.alt;
-    this.feet = spot.alt;
-    this.lastGood = [spot.lat, spot.lon];
+    this.e = spot.e;
+    this.n = spot.n;
+    this.ground = spot.z;
+    this.feet = spot.z;
     this.heading = (spot.headingDeg * Math.PI) / 180;
     this.mag = weapon.magazine;
     this.sight = prefs().shoot.sight;
@@ -414,13 +411,13 @@ export class Shooter {
     if (this.airborne || this.over || !this.canGetOver()) return;
     this.airborne = true;
     this.vz = JUMP_MS;
-    this.jumpedAt = performance.now();
+    this.jumpedAt = this.t;
     this.jumpFeet = this.feet;
     const moving = Math.hypot(this.wantDir[0], this.wantDir[1]) > 0.5;
     const dir: [number, number] = moving
       ? this.wantDir
       : [Math.sin(this.heading), Math.cos(this.heading)];
-    void this.reachFor(dir, new Set(["vault", "climb"]), this.feet, this.running, true);
+    this.reachFor(dir, new Set(["vault", "climb"]), this.feet, this.running);
   }
 
   private canGetOver(): boolean {
@@ -487,9 +484,11 @@ export class Shooter {
     return 1 - this.ads * (1 - prefs().shoot.adsZoom);
   }
 
-  // Each frame.
+  // The frame loop's phases.
 
-  frame(now: number, dt: number): SightPicture | null {
+  /** The controls, each frame: the aim turns now (no waiting for a step), and what they ask of
+   * the body is kept for the steps. */
+  input(dt: number): void {
     const p = prefs().shoot;
     if (p.sight !== this.sight && this.weapon.sights.includes(p.sight)) {
       this.sight = p.sight;
@@ -510,8 +509,8 @@ export class Shooter {
     }
     const [lo, hi] = PITCH[this.stance];
     this.pitch = Math.max(lo, Math.min(hi, this.pitch));
-    // Move.
-    const key = (c: string) => this.keys.has(c);
+    // What they ask of the body.
+    const key = (c: string) => !paused() && this.keys.has(c);
     let fwd = (key("KeyW") ? 1 : 0) - (key("KeyS") ? 1 : 0) + pad.move[1];
     let side = (key("KeyD") ? 1 : 0) - (key("KeyA") ? 1 : 0) + pad.move[0];
     const len = Math.hypot(fwd, side);
@@ -519,23 +518,31 @@ export class Shooter {
       fwd /= len;
       side /= len;
     }
-    const moving = len > 0.05 && this.stanceK >= 1 && this.stance !== "kneeling";
     const shift = key("ShiftLeft") || key("ShiftRight");
+    this.ask = { fwd, side, run: shift || pad.run, breath: shift || pad.breath };
+  }
+
+  /** The body, `h` s on: a fixed-rate step. */
+  step(h: number): void {
+    this.t += h;
+    const { fwd, side } = this.ask;
+    const len = Math.hypot(fwd, side);
+    const moving = len > 0.05 && this.stanceK >= 1 && this.stance !== "kneeling";
     const sprinting =
       moving &&
-      (shift || pad.run) &&
+      this.ask.run &&
       this.stance === "standing" &&
       this.ads < 0.1 &&
       this.reloading === null &&
       fwd > 0.5;
     if (sprinting) this.adsWanted = this.adsMouse = false;
-    this.sprintK = Math.max(0, Math.min(1, this.sprintK + (sprinting ? dt : -dt) / SPRINT_POSE_S));
-    this.move(dt, moving ? fwd : 0, moving ? side : 0, sprinting);
-    void this.probe(now);
+    this.sprintK = Math.max(0, Math.min(1, this.sprintK + (sprinting ? h : -h) / SPRINT_POSE_S));
+    this.move(h, moving ? fwd : 0, moving ? side : 0, sprinting);
+    this.groundSvc.focus("shooter", [this.e, this.n, this.feet]);
     this.see();
     const speedNow = Math.hypot(this.vel[0], this.vel[1]);
     if (!this.airborne && speedNow > 0.1) {
-      this.bob += dt * (speedNow > WALK + 0.5 ? 2.8 : 1.9) * Math.PI * 2;
+      this.bob += h * (speedNow > WALK + 0.5 ? 2.8 : 1.9) * Math.PI * 2;
     }
     this.effort = this.over
       ? this.over.o.kind === "push"
@@ -548,7 +555,7 @@ export class Shooter {
           : "still";
     // Stance and the sight.
     if (this.stanceK < 1) {
-      this.stanceK = Math.min(1, this.stanceK + dt / STANCE_S[this.stance]);
+      this.stanceK = Math.min(1, this.stanceK + h / STANCE_S[this.stance]);
       const s = this.stanceK * this.stanceK * (3 - 2 * this.stanceK);
       this.eyeH = this.eyeFrom + (EYE_M[this.stance] - this.eyeFrom) * s;
     }
@@ -558,14 +565,12 @@ export class Shooter {
       this.stanceK >= 1 &&
       this.sprintK === 0 &&
       !this.over;
-    this.ads = Math.max(0, Math.min(1, this.ads + (want ? dt : -dt) / ADS_S));
+    this.ads = Math.max(0, Math.min(1, this.ads + (want ? h : -h) / ADS_S));
     // The hold and the recoil.
-    const breath = this.ads > 0.5 && (shift || pad.breath) && !moving && !this.airborne;
-    this.hold.step(dt, this.effort, breath);
-    this.recoil.step(dt);
-    this.reloadStep(dt);
-    void this.followGround(now);
-    return this.place(now);
+    const breath = this.ads > 0.5 && this.ask.breath && !moving && !this.airborne;
+    this.hold.step(h, this.effort, breath);
+    this.recoil.step(h);
+    this.reloadStep(h);
   }
 
   private reloadStep(dt: number): void {
@@ -617,14 +622,14 @@ export class Shooter {
     const dn = this.vel[1] * dt;
     let into = false;
     if (de !== 0 || dn !== 0) {
-      if (!this.blocked(de, dn)) this.step(de, dn);
+      if (!this.blocked(de, dn)) this.stepBy(de, dn);
       else {
         into = true;
         if (de !== 0 && !this.blocked(de, 0)) {
-          this.step(de, 0);
+          this.stepBy(de, 0);
           this.vel[1] = 0;
         } else if (dn !== 0 && !this.blocked(0, dn)) {
-          this.step(0, dn);
+          this.stepBy(0, dn);
           this.vel[0] = 0;
         } else this.vel = [0, 0];
       }
@@ -634,7 +639,13 @@ export class Shooter {
       into = this.blocked(this.wantDir[0] * 0.05, this.wantDir[1] * 0.05);
     }
     this.lean(dt, into, sprinting);
-    // Up and down.
+    // Up and down: the ground under them now (where it is built; else as it was).
+    const under = this.groundAt(this.e, this.n);
+    if (under !== undefined) {
+      if (!this.footed) this.feet = under;
+      this.footed = true;
+      this.ground = under;
+    }
     if (this.airborne) {
       this.vz -= G * dt;
       this.feet += this.vz * dt;
@@ -655,60 +666,37 @@ export class Shooter {
    * after longer; in the air just after a jump, a grab of its top. */
   private lean(dt: number, into: boolean, sprinting: boolean): void {
     this.leaning = into ? this.leaning + dt : 0;
-    const now = performance.now();
-    if (!into || this.planBusy || now - this.lastPlan < 150) return;
+    if (!into || this.t - this.lastPlan < PLAN_EVERY_S) return;
     const dir: [number, number] =
       this.wantDir[0] || this.wantDir[1]
         ? this.wantDir
         : [Math.sin(this.heading), Math.cos(this.heading)];
     if (this.airborne) {
-      if (now - this.jumpedAt < GRAB_S * 1000) {
-        void this.reachFor(dir, new Set(["vault", "climb"]), this.jumpFeet, this.running, true);
+      if (this.t - this.jumpedAt < GRAB_S) {
+        this.reachFor(dir, new Set(["vault", "climb"]), this.jumpFeet, this.running);
       }
       return;
     }
     if (this.leaning < (sprinting ? 0 : LEAN_S)) return;
     const allow = new Set<OverKind>(["vault"]);
     if (this.leaning >= PUSH_LEAN_S) allow.add("push");
-    void this.reachFor(dir, allow, this.feet, sprinting, false);
+    this.reachFor(dir, allow, this.feet, sprinting);
   }
 
   /** Look along `dir` for something to get over, and if there is, start over it. */
-  private async reachFor(
+  private reachFor(
     dir: [number, number],
     allow: Set<OverKind>,
     feet: number,
     running: boolean,
-    jumped: boolean,
-  ): Promise<void> {
-    if (this.planBusy || this.over) return;
-    this.planBusy = true;
-    this.lastPlan = performance.now();
-    const epoch = this.epoch;
-    try {
-      const [e, n] = this.here();
-      const ds = lookDistances(allow.has("push") ? PUSH_M + LOOK_EVERY_M : REACH_M + 1);
-      const at = ds.map((d) => [e + dir[0] * d, n + dir[1] * d] as [number, number]);
-      const o = this.rounds.origin;
-      const hs = await this.world.groundHeights(
-        at.map(([pe, pn]) => moveBy(o.lat, o.lon, pn, pe)),
-        this.exclude(),
-      );
-      const sim = hs.map((h) => (h === undefined ? undefined : h - mapOffset()));
-      const t = performance.now();
-      sim.forEach((h, i) => {
-        if (h !== undefined) this.cells.set(this.cellKey(...at[i]!), { h, at: t });
-      });
-      if (epoch !== this.epoch || this.over || !this.canGetOver()) return;
-      // A jump's reach is gone once it is coming down past where it could grab; a lean is gone
-      // once they stop leaning.
-      if (jumped && !this.airborne && t - this.jumpedAt > GRAB_S * 1000) return;
-      if (!jumped && this.leaning === 0) return;
-      const p = plan(feet, ds, sim, allow);
-      if (p) this.startOver(p, [e, n], dir, running);
-    } finally {
-      this.planBusy = false;
-    }
+  ): void {
+    if (this.over || !this.canGetOver()) return;
+    this.lastPlan = this.t;
+    const [e, n] = this.here();
+    const ds = lookDistances(allow.has("push") ? PUSH_M + LOOK_EVERY_M : REACH_M + 1);
+    const hs = ds.map((d) => this.groundAt(e + dir[0] * d, n + dir[1] * d));
+    const p = plan(feet, ds, hs, allow);
+    if (p) this.startOver(p, [e, n], dir, running);
   }
 
   private startOver(o: Over, from: [number, number], dir: [number, number], running: boolean) {
@@ -732,7 +720,6 @@ export class Shooter {
     this.vel = [0, 0];
     this.leaning = 0;
     this.adsWanted = this.adsMouse = false;
-    this.epoch++;
   }
 
   /** On through getting over something: the feet's path, the stoop and where the eye looks,
@@ -794,13 +781,8 @@ export class Shooter {
         break;
       }
     }
-    const o = this.rounds.origin;
-    [this.lat, this.lon] = moveBy(
-      o.lat,
-      o.lon,
-      v.from[1] + (v.to[1] - v.from[1]) * across,
-      v.from[0] + (v.to[0] - v.from[0]) * across,
-    );
+    this.e = v.from[0] + (v.to[0] - v.from[0]) * across;
+    this.n = v.from[1] + (v.to[1] - v.from[1]) * across;
     this.feet = feet;
     if (u < 1) return;
     // There: on the top (a drop off its far side next, over a fence), or through.
@@ -808,10 +790,6 @@ export class Shooter {
     this.stoop = this.stoopLook = this.stow = this.slung = 0;
     this.feet = f1;
     this.ground = v.o.ground;
-    this.lastGood = [this.lat, this.lon];
-    this.walled = 0;
-    this.cells.set(this.cellKey(...this.here()), { h: v.o.ground, at: performance.now() });
-    this.epoch++;
   }
 
   private land(): void {
@@ -826,70 +804,34 @@ export class Shooter {
     }
   }
 
-  private step(de: number, dn: number): void {
-    [this.lat, this.lon] = moveBy(this.lat, this.lon, dn, de);
+  private stepBy(de: number, dn: number): void {
+    this.e += de;
+    this.n += dn;
   }
 
   /** Here, the local frame: east, north. */
   private here(): [number, number] {
-    const [n, e] = neFrom(this.rounds.origin.lat, this.rounds.origin.lon, this.lat, this.lon);
-    return [e, n];
+    return [this.e, this.n];
   }
 
-  private cellKey(e: number, n: number): string {
-    return `${Math.floor(e / CELL_M)},${Math.floor(n / CELL_M)}`;
-  }
-
-  /** The ground looked up at (`e`, `n`) in the local frame, if lately. */
-  private cellAt(e: number, n: number): number | undefined {
-    const at = this.cells.get(this.cellKey(e, n));
-    return at && performance.now() - at.at <= CELL_LIFE_MS ? at.h : undefined;
+  /** The ground's height at (`e`, `n`), as someone standing at the feet meets it: looked for
+   * down from a little over their head (OVERHEAD_M), so a tree's crown or an overhang is not in
+   * the way; from the top where that finds nothing near (inside something taller: its top is
+   * the ground there, a wall). Undefined where none is built. */
+  private groundAt(e: number, n: number): number | undefined {
+    const g = this.groundSvc;
+    const low = g.heightAt(e, n, this.feet + OVERHEAD_M);
+    if (low !== undefined && low > this.feet - DEEP_M) return low;
+    return g.heightAt(e, n) ?? low;
   }
 
   /** Whether a step of (`de`, `dn`) m walks the body into something higher than the legs (or,
-   * off the ground, the feet) clear, as the ground looked up ahead has it. */
+   * off the ground, the feet) clear. */
   private blocked(de: number, dn: number): boolean {
     const len = Math.hypot(de, dn);
     if (len === 0) return false;
-    const [e, n] = this.here();
-    const h = this.cellAt(e + de + (de / len) * BODY_M, n + dn + (dn / len) * BODY_M);
+    const h = this.groundAt(this.e + de + (de / len) * BODY_M, this.n + dn + (dn / len) * BODY_M);
     return h !== undefined && h > this.feet + STEP_M;
-  }
-
-  /** The ground ahead, looked up: while they move, just past the body and as far as the next
-   * look's time will carry them; standing, in front of them (for the HUD's "ahead"). */
-  private async probe(now: number): Promise<void> {
-    const speed = Math.hypot(this.vel[0], this.vel[1]);
-    const moving = speed >= 0.1;
-    if (this.probeBusy || this.over || now - this.lastProbe < (moving ? PROBE_MS : 300)) return;
-    this.probeBusy = true;
-    this.lastProbe = now;
-    try {
-      const [e, n] = this.here();
-      const u = moving
-        ? [this.vel[0] / speed, this.vel[1] / speed]
-        : [Math.sin(this.heading), Math.cos(this.heading)];
-      const at = [BODY_M + CELL_M / 2, BODY_M + 0.3 + speed * 0.25].map(
-        (d) => [e + u[0]! * d, n + u[1]! * d] as [number, number],
-      );
-      const o = this.rounds.origin;
-      const hs = await this.world.groundHeights(
-        at.map(([pe, pn]) => moveBy(o.lat, o.lon, pn, pe)),
-        this.exclude(),
-      );
-      const t = performance.now();
-      hs.forEach((h, i) => {
-        if (h !== undefined) {
-          const [pe, pn] = at[i]!;
-          this.cells.set(this.cellKey(pe, pn), { h: h - mapOffset(), at: t });
-        }
-      });
-      if (this.cells.size > 400) {
-        for (const [k, v] of this.cells) if (t - v.at > CELL_LIFE_MS) this.cells.delete(k);
-      }
-    } finally {
-      this.probeBusy = false;
-    }
   }
 
   /** What is right in front, for the HUD: the way they walk, or look standing still. */
@@ -898,49 +840,14 @@ export class Shooter {
       this.wantDir[0] || this.wantDir[1]
         ? this.wantDir
         : [Math.sin(this.heading), Math.cos(this.heading)];
-    const [e, n] = this.here();
-    const d = BODY_M + CELL_M / 2;
-    const h = this.cellAt(e + dir[0]! * d, n + dir[1]! * d);
+    const d = BODY_M + 0.25;
+    const h = this.groundAt(this.e + dir[0]! * d, this.n + dir[1]! * d);
     this.facing =
       h === undefined || this.airborne || !this.canGetOver() ? null : ahead(h - this.feet);
   }
 
-  /** The drawn ground under their feet, now and then. Higher than a step over the feet, a wall
-   * the looks ahead missed: back to where they last stood (unless it stays, a few looks on:
-   * inside a blob of the tiles, they come up on top of it). */
-  private async followGround(now: number): Promise<void> {
-    if (this.groundBusy || this.over || now - this.lastGround < GROUND_MS) return;
-    this.groundBusy = true;
-    this.lastGround = now;
-    const epoch = this.epoch;
-    try {
-      const at: [number, number] = [this.lat, this.lon];
-      const h = await this.world.groundHeight(at[0], at[1], this.exclude());
-      if (h === undefined || epoch !== this.epoch || this.over) return;
-      const sim = h - mapOffset();
-      const [e, n] = this.here();
-      this.cells.set(this.cellKey(e, n), { h: sim, at: performance.now() });
-      if (!this.footed) {
-        this.footed = true;
-        this.ground = this.feet = sim;
-        this.lastGood = at;
-        return;
-      }
-      if (sim > this.feet + STEP_M && ++this.walled < WALL_LOOKS) {
-        [this.lat, this.lon] = this.lastGood;
-        this.vel = [0, 0];
-        return;
-      }
-      this.walled = 0;
-      this.lastGood = at;
-      this.ground = sim;
-    } finally {
-      this.groundBusy = false;
-    }
-  }
-
-  /** The camera, the rifle, and any shot due: the sight picture. */
-  private place(now: number): SightPicture {
+  /** The camera, the rifle, and any shot due, each frame: the sight picture. */
+  place(now: number): SightPicture {
     const g = this.geometry;
     const h = this.hold;
     const r = this.recoil;
@@ -981,12 +888,11 @@ export class Shooter {
     // Where the eye is: over the ground, by stance, with the walk's bob and the recoil's rock.
     const fwdH: Vec3 = [Math.sin(this.heading), Math.cos(this.heading), 0];
     const rightH: Vec3 = [Math.cos(this.heading), -Math.sin(this.heading), 0];
-    const [n0, e0] = neFrom(this.rounds.origin.lat, this.rounds.origin.lon, this.lat, this.lon);
     const back = r.headBack;
     const eye: Vec3 = [
-      e0 + rightH[0] * bobSide - fwdH[0] * back,
-      n0 + rightH[1] * bobSide - fwdH[1] * back,
-      this.feet - this.rounds.origin.alt + this.eyeH + bobUp - this.dip.x - this.stoop,
+      this.e + rightH[0] * bobSide - fwdH[0] * back,
+      this.n + rightH[1] * bobSide - fwdH[1] * back,
+      this.feet + this.eyeH + bobUp - this.dip.x - this.stoop,
     ];
     // The rifle: its eye point (holo or irons) at the eye on the sight, lower and ahead head up,
     // and back into the shoulder by the recoil.

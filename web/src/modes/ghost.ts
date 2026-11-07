@@ -52,11 +52,11 @@ export class Ghost {
       }).then((m) => {
         if (this.disposed) return;
         this.model = m;
-        world.scene.primitives.add(m);
+        world.add(m);
       });
     // Hidden as a whole until the first pose: a collection counts even a hidden label's place
     // (here the earth's centre) in the camera's near and far planes, which breaks rendering.
-    this.label = world.scene.primitives.add(new C.LabelCollection({ show: false }));
+    this.label = world.add(new C.LabelCollection({ show: false }));
     this.label.add({
       text: name,
       font: "600 13px Inter, sans-serif",
@@ -110,8 +110,8 @@ export class Ghost {
 
   dispose(): void {
     this.disposed = true;
-    if (this.model) this.world.scene.primitives.remove(this.model);
-    this.world.scene.primitives.remove(this.label);
+    if (this.model) this.world.remove(this.model);
+    this.world.remove(this.label);
   }
 }
 

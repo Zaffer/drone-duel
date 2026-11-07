@@ -2,7 +2,10 @@
 // server for the vehicle, measures where the map's ground meets the sim's, draws the vehicle,
 // runs the view's camera, the camera feed, the HUD's minimap and dials, and the dynamics overlay
 // each frame, sends the pilot's sticks to the firmware and the map's ground to the physics.
-// The mode (modes/*) rides on top, through `mode`. A mode that owns the view (Shoot Down: the
+// The flight owns the place's local frame and its ground (engine/), built once the pad's height on
+// the map is known and kept while the place is: the truck drives on it, a mode stands on it, and
+// the aircraft's physics is told the ground under it from it. The mode (modes/*) rides on top,
+// through `mode`. A mode that owns the view (Shoot Down: the
 // player is on the ground, the vehicle the target) places the camera itself, and nobody here flies
 // the vehicle: no rig, no camera feed, no operator, no sticks, no motor in the player's ears.
 
@@ -10,6 +13,8 @@ import { effect, signal } from "alien-signals";
 import { rotorNorm, truckEngine } from "./audio/levels.ts";
 import { sounds } from "./audio/sounds.ts";
 import { DynamicsOverlay } from "./dynamics/overlay.ts";
+import { LocalFrame } from "./engine/frame.ts";
+import { Ground } from "./engine/ground.ts";
 import { loop } from "./engine/loop.ts";
 import { Minimap } from "./hud/minimap.ts";
 import { perf } from "./hud/perf.ts";
@@ -31,7 +36,6 @@ import {
 import { inputSource } from "./state/input.ts";
 import { prefs, type ViewId } from "./state/prefs.ts";
 import { phase, sessionStarting, status } from "./state/session.ts";
-import { every } from "./streams/time.ts";
 import { makeBody } from "./vehicles/make.ts";
 import { truckControls } from "./vehicles/truck/controls.ts";
 import { Truck } from "./vehicles/truck/truck.ts";
@@ -42,14 +46,12 @@ import { makeRigs, type Rig, type RigContext } from "./views/rigs.ts";
 import { mapOffset, moveBy } from "./world/geo.ts";
 import type { World } from "./world/world.ts";
 
-/** What a mode adds to a flight (modes/*). */
+/** What a mode adds to a flight (modes/*). A mode with systems of its own joins the frame loop
+ * itself (engine/loop.ts); `tick` is run in the flight's place in it. */
 export interface ModeRuntime {
-  tick(now: number, pose: Pose | null): void;
+  tick?(now: number, pose: Pose | null): void;
   /** Marks for the minimap (gates, the other player, the truck). */
   marks(): Parameters<Minimap["setMarks"]>[0];
-  /** What the mode draws that is not ground (Shoot Down's rifle, tracers, dust): ground
-   * sampling looks through it. */
-  primitives?(): object[];
   dispose(): void;
 }
 
@@ -60,6 +62,9 @@ export class Flight {
   readonly body = signal<Body | null>(null);
   /** The pad as the sim has it: lat, lon, ground m above sea level, heading. */
   readonly pad = signal<RigContext["pad"] | null>(null);
+  /** The place's ground, with its local frame at the pad (engine/ground.ts), once known. */
+  readonly ground = signal<Ground | null>(null);
+  private groundAt = "";
   mode: ModeRuntime | null = null;
   /** The pilot standing behind the pad (not for the truck, which they would be driving). */
   operator: Operator | null = null;
@@ -75,6 +80,7 @@ export class Flight {
   private seq = 0;
   private bodyKey = "";
   private groundBusy = false;
+  private groundTold = 0;
   private lastFrame = 0;
   private disposers: (() => void)[] = [];
 
@@ -95,7 +101,7 @@ export class Flight {
 
     loop.each("flight", "place", (now) => this.frame(now), signal);
     radio.samples().subscribe((ch) => this.sticks(ch), { signal });
-    every(GROUND_MS).subscribe(() => void this.reportGround(), { signal });
+    loop.each("ground report", "sim", (now) => this.reportGround(now), signal);
     let dynamicsData: Record<string, unknown> | null = null;
     link.on("dynamics").subscribe((d) => (dynamicsData = d.data), { signal });
     this.dynamicsData = () => dynamicsData;
@@ -179,6 +185,8 @@ export class Flight {
     this.minimap.dispose();
     this.mapLayer.dispose();
     this.dynamics.dispose();
+    this.ground()?.dispose();
+    this.ground(null);
     sounds.stopMotor();
     this.world.mouseCamera = true;
     link.send({ ch: "dynamics", on: false });
@@ -219,6 +227,19 @@ export class Flight {
     const h = await this.world.groundHeightSettled(origin[0], origin[1]);
     if (this.bodyKey !== key || this.abort.signal.aborted) return;
     mapOffset(h - origin[2]);
+    const place = status().location ?? "";
+    if (!this.ground() || this.groundAt !== place) {
+      this.ground()?.dispose();
+      this.ground(null);
+      const ground = await Ground.create(this.world, new LocalFrame(origin[0], origin[1], h));
+      if (this.bodyKey !== key || this.abort.signal.aborted) {
+        ground.dispose();
+        return;
+      }
+      this.groundAt = place;
+      this.ground(ground);
+    }
+    const ground = this.ground()!;
     if (spec.kind !== "ground" && !this.ownsView) {
       const at = { lat: origin[0], lon: origin[1], heading_deg: pad.heading_deg };
       const spot = await operatorSpot(this.world, at, mapOffset());
@@ -229,7 +250,7 @@ export class Flight {
       pad.alt = (await this.world.groundHeightSettled(pad.lat, pad.lon)) - mapOffset();
     }
     this.pad(pad);
-    const body = await makeBody(this.world, spec, pad);
+    const body = await makeBody(this.world, spec, pad, ground);
     if (this.bodyKey !== key || this.abort.signal.aborted) {
       body.dispose();
       return;
@@ -293,6 +314,10 @@ export class Flight {
     const body = this.body();
     body?.draw(now);
     const pose = body?.poseAt(now) ?? null;
+    const ground = this.ground();
+    if (ground) {
+      ground.focus("vehicle", pose ? ground.frame.fromSim(pose.lat, pose.lon, pose.alt) : null);
+    }
     perf.frame(now, body?.ahead?.(now) ?? 0);
     const ctx = this.rigContext();
     if (pose && ctx && this.rig && !paused()) this.rig.update(ctx, pose, dt);
@@ -300,7 +325,7 @@ export class Flight {
     const pilot = this.operator?.spot ?? pad;
     if (pilot) this.feed.setPilot(pilot.lat, pilot.lon, pilot.alt + GOGGLES_M);
     this.feed.frame(now, pose);
-    this.mode?.tick(now, pose);
+    this.mode?.tick?.(now, pose);
     this.minimap.setMarks([
       ...(pad ? [{ lat: pad.lat, lon: pad.lon, kind: "pad" as const }] : []),
       ...(this.mode?.marks() ?? []),
@@ -356,30 +381,41 @@ export class Flight {
     link.send({ ch: "rc", seq: ++this.seq, us: toFirmware(ch, v.firmware.kind) as RcMsg["us"] });
   }
 
-  // The map's ground under the vehicle, a little ahead of it, for its physics.
+  // The map's ground under the vehicle, a little ahead of it, for its physics: from the ground's
+  // colliders, or, where none are built (the map view, far off), Cesium's lookup.
 
-  private async reportGround(): Promise<void> {
+  private reportGround(now: number): void {
     const body = this.body();
-    const pose = body?.poseAt(performance.now());
-    if (!body || !pose || this.groundBusy || body instanceof Truck) return;
-    this.groundBusy = true;
-    try {
-      const R = 6378137;
-      const lat = pose.lat + ((pose.v[0] * GROUND_LEAD_S) / R) * (180 / Math.PI);
-      const lon =
-        pose.lon +
-        ((pose.v[1] * GROUND_LEAD_S) / (R * Math.cos((pose.lat * Math.PI) / 180))) *
-          (180 / Math.PI);
-      const h = await this.world.groundHeight(lat, lon, [
-        ...body.primitives,
-        ...(this.operator?.primitives ?? []),
-        ...this.dynamics.primitives,
-        ...(this.mode?.primitives?.() ?? []),
-      ]);
-      if (h !== undefined) link.send({ ch: "ground", lat, lon, alt: h - mapOffset() });
-    } finally {
-      this.groundBusy = false;
+    if (!body || body instanceof Truck || now - this.groundTold < GROUND_MS) return;
+    const pose = body.poseAt(now);
+    if (!pose) return;
+    this.groundTold = now;
+    const R = 6378137;
+    const lat = pose.lat + ((pose.v[0] * GROUND_LEAD_S) / R) * (180 / Math.PI);
+    const lon =
+      pose.lon +
+      ((pose.v[1] * GROUND_LEAD_S) / (R * Math.cos((pose.lat * Math.PI) / 180))) * (180 / Math.PI);
+    const ground = this.ground();
+    if (ground) {
+      // Down from just over it: a tree's crown it flies under is not its ground.
+      const p = ground.frame.fromSim(lat, lon, pose.alt);
+      const h = ground.covers(p) ? ground.heightAt(p[0], p[1], p[2] + 1) : undefined;
+      if (h !== undefined) {
+        const at = ground.frame.toGeo([p[0], p[1], h]);
+        link.send({ ch: "ground", lat, lon, alt: at.alt });
+        return;
+      }
     }
+    if (this.groundBusy) return;
+    this.groundBusy = true;
+    void this.world
+      .groundHeight(lat, lon)
+      .then((h) => {
+        if (h !== undefined) link.send({ ch: "ground", lat, lon, alt: h - mapOffset() });
+      })
+      .finally(() => {
+        this.groundBusy = false;
+      });
   }
 }
 

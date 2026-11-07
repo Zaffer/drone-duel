@@ -50,6 +50,8 @@ export class World {
    * getGlobeHeight): a fifth of the page's time measured (2026-11-04), so only while the mouse
    * moves the camera; the pilot views place it themselves. */
   private collide = true;
+  /** Everything the page draws itself (world.add): never ground to a lookup here. */
+  private readonly ours = new Set<object>();
 
   constructor(container: HTMLElement, keys: MapKeys) {
     C.Ion.defaultAccessToken = keys.cesium_ion_token ?? "";
@@ -229,28 +231,43 @@ export class World {
     });
   }
 
+  /** Draw `p` (a model, a primitive collection): the page's own, so never ground to a lookup.
+   * Everything the page draws comes through here (a test holds it). */
+  add<T extends object>(p: T): T {
+    this.scene.primitives.add(p);
+    this.ours.add(p);
+    return p;
+  }
+
+  /** Stop drawing `p` (destroying it, as Cesium's remove does). */
+  remove(p: object): boolean {
+    this.ours.delete(p);
+    return this.scene.primitives.remove(p);
+  }
+
+  // The lookups below are Cesium's: each a render of its own, and the ones that wait load the
+  // finest tiles first, so they are for where the ground service (engine/ground.ts) has nothing
+  // built yet: a pad before anything is drawn there, the map view's far-off vehicle. Each is
+  // metered in the frame loop ("map lookup", "screen pick").
+
   /** Height of the drawn ground at a point, m above the ellipsoid, from the most detailed tiles
-   * there (coarser ones, drawn while those load, can be kilometres out). `exclude`: primitives
-   * that are not ground (vehicles). Undefined when nothing is there yet. */
-  async groundHeight(
-    lat: number,
-    lon: number,
-    exclude: object[] = [],
-  ): Promise<number | undefined> {
-    const [h] = await this.groundHeights([[lat, lon]], exclude);
+   * there (coarser ones, drawn while those load, can be kilometres out); never what the page
+   * draws itself. Undefined when nothing is there yet. */
+  async groundHeight(lat: number, lon: number): Promise<number | undefined> {
+    const [h] = await this.groundHeights([[lat, lon]]);
     return h;
   }
 
   /** The ground heights at several points (lat, lon), in one look. */
-  async groundHeights(
-    points: [number, number][],
-    exclude: object[] = [],
-  ): Promise<(number | undefined)[]> {
+  async groundHeights(points: [number, number][]): Promise<(number | undefined)[]> {
     await this.ready;
     const cartos = points.map(([lat, lon]) => C.Cartographic.fromDegrees(lon, lat));
     try {
       if (this.groundIsTiles) {
-        const hits = await this.scene.sampleHeightMostDetailed(cartos, exclude);
+        const t0 = performance.now();
+        const asked = this.scene.sampleHeightMostDetailed(cartos, [...this.ours]);
+        loop.meter("map lookup", performance.now() - t0);
+        const hits = await asked;
         // Through a slit between tiles, down to the backstop: no ground there, as before it.
         return hits.map((hit) =>
           hit?.height !== undefined && hit.height > BACKSTOP_M + 1 ? hit.height : undefined,
@@ -278,14 +295,20 @@ export class World {
 
   /** WGS84 position under a screen point, or undefined off the ground. */
   pickGround(windowPosition: C.Cartesian2): C.Cartographic | undefined {
-    const scene = this.scene;
-    if (this.groundIsTiles) {
-      const cart = scene.pickPositionSupported ? scene.pickPosition(windowPosition) : undefined;
-      return cart ? C.Cartographic.fromCartesian(cart) : undefined;
-    }
-    const ray = this.viewer.camera.getPickRay(windowPosition);
-    const cart = ray ? scene.globe.pick(ray, scene) : undefined;
+    const cart = this.pickPoint(windowPosition);
     return cart ? C.Cartographic.fromCartesian(cart) : undefined;
+  }
+
+  /** The earth-fixed point drawn under a screen point (anything drawn), or undefined. */
+  pickPoint(windowPosition: C.Cartesian2): C.Cartesian3 | undefined {
+    const scene = this.scene;
+    return loop.timed("screen pick", () => {
+      if (this.groundIsTiles) {
+        return scene.pickPositionSupported ? scene.pickPosition(windowPosition) : undefined;
+      }
+      const ray = this.viewer.camera.getPickRay(windowPosition);
+      return ray ? scene.globe.pick(ray, scene) : undefined;
+    });
   }
 
   /** Fly the camera to look at a place from above (menus, map view). */

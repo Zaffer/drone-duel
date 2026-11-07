@@ -14,7 +14,6 @@ export type Animate = (model: C.Model, pose: Pose, dt: number) => void;
 
 export class Aircraft implements Body {
   model: C.Model | null = null;
-  readonly primitives: object[] = [];
   /** The poses by sim time. */
   readonly timeline = new Timeline<Pose>();
   private readonly abort = new AbortController();
@@ -41,8 +40,7 @@ export class Aircraft implements Body {
         if (this.abort.signal.aborted) return;
         this.model = model;
         model.show = this.visible && this.timeline.newest !== null;
-        world.scene.primitives.add(model);
-        this.primitives.push(model);
+        world.add(model);
       })
       .catch((err: unknown) => console.error(`model ${spec.model}`, err));
   }
@@ -74,7 +72,7 @@ export class Aircraft implements Body {
 
   dispose(): void {
     this.abort.abort();
-    if (this.model) this.world.scene.primitives.remove(this.model);
+    if (this.model) this.world.remove(this.model);
     this.model = null;
   }
 }

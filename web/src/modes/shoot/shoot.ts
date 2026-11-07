@@ -11,6 +11,8 @@ import { effect } from "alien-signals";
 import * as C from "cesium";
 import { droneGain, rotorNorm } from "../../audio/levels.ts";
 import { sounds } from "../../audio/sounds.ts";
+import type { Ground } from "../../engine/ground.ts";
+import { loop } from "../../engine/loop.ts";
 import type { Flight, ModeRuntime } from "../../flight.ts";
 import { radio } from "../../input/radio.ts";
 import type { Weapon } from "../../net/protocol.ts";
@@ -19,7 +21,7 @@ import { Air } from "../../shoot/air.ts";
 import { airAt, setting } from "../../shoot/ballistics.ts";
 import { setSpeedOfSound } from "../../shoot/gunsounds.ts";
 import { rifleGeometry } from "../../shoot/rifle.ts";
-import { type Origin, Rounds } from "../../shoot/rounds.ts";
+import { Rounds } from "../../shoot/rounds.ts";
 import { Shooter } from "../../shoot/shooter.ts";
 import { Sights } from "../../shoot/sights.ts";
 import { content, toast, wind } from "../../state/app.ts";
@@ -28,7 +30,7 @@ import { prefs } from "../../state/prefs.ts";
 import { phase, status } from "../../state/session.ts";
 import { h } from "../../ui/h.ts";
 import type { RigContext } from "../../views/rigs.ts";
-import { mapOffset, moveBy, neFrom, type Vec3 } from "../../world/geo.ts";
+import { mapOffset, moveBy, type Vec3 } from "../../world/geo.ts";
 import type { ModeDef } from "../types.ts";
 
 /** Where the shooter starts: this far behind the pad, m; and the drone's hover, m above it. */
@@ -36,6 +38,8 @@ const STAND_OFF_M = 100;
 const HOVER_M = 30;
 /** Down, it comes back after this long, s. */
 const RESPAWN_S = 5;
+/** The shooter's body is stepped this often, Hz (engine/loop.ts). */
+const BODY_HZ = 240;
 /** A rangefinder's beam spreads (EST: a hunting rangefinder's, 2 mrad); its reading shows for
  * this long, s. */
 const BEAM_RAD = 0.002;
@@ -83,7 +87,8 @@ class ShootRuntime implements ModeRuntime {
   private weapon: Weapon | null;
   private disposers: (() => void)[] = [];
   private disposed = false;
-  private lastNow = 0;
+  private readonly abort = new AbortController();
+  private ground: Ground | null = null;
   private drone: DroneState = "starting";
   private hoverSent = false;
   private firstShotAt: number | null = null;
@@ -117,21 +122,23 @@ class ShootRuntime implements ModeRuntime {
     void this.setup();
   }
 
-  /** The shooter and their rifle, once the pad's ground is known (flight.pad). */
+  /** The shooter and their rifle, once the pad and the place's ground are known. */
   private async setup(): Promise<void> {
     const flight = this.flight;
     const weapon = this.weapon;
     if (!weapon) return;
-    const pad = await new Promise<RigContext["pad"]>((resolve) => {
+    const [pad, ground] = await new Promise<[RigContext["pad"], Ground]>((resolve) => {
       const stop = effect(() => {
         const p = flight.pad();
-        if (p) {
+        const g = flight.ground();
+        if (p && g) {
           queueMicrotask(() => stop());
-          resolve(p);
+          resolve([p, g]);
         }
       });
     });
     if (this.disposed) return;
+    this.ground = ground;
     const hd = (pad.heading_deg * Math.PI) / 180;
     const [lat, lon] = moveBy(
       pad.lat,
@@ -139,27 +146,23 @@ class ShootRuntime implements ModeRuntime {
       -Math.cos(hd) * STAND_OFF_M,
       -Math.sin(hd) * STAND_OFF_M,
     );
+    // Its ground is built only once someone stands there: until then, the map's.
     const map = await flight.world.groundHeightSettled(lat, lon);
-    const ground = map - mapOffset();
     if (this.disposed) return;
-    const origin: Origin = { lat, lon, alt: ground };
+    const [e, n, z] = ground.frame.fromMap(lat, lon, map);
+    ground.focus("shooter", [e, n, z]);
+    const groundSim = map - mapOffset();
     const w = wind() ?? content()?.locations[status().location ?? ""]?.wind;
     if (!w) return;
     this.air = new Air(w);
     const air = this.air;
-    const where = setting(lat, ground, (p) => air.at(Math.max(0.1, p[2])));
-    setSpeedOfSound(airAt(ground).sound);
-    const exclude = () => this.primitives();
-    this.rounds = new Rounds(
-      flight.world,
-      origin,
-      where,
-      () => {
-        const body = flight.body();
-        return body ? (now: number) => body.poseAt(now) : null;
-      },
-      exclude,
-    );
+    // The wind's height is over the shooter's ground.
+    const where = setting(lat, groundSim, (p) => air.at(Math.max(0.1, p[2] - z)));
+    setSpeedOfSound(airAt(groundSim).sound);
+    this.rounds = new Rounds(flight.world, ground, where, () => {
+      const body = flight.body();
+      return body ? (now: number) => body.poseAt(now) : null;
+    });
     this.rounds.onHit = (hit) => {
       this.stats.hits++;
       const p = hit.strike.part;
@@ -183,18 +186,26 @@ class ShootRuntime implements ModeRuntime {
     };
     const geometry = await rifleGeometry(`/${weapon.model}`);
     if (this.disposed) return;
-    this.shooter = new Shooter(
+    const shooter = new Shooter(
       flight.world,
+      ground,
       weapon,
       geometry,
-      { lat, lon, alt: ground, headingDeg: pad.heading_deg },
+      { e, n, z, headingDeg: pad.heading_deg },
       this.rounds,
       where,
-      exclude,
     );
+    this.shooter = shooter;
     // Aim at where the drone will hover.
-    this.shooter.pitch = Math.atan2(HOVER_M - 1.6, STAND_OFF_M);
-    this.shooter.onLase = () => this.laseNow();
+    shooter.pitch = Math.atan2(HOVER_M - 1.6, STAND_OFF_M);
+    shooter.onLase = () => this.laseNow();
+    // Into the frame loop: the controls, the body at its own rate, the rounds, then the view.
+    const signal = this.abort.signal;
+    const rounds = this.rounds;
+    loop.each("shooter input", "input", (_now, dt) => shooter.input(dt), signal);
+    loop.fixed("shooter", BODY_HZ, (h) => shooter.step(h), signal);
+    loop.each("rounds", "sim", (now) => rounds.update(now), signal);
+    loop.each("shoot down", "place", (now, dt) => this.frame(now, dt), signal);
   }
 
   private onSession(state: string, p: string): void {
@@ -239,25 +250,29 @@ class ShootRuntime implements ModeRuntime {
     }, RESPAWN_S * 1000);
   }
 
-  tick(now: number, pose: Pose | null): void {
-    const dt = this.lastNow ? Math.min(0.1, (now - this.lastNow) / 1000) : 0;
-    this.lastNow = now;
+  /** Each frame, once the body has stepped and the rounds flown: the eye, the rifle, the sight,
+   * the drone's sound, the panel. */
+  private frame(now: number, dt: number): void {
     const s = this.shooter;
     if (!s || !this.rounds || !this.air) return;
+    const pose = this.flight.pose(now);
     const w = wind();
     if (w) this.air.wind = w;
     this.air.step(dt);
     const before = s.fired;
-    const picture = s.frame(now, dt);
+    const picture = s.place(now);
     if (s.fired > before) {
       this.stats.shots += s.fired - before;
       this.shotsAtThis += s.fired - before;
       if (this.firstShotAt === null && this.drone !== "down") this.firstShotAt = now;
     }
-    this.rounds.update(now);
     this.sights.draw(picture);
     this.droneSound(now, pose);
-    if (this.drone === "climbing" && pose && pose.alt - this.rounds.origin.alt > HOVER_M * 0.6) {
+    if (
+      this.drone === "climbing" &&
+      pose &&
+      pose.alt - (this.flight.pad()?.alt ?? 0) > HOVER_M * 0.6
+    ) {
       this.drone = "hovering";
     }
     if (now - this.lastPanel > 100) {
@@ -270,11 +285,9 @@ class ShootRuntime implements ModeRuntime {
   private droneSound(now: number, pose: Pose | null): void {
     const s = this.shooter;
     const body = this.flight.body();
-    if (!s || !pose || !body || !this.rounds) return;
-    const local = (p: Pose): Vec3 => {
-      const [n, e] = neFrom(this.rounds!.origin.lat, this.rounds!.origin.lon, p.lat, p.lon);
-      return [e, n, p.alt - this.rounds!.origin.alt];
-    };
+    const frame = this.ground?.frame;
+    if (!s || !pose || !body || !frame) return;
+    const local = (p: Pose): Vec3 => frame.fromSim(p.lat, p.lon, p.alt);
     const ear = s.eyeLocal;
     const d0 = local(pose);
     const range0 = Math.hypot(d0[0] - ear[0], d0[1] - ear[1], d0[2] - ear[2]);
@@ -296,14 +309,15 @@ class ShootRuntime implements ModeRuntime {
   private laseNow(): void {
     const s = this.shooter;
     const body = this.flight.body();
-    if (!s || !this.rounds) return;
+    const ground = this.ground;
+    if (!s || !this.rounds || !ground) return;
     const look = s.lookDir;
     const eye = s.eyeLocal;
     const pose = body?.poseAt(performance.now());
     let range: number | null = null;
     if (pose) {
-      const [n, e] = neFrom(this.rounds.origin.lat, this.rounds.origin.lon, pose.lat, pose.lon);
-      const d: Vec3 = [e - eye[0], n - eye[1], pose.alt - this.rounds.origin.alt - eye[2]];
+      const p = ground.frame.fromSim(pose.lat, pose.lon, pose.alt);
+      const d: Vec3 = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
       const along = d[0] * look[0] + d[1] * look[1] + d[2] * look[2];
       const miss = Math.hypot(
         d[0] - look[0] * along,
@@ -312,10 +326,12 @@ class ShootRuntime implements ModeRuntime {
       );
       if (along > 0 && miss < 0.15 + (BEAM_RAD * along) / 2) range = along;
     }
+    // Else the ground, where it is built near; else whatever is drawn there.
+    if (range === null) range = ground.cast(eye, look, 400)?.toi ?? null;
     if (range === null) {
-      const scene = this.flight.world.scene;
-      const c = new C.Cartesian2(scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2);
-      const hit = scene.pickPositionSupported ? scene.pickPosition(c) : undefined;
+      const world = this.flight.world;
+      const c = world.scene.canvas;
+      const hit = world.pickPoint(new C.Cartesian2(c.clientWidth / 2, c.clientHeight / 2));
       if (hit) range = C.Cartesian3.distance(hit, this.rounds.fixed(eye));
     }
     const angle = (Math.asin(Math.max(-1, Math.min(1, look[2]))) * 180) / Math.PI;
@@ -392,15 +408,6 @@ class ShootRuntime implements ModeRuntime {
     this.panel.replaceChildren(...rows);
   }
 
-  /** Not ground: the drone, the rifle, the rounds' tracers and dust. */
-  primitives(): object[] {
-    return [
-      ...(this.flight.body()?.primitives ?? []),
-      ...(this.shooter?.rifle.primitives ?? []),
-      ...(this.rounds?.primitives ?? []),
-    ];
-  }
-
   /** A rifleman has no map: the minimap is hidden in this mode. */
   marks() {
     return [];
@@ -408,6 +415,8 @@ class ShootRuntime implements ModeRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.abort.abort();
+    this.ground?.focus("shooter", null);
     radio.onFoot = false;
     for (const d of this.disposers) d();
     this.shooter?.dispose();

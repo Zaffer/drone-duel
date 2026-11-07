@@ -1,23 +1,22 @@
 // The rounds in flight (DESIGN.md §7, Shoot Down). Each is ballistics.ts's Round, stepped in
 // real time from when it left the muzzle, and checked step by step against the drone as the
 // shooter sees it at that moment (its body's poseAt: the drawn pose, favouring the shooter, as
-// the duel's strikes are judged) and against the drawn ground. A strike sends the hit to the
-// physics on the server, which does the rest (part damage, the push).
+// the duel's strikes are judged) and, each frame, its way since the last against the ground: a
+// segment cast through the place's colliders (engine/ground.ts), microseconds, the point where
+// it went in exact. A strike sends the hit to the physics on the server, which does the rest
+// (part damage, the push).
 //
-// The ground is Cesium's sampleHeight, a pick render of its own (a millisecond or more on
-// Google's tiles), so it is rationed: a round is looked at once a frame at most, the rounds
-// share a few milliseconds a frame, and one high above anything is not looked at. Only once a
-// round is found under the ground is its way since last looked at searched for where it went in.
-// (Looked for every few metres of flight instead, a string of shots took seconds a frame: the
-// next frame had more flight to look along, and so on.)
+// The ground is built only near the shooter and the drone (a few hundred metres); past
+// COLLIDE_M from the shooter a round is no longer checked against it (there is nothing there to
+// meet) but flies on, tracer and all, until it is spent.
 //
-// Positions are in a local frame east-north-up, metres, from a fixed origin on the ground near
-// the shooter (sim heights: above sea level less the origin's ground).
+// Positions are in the place's local frame (engine/frame.ts): east, north, up, metres.
 
 import * as C from "cesium";
+import type { Ground } from "../engine/ground.ts";
 import type { HitMsg } from "../net/protocol.ts";
 import { link, type Pose } from "../net/server.ts";
-import { mapOffset, moveBy, neFrom, type Quat, rotate, type Vec3 } from "../world/geo.ts";
+import { type Quat, rotate, type Vec3 } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
 import { type Load, Round, type Setting, STEP_S } from "./ballistics.ts";
 import { gunSounds } from "./gunsounds.ts";
@@ -27,24 +26,12 @@ import { MOMENTUM_SHARE, type Strike, strikes } from "./target.ts";
 const MAX_S = 5;
 const MIN_SPEED = 120;
 const MAX_RANGE = 3000;
-/** The ground's rationing: milliseconds a frame for all the rounds (one round is always looked
- * at); above this height over the shooter's ground nothing is in the way, m (EST: hills and
- * towers within the 3 km a round flies). */
-const GROUND_MS = 2;
-const CLEAR_ABOVE_M = 300;
-/** Where it went in is found to this, as a fraction of its way since last looked at. */
-const GROUND_BISECT = 6;
+/** Past this far from the shooter a round meets no ground: none is built there, m. */
+const COLLIDE_M = 400;
 /** A tracer's streak, s of flight behind it; and it shows from this far, m (M196 lights near the
  * muzzle; nearer than this it is behind the shooter's eye anyway). */
 const TRACER_TAIL_S = 0.02;
 const TRACER_FROM_M = 25;
-
-export interface Origin {
-  lat: number;
-  lon: number;
-  /** Ground there, sim height (m above sea level). */
-  alt: number;
-}
 
 export interface Flying {
   round: Round;
@@ -56,9 +43,10 @@ export interface Flying {
   line?: C.Polyline;
   /** The tracer's burning base: seen from behind, a bright dot more than a streak. */
   head?: C.Billboard;
-  /** Its way since the ground was last looked at: where it was then (known above the ground),
-   * then where each frame left it. */
-  path: Vec3[];
+  /** Where it was when the ground was last looked along its way. */
+  checked: Vec3;
+  /** Where it left the muzzle. */
+  muzzle: Vec3;
 }
 
 export interface HitReport {
@@ -82,23 +70,31 @@ export class Rounds {
   ear: Vec3 = [0, 0, 1.6];
   earRight: Vec3 = [1, 0, 0];
   onHit: ((h: HitReport) => void) | null = null;
+  /** Rounds that went into the ground. */
+  groundHits = 0;
 
   constructor(
     private readonly world: World,
-    readonly origin: Origin,
+    private readonly ground: Ground,
     private readonly where: Setting,
     private readonly target: () => ((now: number) => Pose | null) | null,
-    private readonly exclude: () => object[],
   ) {
-    this.lines = world.scene.primitives.add(new C.PolylineCollection()) as C.PolylineCollection;
-    this.puffs = world.scene.primitives.add(new C.BillboardCollection()) as C.BillboardCollection;
+    this.lines = world.add(new C.PolylineCollection()) as C.PolylineCollection;
+    this.puffs = world.add(new C.BillboardCollection()) as C.BillboardCollection;
     this.sprites = { dust: sprite("dust"), spark: sprite("spark"), flash: sprite("flash") };
   }
 
   /** A shot leaves `muzzle` along `dir` (local frame) at `speed`. */
   fire(load: Load, muzzle: Vec3, dir: Vec3, speed: number, tracer: boolean, now: number): void {
     const round = new Round(load, this.where, muzzle, dir, speed);
-    const f: Flying = { round, at: now, tracer, hit: new Set(), path: [[...muzzle]] };
+    const f: Flying = {
+      round,
+      at: now,
+      tracer,
+      hit: new Set(),
+      checked: [...muzzle],
+      muzzle: [...muzzle],
+    };
     if (tracer) {
       f.line = this.lines.add({
         positions: [this.fixed(muzzle), this.fixed(muzzle)],
@@ -122,16 +118,15 @@ export class Rounds {
     this.muzzleFlash(muzzle, now);
   }
 
-  /** Each frame. */
+  /** Each frame: on to `now`, the drone and the ground in the way of each. */
   update(now: number): void {
     const poseAt = this.target();
     const keep: Flying[] = [];
     for (const f of this.flying) {
-      if (this.advance(f, now, poseAt)) keep.push(f);
+      if (this.advance(f, now, poseAt) && !this.intoGround(f, now)) keep.push(f);
       else this.drop(f);
     }
     this.flying = keep;
-    this.lookForGround(now);
     this.animate(now);
   }
 
@@ -140,52 +135,18 @@ export class Rounds {
     if (f.head) this.puffs.remove(f.head);
   }
 
-  /** The ground, rationed: the rounds looked at longest ago first, while the frame's few
-   * milliseconds last. A round under it stops where it went in. */
-  private lookForGround(now: number): void {
-    const t0 = performance.now();
-    const due = this.flying
-      .filter((f) => f.path.length > 1)
-      .sort((a, b) => b.path.length - a.path.length || a.at - b.at);
-    const gone = new Set<Flying>();
-    for (const f of due) {
-      if (f !== due[0] && performance.now() - t0 > GROUND_MS) break;
-      const p = f.path[f.path.length - 1]!;
-      if (p[2] > CLEAR_ABOVE_M) {
-        f.path = [p];
-        continue;
-      }
-      if (!this.belowGround(p)) {
-        f.path = [p];
-        continue;
-      }
-      const at = this.wentIn(f.path);
-      this.groundHit(at, now);
-      gone.add(f);
-    }
-    if (!gone.size) return;
-    for (const f of gone) this.drop(f);
-    this.flying = this.flying.filter((f) => !gone.has(f));
-  }
-
-  /** Where along `path` (its first point above the ground, its last below) it went in. */
-  private wentIn(path: Vec3[]): Vec3 {
-    // The first leg that ends under the ground (the last does), then halve it.
-    let i = 1;
-    while (i < path.length - 1 && !this.belowGround(path[i]!)) i++;
-    let a = path[i - 1]!;
-    let b = path[i]!;
-    for (let k = 0; k < GROUND_BISECT; k++) {
-      const m: Vec3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-      if (this.belowGround(m)) b = m;
-      else a = m;
-    }
-    return a;
-  }
-
-  /** Its own drawing: tracers, dust, sparks, the flash. Not ground. */
-  get primitives(): object[] {
-    return [this.lines, this.puffs];
+  /** Whether its way since last looked meets the ground: it stops there, in a puff of dust. */
+  private intoGround(f: Flying, now: number): boolean {
+    const a = f.checked;
+    const b = f.round.at();
+    f.checked = b;
+    const far = Math.hypot(a[0] - this.ear[0], a[1] - this.ear[1]);
+    if (far > COLLIDE_M) return false;
+    const hit = this.ground.segment(a, b);
+    if (!hit) return false;
+    this.groundHit(hit.point, now);
+    this.groundHits++;
+    return true;
   }
 
   get count(): number {
@@ -201,10 +162,9 @@ export class Rounds {
       r.step(STEP_S);
       const b = r.at();
       if (poseAt) this.checkDrone(f, a, b, poseAt(f.at + r.t * 1000));
-      const range = Math.hypot(b[0], b[1]);
+      const range = Math.hypot(b[0] - f.muzzle[0], b[1] - f.muzzle[1]);
       if (r.t > MAX_S || r.speed < MIN_SPEED || range > MAX_RANGE) return false;
     }
-    f.path.push(r.at());
     if (f.line) {
       const p = r.at();
       const tail: Vec3 = [
@@ -226,8 +186,7 @@ export class Rounds {
 
   private checkDrone(f: Flying, a: Vec3, b: Vec3, pose: Pose | null): void {
     if (!pose) return;
-    const [n, e] = neFrom(this.origin.lat, this.origin.lon, pose.lat, pose.lon);
-    const d: Vec3 = [e, n, pose.alt - this.origin.alt];
+    const d = this.ground.frame.fromSim(pose.lat, pose.lon, pose.alt);
     // Quick: is the step anywhere near?
     const mid: Vec3 = [
       (a[0] + b[0]) / 2 - d[0],
@@ -277,24 +236,6 @@ export class Rounds {
       gunSounds.hit(range, this.pan(where), s.part === "motor" || s.part === "battery");
       this.onHit?.({ strike: s, where, speed, range });
     }
-  }
-
-  /** Whether `p` is under the drawn ground (the tiles drawn now, as sampleHeight has them). */
-  private belowGround(p: Vec3): boolean {
-    const scene = this.world.scene;
-    if (!scene.sampleHeightSupported) return p[2] < 0;
-    const [lat, lon] = moveBy(this.origin.lat, this.origin.lon, p[1], p[0]);
-    let h: number | undefined;
-    try {
-      h = scene.sampleHeight(C.Cartographic.fromDegrees(lon, lat), [
-        ...this.exclude(),
-        ...this.primitives,
-      ]);
-    } catch {
-      h = undefined;
-    }
-    if (h === undefined) return false;
-    return this.origin.alt + p[2] + mapOffset() < h;
   }
 
   private groundHit(p: Vec3, now: number): void {
@@ -389,15 +330,14 @@ export class Rounds {
     return (d[0] * this.earRight[0] + d[1] * this.earRight[1] + d[2] * this.earRight[2]) / l;
   }
 
-  /** A local point, earth-fixed (map heights). */
+  /** A local point, earth-fixed. */
   fixed(p: Vec3): C.Cartesian3 {
-    const [lat, lon] = moveBy(this.origin.lat, this.origin.lon, p[1], p[0]);
-    return C.Cartesian3.fromDegrees(lon, lat, this.origin.alt + p[2] + mapOffset());
+    return this.ground.frame.fixed(p);
   }
 
   dispose(): void {
-    this.world.scene.primitives.remove(this.lines);
-    this.world.scene.primitives.remove(this.puffs);
+    this.world.remove(this.lines);
+    this.world.remove(this.puffs);
     this.flying = [];
   }
 }

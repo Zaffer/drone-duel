@@ -1,6 +1,6 @@
 // The truck (DESIGN.md §6.3): the old drive (drivesession.js) behind the Body interface. Rapier
-// runs it in the page, in a local east-north-up frame at its start, on colliders made of the 3D
-// tiles drawn near it (colliders.ts), stepped at a fixed 60 Hz from `draw`. Its pose is in the
+// runs it in the page, in the place's ground (engine/ground.ts): its local frame, its colliders
+// made of the 3D tiles drawn near it, its physics world stepped at a fixed 60 Hz. Its pose is in the
 // sim's heights (map height less geo.mapOffset), as the aircraft's are; the views ask for it
 // like any other. No cameras here.
 //
@@ -8,16 +8,15 @@
 // itself after lying on its side or roof a while, goes back to its last good spot if it falls
 // out of the world, and, with an `outside` fence, back inside after a few seconds out.
 
-import RAPIER from "@dimforge/rapier3d-compat";
 import * as C from "cesium";
 import { sounds } from "../../audio/sounds.ts";
+import type { Ground, GroundStats } from "../../engine/ground.ts";
 import type { Vehicle } from "../../net/protocol.ts";
 import type { Pose } from "../../net/server.ts";
 import { mapOffset } from "../../world/geo.ts";
 import type { World } from "../../world/world.ts";
 import { type Body, extrapolate } from "../types.ts";
 import { Car } from "./car.ts";
-import { FlatGround, type Ground, type GroundStats, TileColliders } from "./colliders.ts";
 import { type TruckControls, truckInput } from "./controls.ts";
 import {
   bodyRates,
@@ -31,12 +30,8 @@ import {
   yawQuat,
 } from "./frame.ts";
 
-type Rapier = typeof RAPIER;
-
 export type { TruckControls } from "./controls.ts";
 
-const STEP_S = 1 / 60;
-const MAX_STEPS = 4;
 /** The truck waits for ground under it, looking this far down from this high. */
 const GROUND_PROBE = { up: 60, down: 200 };
 /** It rights itself after lying on its side or roof this long. */
@@ -67,19 +62,11 @@ interface Spot {
 }
 
 interface Sim {
-  R: Rapier;
-  world: RAPIER.World;
   car: Car;
   ground: Ground;
   localToFixed: C.Matrix4;
-  fixedToLocal: C.Matrix4;
-}
-
-let rapier: Promise<Rapier> | null = null;
-/** Rapier, loaded and initialised once for the page. */
-export function loadRapier(): Promise<Rapier> {
-  rapier ??= RAPIER.init().then(() => RAPIER);
-  return rapier;
+  /** Stops its driving on each physics step. */
+  stopDriving: () => void;
 }
 
 const scratchRot = new C.Matrix3();
@@ -90,7 +77,6 @@ const scratchCarto = new C.Cartographic();
 
 export class Truck implements Body {
   model: C.Model | null = null;
-  readonly primitives: object[] = [];
   /** Resolves once Rapier and the local frame are set up (it then waits for ground). */
   readonly ready: Promise<void>;
   /** A message for the player, or null to clear it ("Loading the ground…", the fence). */
@@ -107,8 +93,6 @@ export class Truck implements Body {
   /** Where it goes once there is ground under it; null once on its wheels. */
   private placing: Spot | null;
   private input: TruckControls = { throttle: 0, steer: 0, handbrake: false };
-  private last = 0;
-  private acc = 0;
   private simTime = 0;
   private pose: Pose | null = null;
   private notice: string | null = null;
@@ -125,6 +109,7 @@ export class Truck implements Body {
     private readonly world: World,
     readonly spec: Vehicle,
     readonly start: TruckStart,
+    private readonly ground: Ground,
   ) {
     this.placing = { x: 0, y: 0, z: 0, yaw: yawOfHeading(start.heading_deg) };
     truckInput.rearm();
@@ -137,38 +122,50 @@ export class Truck implements Body {
         }
         this.model = model;
         model.show = false;
-        world.scene.primitives.add(model);
-        this.primitives.push(model);
+        world.add(model);
       })
       .catch((err: unknown) => console.error(`model ${spec.model}`, err));
   }
 
   /** A truck with its physics ready. */
-  static async create(world: World, spec: Vehicle, start: TruckStart): Promise<Truck> {
-    const truck = new Truck(world, spec, start);
+  static async create(
+    world: World,
+    spec: Vehicle,
+    start: TruckStart,
+    ground: Ground,
+  ): Promise<Truck> {
+    const truck = new Truck(world, spec, start, ground);
     await truck.ready;
     return truck;
   }
 
   private async init(): Promise<void> {
-    const R = await loadRapier();
     await this.world.ready;
     const { lat, lon, alt } = this.start;
     const groundH = (await this.world.groundHeight(lat, lon)) ?? alt + mapOffset();
     if (this.disposed) return;
-    const origin = C.Cartesian3.fromDegrees(lon, lat, groundH);
-    const localToFixed = C.Transforms.eastNorthUpToFixedFrame(origin);
-    const fixedToLocal = C.Matrix4.inverseTransformation(localToFixed, new C.Matrix4());
-    const world = new R.World({ x: 0, y: 0, z: -9.81 });
-    world.timestep = STEP_S;
-    const tileset = this.world.tileset;
-    const ground = tileset
-      ? new TileColliders(this.world.scene, tileset, R, world, localToFixed)
-      : new FlatGround(R, world);
-    const car = new Car(R, world);
+    const ground = this.ground;
+    const [x, y, z] = ground.frame.fromMap(lat, lon, groundH);
+    this.home = { x, y, z, yaw: yawOfHeading(this.start.heading_deg) };
+    if (this.placing) this.placing = { ...this.home };
+    const car = new Car(ground.R, ground.physics);
     car.body.setEnabled(false);
-    this.sim = { R, world, car, ground, localToFixed, fixedToLocal };
+    const stopDriving = ground.onStep((h) => this.step(h));
+    this.sim = { car, ground, localToFixed: ground.frame.toFixedM, stopDriving };
     this.say("Loading the ground…");
+  }
+
+  /** Where it starts, local. */
+  private home: Spot = { x: 0, y: 0, z: 0, yaw: 0 };
+
+  /** A physics step's driving, before it. */
+  private step(h: number): void {
+    const sim = this.sim;
+    if (!sim || this.placing) return;
+    const input = this.input;
+    // The chassis steers +1 to the left.
+    sim.car.drive(h, { throttle: input.throttle, steer: -input.steer, handbrake: input.handbrake });
+    this.simTime += h;
   }
 
   // -- the Body interface ----------------------------------------------------------------
@@ -181,26 +178,11 @@ export class Truck implements Body {
   draw(now: number): void {
     const sim = this.sim;
     if (!sim) return;
-    const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
-    this.last = now;
     const { car } = sim;
     if (this.placing) this.tryPlace(sim, this.placing, now);
     if (!this.placing) {
-      this.acc += dt;
-      let steps = 0;
-      const input = this.input;
-      // The chassis steers +1 to the left.
-      const drive = { throttle: input.throttle, steer: -input.steer, handbrake: input.handbrake };
-      while (this.acc >= STEP_S && steps < MAX_STEPS) {
-        car.drive(STEP_S, drive);
-        sim.world.step();
-        this.acc -= STEP_S;
-        this.simTime += STEP_S;
-        steps++;
-      }
-      if (steps === MAX_STEPS) this.acc = 0;
       const t = car.body.translation();
-      sim.ground.focus = new C.Cartesian3(t.x, t.y, t.z);
+      sim.ground.focus("truck", [t.x, t.y, t.z]);
       this.guardFall(sim, t, now);
       this.bump(sim, now);
     }
@@ -217,14 +199,15 @@ export class Truck implements Body {
   dispose(): void {
     this.disposed = true;
     if (this.model) {
-      this.world.scene.primitives.remove(this.model);
+      this.world.remove(this.model);
       this.model = null;
     }
     const sim = this.sim;
     this.sim = null;
     if (sim) {
-      sim.ground.destroy();
-      sim.world.free();
+      sim.stopDriving();
+      sim.car.remove(sim.ground.physics);
+      sim.ground.focus("truck", null);
     }
     this.say(null);
   }
@@ -253,7 +236,7 @@ export class Truck implements Body {
 
   /** Back to the start, once there is ground there. */
   respawn(): void {
-    this.placeAt({ x: 0, y: 0, z: 0, yaw: yawOfHeading(this.start.heading_deg) });
+    this.placeAt({ ...this.home });
   }
 
   /** On its wheels, on the ground (false while it waits for ground). */
@@ -287,21 +270,6 @@ export class Truck implements Body {
     this.sim?.ground.setDebug(on);
   }
 
-  /** Distance, m, from earth-fixed `from` towards `to` to the first thing in the way (the
-   * colliders, not the truck), or null when the way is clear: for a camera to stay out of
-   * walls. */
-  castRay(from: C.Cartesian3, to: C.Cartesian3): number | null {
-    const sim = this.sim;
-    if (!sim) return null;
-    const a = C.Matrix4.multiplyByPoint(sim.fixedToLocal, from, new C.Cartesian3());
-    const b = C.Matrix4.multiplyByPoint(sim.fixedToLocal, to, new C.Cartesian3());
-    const d = C.Cartesian3.subtract(b, a, new C.Cartesian3());
-    const reach = C.Cartesian3.magnitude(d);
-    if (reach < 1e-6) return null;
-    C.Cartesian3.divideByScalar(d, reach, d);
-    return sim.ground.castRay(a, d, reach);
-  }
-
   // -- inside ----------------------------------------------------------------------------
 
   private say(text: string | null): void {
@@ -322,20 +290,13 @@ export class Truck implements Body {
   /** Drop it onto the ground at `spot` once its colliders are built. */
   private tryPlace(sim: Sim, spot: Spot, now: number): void {
     const { x, y, yaw } = spot;
-    sim.ground.focus = new C.Cartesian3(x, y, spot.z);
-    // New colliders reach ray casts on a step; the truck is out of the world till placed.
-    sim.world.step();
-    const toi = sim.ground.castRay(
-      { x, y, z: spot.z + GROUND_PROBE.up },
-      { x: 0, y: 0, z: -1 },
-      GROUND_PROBE.down,
-    );
+    sim.ground.focus("truck", [x, y, spot.z]);
+    const hit = sim.ground.cast([x, y, spot.z + GROUND_PROBE.up], [0, 0, -1], GROUND_PROBE.down);
     // Wait for the ground to settle at its finest too, or it lands on a coarse tile.
-    if (toi === null || sim.ground.stats.pending > 0) return;
-    sim.car.place({ x, y, z: spot.z + GROUND_PROBE.up - toi + 0.4 }, yaw);
+    if (hit === null || sim.ground.settling) return;
+    sim.car.place({ x, y, z: hit.point[2] + 0.4 }, yaw);
     sim.car.body.setEnabled(true);
     this.placing = null;
-    this.acc = 0;
     this.say(null);
     this.quiet(now);
   }
@@ -405,7 +366,7 @@ export class Truck implements Body {
     }
     this.outsideSince = null;
     this.fenceSecond = null;
-    const back = this.lastInside ?? { x: 0, y: 0, z: 0, yaw: sim.car.yaw };
+    const back = this.lastInside ?? { ...this.home, yaw: sim.car.yaw };
     this.placeAt({ ...back, yaw: back.yaw + Math.PI });
   }
 

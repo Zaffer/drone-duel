@@ -14,6 +14,7 @@
 // light scales, green live values, a yellow aircraft symbol, sky-blue pilot input (hud.css).
 
 import { effect } from "alien-signals";
+import { loop } from "../engine/loop.ts";
 import type { TelemetryMsg } from "../net/protocol.ts";
 import { vehicle } from "../state/app.ts";
 import { channels } from "../state/input.ts";
@@ -340,15 +341,17 @@ class Dials {
   }
 }
 
-/** The dials in `el`, kept to the telemetry and the sticks (drawn once an animation frame at
- * most); rebuilt when the units or the vehicle change. Returns what takes them down. */
+/** The dials in `el`, kept to the telemetry and the sticks (drawn once a frame at most, in the
+ * frame loop's place phase); rebuilt when the units or the vehicle change. Returns what takes
+ * them down. */
 export function mountDials(el: HTMLElement): () => void {
   let dials: Dials | null = null;
   let key = "";
-  let pending = 0;
+  let pending = false;
+  const stopLoop = new AbortController();
 
   const draw = (): void => {
-    pending = 0;
+    pending = false;
     const v = vehicle();
     const units = prefs().hud.units;
     const kind = v?.kind ?? "multirotor";
@@ -365,17 +368,18 @@ export function mountDials(el: HTMLElement): () => void {
   };
 
   draw();
+  loop.each("dials", "place", () => pending && draw(), stopLoop.signal);
   const stop = effect(() => {
     // Read what the dials show, so a change of any of them draws the next frame.
     telemetry();
     channels();
     prefs();
     vehicle();
-    if (!pending) pending = requestAnimationFrame(draw);
+    pending = true;
   });
   return () => {
     stop();
-    if (pending) cancelAnimationFrame(pending);
+    stopLoop.abort();
     dials?.svg.remove();
     dials = null;
   };

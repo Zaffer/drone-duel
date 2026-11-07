@@ -80,11 +80,10 @@ function discImage(): string {
 }
 
 function dust(world: World, position: C.Cartesian3, d: Dust): void {
-  const scene = world.scene;
   const up = C.Ellipsoid.WGS84.geodeticSurfaceNormal(position, new C.Cartesian3());
   const rise = new C.Cartesian3();
   const drag = Math.log(d.dragKeep);
-  const system = scene.primitives.add(
+  const system = world.add(
     new C.ParticleSystem({
       image: discImage(),
       modelMatrix: C.Transforms.eastNorthUpToFixedFrame(position),
@@ -112,7 +111,7 @@ function dust(world: World, position: C.Cartesian3, d: Dust): void {
     }),
   ) as C.ParticleSystem;
   // The system's complete event comes when it stops billowing, its particles still alive.
-  setTimeout(() => scene.primitives.remove(system), (d.billowS + d.lifeS[1] + 1) * 1000);
+  setTimeout(() => world.remove(system), (d.billowS + d.lifeS[1] + 1) * 1000);
 }
 
 /** White dust where a drone strikes something, at sim height `altAmsl` (m above sea level). */

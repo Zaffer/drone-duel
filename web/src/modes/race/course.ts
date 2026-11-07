@@ -42,9 +42,9 @@ export class CourseView {
     private readonly world: World,
     readonly course: Course,
   ) {
-    this.lines = world.scene.primitives.add(new C.PolylineCollection());
+    this.lines = world.add(new C.PolylineCollection());
     // Hidden as a whole until placed (a hidden billboard's place still counts in the frustum).
-    this.marker = world.scene.primitives.add(new C.BillboardCollection({ show: false }));
+    this.marker = world.add(new C.BillboardCollection({ show: false }));
     const chevron = canvas(48, (g) => {
       g.fillStyle = "#FF6B35";
       g.strokeStyle = "#0D0E15";
@@ -124,9 +124,9 @@ export class CourseView {
         });
       }
     });
-    if (this.frames) this.world.scene.primitives.remove(this.frames);
+    if (this.frames) this.world.remove(this.frames);
     this.frames = boxes.length
-      ? this.world.scene.primitives.add(
+      ? this.world.add(
           new C.Primitive({
             geometryInstances: boxes,
             appearance: new C.PerInstanceColorAppearance({ translucent: false }),
@@ -160,9 +160,9 @@ export class CourseView {
   }
 
   dispose(): void {
-    if (this.frames) this.world.scene.primitives.remove(this.frames);
-    this.world.scene.primitives.remove(this.lines);
-    this.world.scene.primitives.remove(this.marker);
+    if (this.frames) this.world.remove(this.frames);
+    this.world.remove(this.lines);
+    this.world.remove(this.marker);
   }
 }
 

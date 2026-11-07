@@ -16,8 +16,6 @@ export interface Body {
   ahead?(now: number): number;
   /** Draw it for the frame at `now` (performance.now()). */
   draw(now: number): void;
-  /** Its primitives, which ground sampling must look through. */
-  readonly primitives: object[];
   /** The model, once loaded (for hiding it in FPV, and its nodes). */
   readonly model: C.Model | null;
   /** Show or hide the model (hidden in its own FPV view). */
