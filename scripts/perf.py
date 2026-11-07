@@ -163,6 +163,14 @@ def shoot(page: Page, fails: list[str]) -> None:
     time.sleep(3)
     page.mouse.up(button="right")
     step(page, "shoot: after", fails)
+    # On and off the sight: the view narrows and widens again (a full-window overlay repainted
+    # each frame once held four frames 40-60 ms each on the way off).
+    for _ in range(3):
+        page.mouse.down(button="right")
+        time.sleep(1.0)
+        page.mouse.up(button="right")
+        time.sleep(1.0)
+    step(page, "shoot: sight on and off", fails)
     # Down at the ground a few metres ahead: the rounds must stop in it.
     # (The mouse is locked: each move is read as how far it went, so it goes on down.)
     page.mouse.move(W // 2, 0)

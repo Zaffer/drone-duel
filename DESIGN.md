@@ -241,12 +241,13 @@ there, and a test fences them in. In `web/src/engine/`, `input/actions.ts` and `
 Two of Cesium's costs are taken out in `world.ts`: the Viewer's pick-and-select on every left
 click (a render of its own: the click that takes Shoot Down's mouse held a frame 240 ms), and a
 copy of every texture's reference count into two scratch objects each frame that nothing reads.
-One is left (2026-11-07): coming off the sight, the view widens over 0.22 s and some 700 tiles
-that left it come back into Cesium's selection within four frames, 40 to 60 ms each (7 ms
-steadily, with as many tiles): Cesium's traversal (visibility, transforms, the models'
-updates) for tiles coming back, not GC, the GPU, foveated loading or culled requests (each
-ruled out). It follows the sight's zoom (the Rifle tab): narrowed, the view draws 19 tiles where
-the full one draws 760.
+Coming off the sight held four frames 40 to 60 ms each (2026-11-07). Not Cesium, though its
+tiles came back into view in the same frames: its tile work was 11 ms as always, and the WebGL
+calls themselves stalled. Chrome's GPU thread was busy repainting the sight picture, a 2D canvas
+the size of the window cleared and drawn each frame. Hidden, there were no long frames.
+`shoot/sights.ts` now draws each sight on a small canvas moved by a CSS transform and faded by
+its opacity (the compositor's work); `perf.py` takes the sight on and off three times, and the
+longest frame there is now about 32 ms.
 
 A later step (§3.1) moves the physics world into a Worker; the ground's questions are already
 the only way in.
@@ -588,8 +589,9 @@ The page's modules are in `web/src/shoot/`:
   "Ahead" row says what is in front.
 - **rifle.ts**, **sights.ts**, **gunsounds.ts**: the first-person rifle and arms
   (tools/models/riflemodel.py; its measured points in the GLB's extras), the holo's reticle
-  (at infinity, through its window) and the irons' aperture, and the rifle's sounds, those from
-  out there arriving at the speed of sound.
+  (at infinity, through its window) and the irons' aperture (each a small canvas over the view,
+  moved by the compositor, §3.2), and the rifle's sounds, those from out there arriving at the
+  speed of sound.
 
 Every spring (recoil, the heartbeat, the knees) is the exact one (§3.2), and the view's pitch is
 held off straight up and down: stepped a frame at a time by Euler, the heartbeat's grew without
