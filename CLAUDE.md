@@ -33,6 +33,13 @@ is TypeScript in `web/` (bun). ArduPilot, INAV and Betaflight SITL and mavlink-r
   (a test holds this). The quad uses SkyFlow-Dynamics' JAX backend as published, on the CPU.
   The wing's numbers' sources are in `physics/wing/airframe.py`, and `tests/test_physics_wing.py`
   holds the model to them.
+- The page's engine (DESIGN.md §3.2, `web/src/engine/`): per-frame work joins the frame loop
+  (`loop.each`/`loop.fixed`, named and timed); what moves or collides works in the place's local
+  frame and asks `engine/ground.ts` (microseconds), never Cesium's `sampleHeight`/`pickPosition`
+  (a render each; only `world.ts` may, metered); everything drawn goes through `world.add`;
+  springs are `engine/spring.ts`; controls are tables mounted with `input/actions.ts`. A test
+  fences these. `scripts/check.sh --perf` plays the page on the GPU and holds frames to budget
+  (serves 8600, Google's tiles cost money: run it when the frame's work changes).
 - The page's state is alien-signals; anything over time (the WebSocket, gamepad samples, frames,
   timers, peer messages) is a native Chrome Observable (`web/src/types/observable.d.ts`).
   Chrome only. Colours come from `web/src/theme/tokens.css` ("Dusk").

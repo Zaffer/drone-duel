@@ -72,7 +72,7 @@ the truck, Windows/WSL and macOS, and flying real hardware.
  Chrome ── one WebSocket (/ws) + static app ──────────────────────────────────┐
    │  app shell, menus, HUD          (alien-signals: state)                  │
    │  views, video, OSD, dials       (Observables: pose/osd/telemetry/rc)    │
-   │  truck physics, tile colliders  (Rapier, in the page)                   │
+   │  frame loop, ground, truck      (engine/: Rapier, in the page, §3.2)    │
    │  duel / race peer link          (Trystero over Nostr ⇄ other player)   │
    └─────────────────────────────────────────────────────────────────────────┘
                                    │
@@ -142,8 +142,8 @@ velocities and the attitude turns between them (slerp); past the newest, it goes
 velocity and body rates for up to 100 ms, then holds. Your own aircraft is sampled at "sim now",
 with no delay added: it is carried on 6 ms at the median, 10 to 30 ms at the 95th percentile.
 
-**One frame loop.** Cesium's own render loop is off. Each animation frame runs every
-subscriber of `frames()` in order (the views place the camera and the vehicle from the
+**One frame loop** (§3.2). Cesium's own render loop is off. Each animation frame runs every
+system of the loop in its phase (the views place the camera and the vehicle from the
 timeline), then draws, so a frame shows what it placed, not the frame before's.
 
 **Measured** (2026-11-04, headless Chrome on the RTX 4090, the Chupito at 33 m/s in chase view,
@@ -183,6 +183,56 @@ and the firmware (WebAssembly) would run in a dedicated Worker on a fixed step, 
 there through WebHID (dedicated workers, Chrome 131+), so the sticks still never wait on
 drawing, and the poses would reach the same timeline through a SharedArrayBuffer (which needs
 the page cross-origin isolated).
+
+### 3.2 The page's engine
+
+Built 2026-11-06 after Shoot Down's "somersaults" (a ground lookup per bullet step spiralling
+into seconds-long frames, and a spring stepped a frame at a time running away on them). The
+rule: what costs a render, what runs each frame, and what moves are each in one place, metered
+there, and a test fences them in. In `web/src/engine/`, `input/actions.ts` and `world/world.ts`:
+
+- **One frame loop** (`engine/loop.ts`). Each animation frame runs its systems in phases:
+  `input` (the controls), `sim` (what moves by its own rules), `place` (the camera, the models,
+  the HUD), then Cesium draws. Every system has a name and is timed, and the performance panel
+  (P) lists the dearest. A fixed-rate system (`loop.fixed`) steps by real time whatever the frame
+  rate (the physics at 60 Hz, the shooter's body at 240 Hz), and catches up at most 0.1 s a
+  frame: a stall is dropped and counted, never spent, so a slow frame cannot make the next one
+  slower. Pausing stops input, not time: the firmware cannot stop, so nothing in the world does.
+- **Springs are exact** (`engine/spring.ts`): a damped spring is stepped by its closed-form
+  solution, stable at any step; the recoil, the heartbeat and the knees are these. Exponential
+  approaches use `approach(dt, τ)`, exact too.
+- **One local frame per place** (`engine/frame.ts`): east-north-up metres at the pad, from the
+  pad's map height; it converts to and from earth-fixed, map heights and sim heights. What moves
+  or collides works in it; `geo.ts` keeps the small lat/lon offsets (a pose carried on).
+- **One ground** (`engine/ground.ts`): each of Google's tiles drawn within 150 m of a focus (the
+  vehicle, the shooter, the truck) is read back into a Rapier trimesh, following Cesium's level
+  of detail and dropped 400 m from every focus. Rays, segments and heights are a walk of
+  Rapier's tree: microseconds, no render. Building is a few milliseconds a frame at most
+  ("ground build"). It owns the page's one physics world and steps it ("physics"); the truck
+  drives in it. Coarse tiles (metres out) are never built: past the built ground there is none
+  to ask, and the rounds stop looking (§7.1). Without 3D tiles it is a flat plane.
+- **Cesium's own lookups** (`sampleHeight*`, `pickPosition`, `drillPick`, `globe.pick`) are each
+  a render, and the ones that wait load the finest tiles first. They are only in `world.ts`,
+  metered ("map lookup", "screen pick"), for where nothing is built yet: a pad before anything
+  is drawn there, the drone in the map view. Everything the page draws goes through
+  `world.add`, so those lookups look through it themselves: no exclusion lists to forget (a
+  tracer once "landed" the drone in mid-air).
+- **Controls as tables** (`input/actions.ts`, §12): one listener for the keyboard, the locked
+  mouse and a standard gamepad (read once a frame); each part of the game mounts a table of its
+  actions, and the Inputs tab and the key strip are drawn from the same tables.
+- **Fences** (`web/test/fence.test.ts`): Cesium's lookups only in `world.ts`; scene adds only
+  through `world.add`; `requestAnimationFrame` only in the loop; no hand-cut spring substeps.
+  `web/test/actions.test.ts` holds tables mounted together never to answer one press twice.
+- **Measured** (`scripts/perf.py`, `scripts/check.sh --perf`): headless Chrome on the GPU at
+  3440×1400, uncapped, plays Shoot Down (stand, walk, sprint, ten quick shots, three into the
+  ground, which must stop there) and the truck (it must drive), and fails a frame over 40 ms at
+  the 95th percentile, any over 250 ms, a system over 6 ms at the 95th, or time dropped.
+  2026-11-06: Shoot Down ~110 fps walking; ten quick shots took the frame's own work from
+  8.8 ms (rounds' ground picks) to 0.2 ms, and the longest frame from 150 ms to 19 ms (the
+  tracer's shader kept, §7.1); the truck ~300 fps. Cesium's render is the rest of every frame.
+
+A later step (§3.1) moves the physics world into a Worker; the ground's questions are already
+the only way in.
 
 ## 4. Repository layout
 
@@ -230,17 +280,19 @@ drone-duels/
       main.ts
       theme/                tokens.css (palette, §11), base.css
       state/                alien-signals stores (§9)
-      streams/              Observable sources: ws channels, gamepad, frames, timers
+      engine/               frame loop, exact spring, local frame, ground + physics (§3.2)
+      streams/              Observable sources: ws channels, frames, timers
       net/                  server ws client, protocol types (generated, §8), peer link
       ui/                   menu (scenario, location, vehicle), pause menu, top bar, toasts
-      world/                Cesium viewer, basemap, tile colliders, ground sampling
+      world/                Cesium viewer, basemap, world.add, Cesium's lookups (metered)
       vehicles/             quad, wing, truck: models, animation; truck physics (Rapier)
       people/               the operator standing behind the pad
       views/                fpv, chase, spotter, map, orbit, minimap, dials
       video/                analog (analog-vision), digital, osd renderer
-      modes/                freefly/, duel/, race/
+      modes/                freefly/, duel/, race/, shoot/
+      shoot/                Shoot Down: ballistics, air, rounds, recoil, hold, shooter (§7.1)
       dynamics/             wing dynamics overlay
-      input/                gamepad, profiles, calibration, keyboard
+      input/                actions (the controls' tables), radio, mapping, calibration
       audio/
     test/                   bun test
   tests/                    pytest (physics goldens, bridges, content, session, protocol)
@@ -392,8 +444,9 @@ Betaflight's own PIDs and rates fly it. `bridges/betaflight.py`:
 
 ### 6.3 Truck
 
-Today's Rapier ray-cast vehicle (car.js and drivesession.js) on colliders built from the tiles,
-in the page, with no firmware. It gets the same Vehicle interface in the page as the aircraft
+Today's Rapier ray-cast vehicle (car.js and drivesession.js) on the place's ground (§3.2: the
+colliders built from the tiles, and the physics world stepped at 60 Hz), in the page, with no
+firmware. It gets the same Vehicle interface in the page as the aircraft
 (pose stream, controls, reset), so views and modes do not care that its physics is local.
 
 ### 6.4 Vehicle lifecycle
@@ -471,12 +524,13 @@ The page's modules are in `web/src/shoot/`:
   with the chance the blades cover, motors, ESC sleeves, arms, pack, stack, camera, plates), and
   the share of the bullet's momentum each takes as it passes through.
 - **rounds.ts**: rounds stepped in real time against the drone's drawn pose at the same moment
-  (favouring the shooter, as the duel's strikes) and the drawn ground; tracers, dust, sparks. A
-  hit goes to the server as `hit` (part, motor, impulse, where) and the physics does the rest.
-  The ground is a pick render (`sampleHeight`), so it is rationed: each round once a frame at
-  most, 2 ms a frame among them, none high above anything; a round found under it is searched
-  back along its way for where it went in. (Looked for every few metres of flight, a string of
-  shots fed on itself into seconds-long frames.)
+  (favouring the shooter, as the duel's strikes) and the ground; tracers, dust, sparks. A hit
+  goes to the server as `hit` (part, motor, impulse, where) and the physics does the rest. Each
+  frame, a round's way since the last is a segment cast through the place's colliders (§3.2):
+  the point where it went in, exact, in microseconds. Past 400 m from the shooter none are built,
+  so it is no longer checked, and flies on, tracer and all, until spent (5 s, 120 m/s or 3 km).
+  A clear tracer, flash, spark and dust are kept drawn: Cesium frees a material's shaders once
+  nothing uses them, and relinking the tracer's held the first shot's frame 150 to 350 ms.
 - **recoil.ts**: the rifle's momentum, bullet plus powder gas at Hatcher's 1.75 × muzzle speed
   (5.5 N·s for M193 here), into a body of damped springs by stance: the shoulder pocket, the
   torso pushed back and tipped about the hips (or elbows, prone), the shoulders turned by the
@@ -484,14 +538,18 @@ The page's modules are in `web/src/shoot/`:
   the shakes, a forced breath at 14 s), the hold's wander and shiver by stance, heartbeats, the
   trigger's jerk, and a heart rate that walking and running raise.
 - **shooter.ts**: the person (stances; walking, sprinting at 6 m/s with the rifle down, jumping;
-  the drawn ground looked up ahead as they move; the camera on the sight or head up) and the shot: the trigger breaks, the jerk, 8 ms of lock time, the bullet leaves along
-  the sight line tipped by the zero and spread by the ammunition's dispersion.
+  the camera on the sight or head up) and the shot: the trigger breaks, the jerk, 8 ms of lock
+  time, the bullet leaves along the sight line tipped by the zero and spread by the
+  ammunition's dispersion. Three systems in the frame loop: its controls (shoot/controls.ts),
+  its body at 240 Hz, and the eye and rifle placed. Its ground is the place's colliders, asked
+  as it goes, down from 2.8 m over the feet: a tree's crown or an overhang over them is not in
+  their way; inside something taller (a building) nothing is found below, and its top is a wall.
 - **obstacles.ts**: what they get over, by its rise over the feet: a step (to 0.45 m) walked
   onto; a vault (to 1.1 m, waist high) by walking on into it or a jump; a climb (to 2.3 m) by a
   jump, a grab of the top and a pull up, the rifle slung; higher, a wall, unless it is thin with
   ground within 4 m beyond, which leaning into for 0.6 s pushes through. The tiles' ground is
-  heights from above, so bushes, hedges, crowns of trees and the mesh's glitches are solid blobs
-  to it: pushing through is the way out of them (and a thin wall too high to climb gives way the
+  heights, so bushes, hedges, low crowns of trees and the mesh's glitches are solid blobs to it:
+  pushing through is the way out of them (and a thin wall too high to climb gives way the
   same). Down, any drop: a fall, and landing over 6 m/s (some 1.8 m) a stagger. The HUD's
   "Ahead" row says what is in front.
 - **rifle.ts**, **sights.ts**, **gunsounds.ts**: the first-person rifle and arms
@@ -499,13 +557,14 @@ The page's modules are in `web/src/shoot/`:
   (at infinity, through its window) and the irons' aperture, and the rifle's sounds, those from
   out there arriving at the speed of sound.
 
-Every spring (recoil, the heartbeat, the knees) is stepped in a few milliseconds whatever the
-frame, and the view's pitch is held off straight up and down: stepped a frame at a time, the
-heartbeat's grew without end under about 20 fps and turned the view over.
+Every spring (recoil, the heartbeat, the knees) is the exact one (§3.2), and the view's pitch is
+held off straight up and down: stepped a frame at a time by Euler, the heartbeat's grew without
+end under about 20 fps and turned the view over.
 
 The numbers no source gives are marked EST where they are set. Not modelled yet: the spatial
 variation of the wind along a shot, prop imbalance after a blade is lost, and ricochets. Walls
-are only the drawn tiles' heights: an overhang is not seen, and nothing hurts in a fall.
+are the tiles' heights as the feet meet them: an overhang lower than 2.8 m over the feet is a
+wall, and nothing hurts in a fall.
 
 ## 8. Server ⇄ page protocol
 
@@ -687,6 +746,11 @@ at runtime). The firmware OSD keeps its own fonts and colours, as real goggles s
   ("move the throttle to full", as driveradio.js does). It saves to the server's prefs, keyed by
   the gamepad's id, so the result survives a browser reset.
 - The keyboard and an Xbox-style gamepad are fallbacks, mainly for the truck.
+- Everything else (hotkeys, Shoot Down's controls) is an action in a table
+  (`input/actions.ts`, §3.2): `ui/keys.ts` (the menu, flight, on foot, the dynamics overlay) and
+  `shoot/controls.ts`. Codes are KeyboardEvent codes, `Mouse0`/`Mouse2` (only while the mouse is
+  locked to the map, Shoot Down) and `Pad0`–`Pad16` (a standard gamepad's buttons). The Inputs
+  tab and the HUD's key strip are drawn from the tables.
 - Arm and mode switches go on AUX channels into the firmware, so you arm the way you would for
   real. The vehicle spec says which AUX does what for each firmware.
 
@@ -710,6 +774,9 @@ speed and direction.
 - Integration: `duels doctor` starts each firmware, spawns each vehicle headless, arms and
   reports. A Playwright smoke test (headless Chrome on the 4090 with `--use-angle=gl`, port 8600)
   runs menu → Free Fly → each vehicle → each view.
+- The page's frame time: `scripts/check.sh --perf` (`scripts/perf.py`, §3.2) plays Shoot Down
+  and the truck on the GPU at the user's window size and holds frames and systems to budget.
+  It serves on 8600 (Google's tiles: it costs money, so it is not in the ordinary checks).
 - Every flight is recorded to `logs/flights/` (today's FlightRecorder, generalised).
 
 ## 15. Decided in review (2026-10-29)
