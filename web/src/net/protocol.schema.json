@@ -265,7 +265,7 @@
     },
     "TargetMsg": {
       "additionalProperties": false,
-      "description": "Fly the session's ArduCopter as a ground station would, for a target to shoot at: \"hover\"\ntakes off from its pad (GUIDED, armed over MAVLink, a takeoff) and holds `height_m` above\nit, or climbs or sinks to it if already up; \"land\" lands where it is (LAND). The page sends\nno `rc` meanwhile: an idle receiver is played (firmware/ardupilot.py).",
+      "description": "Fly the session's quad itself, for a target to shoot at: \"hover\" takes off from its pad\nand holds `height_m` above it, or climbs or sinks to it if already up; \"land\" lands where it\nis. ArduCopter is flown as a ground station would (GUIDED, armed over MAVLink, a takeoff;\nLAND), with an idle receiver played (firmware/ardupilot.py); Betaflight, which takes no such\ncommands, as a pilot on its switches would (POSHOLD; firmware/betaflight.py). The page sends\nno `rc` meanwhile.",
       "properties": {
         "ch": {
           "const": "target",

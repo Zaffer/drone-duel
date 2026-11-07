@@ -312,3 +312,48 @@ def test_the_osd_fits_its_grid(video: str) -> None:
         assert x < cols and y < rows, f"{m[1]} at {x}, {y} is off the {cols} x {rows} grid"
         shown += 1
     assert shown >= 15
+
+
+def _stick_factor(throttle: float) -> float:
+    """Betaflight's altitude hold, reading the throttle stick (flight/alt_hold_multirotor.c's
+    altHoldUpdateTargetAltitude): the share of its climb rate asked, -1 to 1."""
+    hover, deadband = betaflight.HOVER_US, betaflight.ALT_HOLD_DEADBAND
+    low = hover - deadband * (hover - 1000)
+    high = hover + deadband * (2000 - hover)
+    if throttle < low:
+        return (throttle - 1000) / (low - 1000) - 1
+    if throttle > high:
+        return (throttle - high) / (2000 - high)
+    return 0.0
+
+
+@pytest.mark.parametrize("climb", [-2.0, -0.7, -0.1, 0.0, 0.1, 0.5, 3.0, 5.0])
+def test_the_throttle_asks_for_the_climb(climb: float) -> None:
+    us = betaflight.throttle_for(climb)
+    assert _stick_factor(us) * betaflight.ALT_HOLD_CLIMB_MS == pytest.approx(climb, abs=0.03)
+    assert us > 1050  # never "throttle low", where altitude hold takes no stick
+
+
+def test_the_pilot_flies_by_the_settings() -> None:
+    """The constants the game flies Betaflight's altitude hold by are what quad5.cli sets, and
+    its switches are where quad5.cli puts the modes."""
+    sets: dict[str, str] = {}
+    aux: dict[int, tuple[int, int, int]] = {}
+    for line in betaflight.commands((FIRMWARE_FILES / "betaflight" / "quad5.cli").read_text()):
+        if m := re.fullmatch(r"set (\w+) = (\S+)", line):
+            sets[m[1]] = m[2]
+        elif m := re.fullmatch(r"aux \d+ (\d+) (\d+) (\d+) (\d+) 0 0", line):
+            aux[int(m[1])] = (int(m[2]), int(m[3]), int(m[4]))
+    assert int(sets["ap_hover_throttle"]) == betaflight.HOVER_US
+    assert int(sets["alt_hold_deadband"]) / 100 == betaflight.ALT_HOLD_DEADBAND
+    assert int(sets["alt_hold_climb_rate"]) / 10 == betaflight.ALT_HOLD_CLIMB_MS
+
+    def on(box: int, channel: int, us: int) -> bool:
+        ch, start, end = aux[box]
+        return ch == channel and start <= us < end
+
+    arm, angle, althold, poshold = 0, 1, 3, 11  # permanent ids
+    assert on(arm, 0, betaflight.ARM_HIGH) and not on(arm, 0, betaflight.IDLE_US[4])
+    assert on(angle, 1, betaflight.MODE_ANGLE) and on(angle, 1, betaflight.IDLE_US[5])
+    assert on(althold, 1, betaflight.MODE_POSHOLD) and on(poshold, 1, betaflight.MODE_POSHOLD)
+    assert not on(althold, 1, betaflight.MODE_ANGLE)

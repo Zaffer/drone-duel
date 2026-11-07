@@ -1,10 +1,11 @@
 // Shoot Down (DESIGN.md §7): the player is a person on the ground with a rifle, and a real drone
-// (ArduCopter on SkyFlow-Dynamics, the server's session) hovers out in front of them. Bring it
-// down. Every bullet flies (shoot/ballistics.ts) through the place's air; what it hits on the
-// drone goes to the physics as damage by part, and the drone falls as it would.
+// (ArduCopter or Betaflight on SkyFlow-Dynamics, the server's session) hovers out in front of
+// them. Bring it down. Every bullet flies (shoot/ballistics.ts) through the place's air; what it
+// hits on the drone goes to the physics as damage by part, and the drone falls as it would.
 //
 // The shooter starts 100 m behind the pad, facing it; the drone takes off from the pad and holds
-// 30 m above it (the server flies it, as a ground station would: target hover). Once it is down
+// 30 m above it (the server flies it, as a ground station would, or Betaflight's pilot on its
+// switches: target hover). Once it is down
 // (crashed, or on the ground after a hit) it comes back after a few seconds: reset and hover.
 
 import { effect } from "alien-signals";
@@ -64,9 +65,14 @@ export const shoot: ModeDef = {
   id: "shoot",
   name: "Shoot Down",
   desc: "On the ground with a rifle. A drone hovers out in front: bring it down.",
-  // The target: a multirotor its firmware can hover on its own.
+  // The target: a multirotor its firmware can hover on its own (ArduCopter in GUIDED, or
+  // Betaflight in POSHOLD, the server on its switches).
   vehicles: (all) =>
-    all.filter((v) => v.kind === "multirotor" && v.firmware.kind === "ardupilot-copter"),
+    all.filter(
+      (v) =>
+        v.kind === "multirotor" &&
+        (v.firmware.kind === "ardupilot-copter" || v.firmware.kind === "betaflight"),
+    ),
   pickHint: "The drone to shoot at",
   ownsView: true,
   run: (flight) => new ShootRuntime(flight),

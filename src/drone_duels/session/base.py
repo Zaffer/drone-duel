@@ -255,6 +255,10 @@ class Firmware(ABC):
         only at boot: the session then respawns the vehicle."""
         return False
 
+    def reset_in_place(self) -> None:  # noqa: B027 - a hook: most have nothing to do
+        """The physics is going back to the start under it (`resets_in_place` only): stop
+        flying itself, and let go of anything that would fly it off the pad again."""
+
     def hover(self, height_m: float) -> None:
         """Fly itself, as a ground station would fly it: take off from the pad and hold
         `height_m` above it (or go to that height, if up). Returns at once; the flying goes on

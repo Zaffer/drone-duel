@@ -4,10 +4,14 @@
 # (quad5.analog.cli or quad5.digital.cli).
 
 # The radio: the pilot's sticks over UDP (SITL's RX_UDP), AETR. AUX1 (channel 5) high arms;
-# AUX2 (channel 6) is the mode switch: low ANGLE, middle HORIZON, high neither (ACRO).
+# AUX2 (channel 6) is the mode switch, laid out as the ArduPilot quad's (LOITER, STABILIZE,
+# ACRO): low POSHOLD (altitude hold and position hold together, on the GPS), middle ANGLE, high
+# neither (ACRO). Betaflight arms only with the hold modes' switch off, and they take over
+# once the throttle has been raised after arming.
 aux 0 0 0 1700 2100 0 0
-aux 1 1 1 900 1300 0 0
-aux 2 2 1 1300 1700 0 0
+aux 1 1 1 1300 1700 0 0
+aux 2 3 1 900 1300 0 0
+aux 3 11 1 900 1300 0 0
 # The radio link lost (the page gone): Betaflight's failsafe lands it where it is, holding the
 # throttle it had through the guard time (not dropping it to low), and disarms on touchdown
 # (its impact detection: 100 g/s of jerk, with the sticks let go or the altitude held).
@@ -19,6 +23,13 @@ set landing_disarm_threshold = 10
 feature GPS
 set gps_provider = VIRTUAL
 set trust_mag = ON
+
+# Altitude hold: Betaflight's defaults, written out because the game flies by them as a target
+# (drone_duels.firmware.betaflight's HOVER_US, ALT_HOLD_DEADBAND, ALT_HOLD_CLIMB_MS). The hover
+# throttle is where this quad hovers in ANGLE (about 1280).
+set ap_hover_throttle = 1275
+set alt_hold_deadband = 20
+set alt_hold_climb_rate = 50
 
 # UART2: MSP for the game's ground station (telemetry). UART3: MSP DisplayPort, the OSD, as to a
 # DJI air unit (functions MSP + VTX_MSP).

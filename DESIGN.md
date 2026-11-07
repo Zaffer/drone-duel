@@ -383,12 +383,28 @@ Betaflight's own PIDs and rates fly it. `bridges/betaflight.py`:
   reordered from Betaflight's quad X (rear right first) to ArduPilot's.
 - RC goes over UDP from the adapter (an idle receiver until the page's sticks come), telemetry
   over MSP, the OSD over MSP DisplayPort polled as a DJI air unit polls it (INAV's `AirUnit`).
+- The mode switch is laid out as ArduCopter's: low POSHOLD (Betaflight's altitude hold and GPS
+  position hold together), middle ANGLE, high ACRO. Betaflight arms only with POSHOLD off, and
+  the hold modes take over once the throttle has been raised after arming; in them the
+  throttle stick asks for a climb or a descent, nothing within 20 % of its travel about the
+  hover throttle (1275 µs, where this quad hovers in ANGLE).
 - A link lost (§8): Betaflight's own failsafe lands it where it is (AUTO-LAND, holding the
-  throttle through the guard time) and disarms on the touchdown's jerk. SITL has no battery: no
-  pack voltage. A reset leaves it running (no EKF to upset). It cannot fly itself here, so Shoot
-  Down's target stays ArduCopter.
+  throttle through the guard time; its altitude and position hold fly the descent) and disarms
+  on the touchdown's jerk. SITL has no battery: no pack voltage. A reset leaves it running (no
+  EKF to upset).
+- **Flying itself** (a target, `target` in §8): Betaflight takes no commands from a ground
+  station (its MAVLink takes missions but no arming or modes, and SITL builds without it), so
+  the game flies it as a pilot on its own modes would (`Betaflight.hover`, `land`), reading it
+  over MSP: arm switch up in ANGLE, POSHOLD, then the throttle stick for the climb asked (0.6 m/s
+  a metre below the height, at most 3 m/s), back in the deadband within 0.3 m, and on nudging it
+  there (its height target trails a fast climb). Landing comes down in POSHOLD until
+  Betaflight's touchdown detection disarms it. A reset in place (`Firmware.reset_in_place`)
+  puts the arm switch low, or it would fly off the pad again.
 - Measured (2026-11-06, SITL): ready 8 s after the start; Betaflight's attitude within 2° of the
-  truth in flight (its compass has a 2° declination).
+  truth in flight (its compass has a 2° declination). In ANGLE the place's wind took it 25 m in
+  10 s; in POSHOLD it held within 0.6 m. As a target: 30 m held 11 s after asking from the pad,
+  within 0.5 m up and down after one 1.8 m dip, within 0.5 m of the pad across; after a reset, 10 m
+  4 s after asking; down from 30 m in 11 s, disarmed by Betaflight on touchdown.
 
 ### 6.3 Truck
 
@@ -454,8 +470,9 @@ saw it (favouring the shooter).
 
 The player is a person on the ground with an 11.5" AR-15 (content/weapons/ar15-sbr.toml: its
 mass, twist, magazine, sights, zero, and the cartridge, M193, with each number's source). The
-target is the session's own vehicle, the 5" quad on ArduCopter and SkyFlow-Dynamics: the page
-asks for `target hover` and the server flies it up as a ground station would. Nobody flies it
+target is the session's own vehicle, the 5" quad on ArduCopter or Betaflight and
+SkyFlow-Dynamics: the page asks for `target hover` and the server flies it up, as a ground
+station would (ArduCopter) or as a pilot on its switches would (Betaflight, §6.2). Nobody flies it
 from the page (`ModeDef.ownsView`: no rig, feed, operator, sticks or motor in the player's ears).
 The page's modules are in `web/src/shoot/`:
 

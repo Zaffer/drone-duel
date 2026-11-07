@@ -4,9 +4,10 @@ Commands (start, switch, reset, destroy, throw, target, stop) run one at a time 
 own thread, in order. A new start or switch cancels a spawn still in progress. The pilot's
 sticks, the ground, the wind and hits go straight through, from any thread.
 
-A target (Shoot Down) is the firmware flying itself, as a ground station would fly it
-(Firmware.hover, land): queued as a command, so a `reset` then `target hover` from the page
-respawns the vehicle first and then takes off. A hit goes straight to the physics
+A target (Shoot Down) is the firmware flying itself, as a ground station would fly it, or (for
+Betaflight, which takes no such commands) as a pilot would on its own modes (Firmware.hover,
+land): queued as a command, so a `reset` then `target hover` from the page respawns the vehicle
+first and then takes off. A hit goes straight to the physics
 (physics/quad/model.py), and the firmware flies on with what it leaves.
 """
 
@@ -248,6 +249,7 @@ class Session:
                 and firmware.resets_in_place
                 and physics is not None
             ):
+                firmware.reset_in_place()
                 physics.send({"t": "reset"})
                 # Still ready, but said again: a page waiting on the reset (a race back on its
                 # grid) hears that it is done.

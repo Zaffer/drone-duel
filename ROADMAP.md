@@ -6,8 +6,9 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 
 - **Betaflight's 5" as a firmware choice on the 5" quad's card**, not a second card: it is a
   vehicle of its own today (`quad5-betaflight`).
-- Betaflight flying itself (its AUTOPILOT / POS HOLD over the game's RC), so Shoot Down can hover
-  it as a target.
+- A moving Shoot Down target on Betaflight's flight plans: a takeoff and a hold that orbits or
+  flies a figure of eight (`waypoint insert`, typed in with its settings), on its AUTOPILOT
+  switch. Today the game hovers it in POSHOLD (DESIGN.md §6.2).
 - A battery for Betaflight SITL: its simulator protocol carries none, so it reads no pack.
 - **ArduPilot Rover on the truck.** Rapier stays the physics (tile collisions). A lockstep link
   between the page and Rover SITL's JSON backend, for practising rover missions.

@@ -1,5 +1,6 @@
 """The Betaflight 5" quad for real: Betaflight SITL on our racer5in physics, through the session,
-flown on the sticks as the page flies it. Slot 3, clear of the other vehicles' tests.
+flown on the sticks as the page flies it, and flying itself as Shoot Down's target. Slot 4, clear
+of the other vehicles' tests.
 """
 
 import math
@@ -15,14 +16,16 @@ from drone_duels.physics.core.rigidbody import to_euler
 from drone_duels.server.protocol import POSE_FIELDS, OsdMsg, TelemetryMsg
 from drone_duels.session.base import Events, Firmware, PhysicsProcess, SpawnContext
 from drone_duels.session.session import Session, make_firmware
+from drone_duels.world.geo import LocalFrame
 
 pytestmark = [
     pytest.mark.sitl,
     pytest.mark.skipif(not BINARY.exists(), reason="no Betaflight SITL: scripts/setup.sh"),
 ]
 
-SLOT = 3
+SLOT = 4
 ALT, QW = POSE_FIELDS.index("alt"), POSE_FIELDS.index("qw")
+LAT, LON = POSE_FIELDS.index("lat"), POSE_FIELDS.index("lon")
 
 Flight = tuple[Session, Recorder, list[Firmware]]
 
@@ -66,6 +69,15 @@ def truth(events: Recorder) -> tuple[float, float, float, float]:
     return roll, pitch, yaw % 360, pose[ALT]
 
 
+def position(session: Session, events: Recorder) -> tuple[float, float, float]:
+    """North and east of the pad and the height above it, m, from the physics."""
+    pose = events.pose()
+    assert pose is not None and session.origin is not None
+    lat, lon, ground = session.origin
+    north, east = LocalFrame(lat, lon).to_ne(pose[LAT], pose[LON])
+    return north, east, pose[ALT] - ground
+
+
 def heading_gap(a: float, b: float) -> float:
     return abs((a - b + 180) % 360 - 180)
 
@@ -83,9 +95,14 @@ def test_fly_lose_the_radio_land_reset(flight: Flight) -> None:
     assert session.origin is not None
     ground = session.origin[2]
     with Radio(session) as radio:
+        radio.set(mode=1000)  # POSHOLD: Betaflight will not arm in it
+        time.sleep(1)
+        blocked = telemetry(events).blockers
+        assert "altitude hold switch" in blocked and "position hold switch" in blocked
+        radio.set(mode=1500)  # ANGLE
         time.sleep(1)
         assert not telemetry(events).armed and telemetry(events).blockers == []
-        radio.set(arm=2000)  # the mode switch low: ANGLE
+        radio.set(arm=2000)
         wait_for("armed", lambda: telemetry(events).armed, 10)
         assert telemetry(events).mode == "ANGLE"
 
@@ -107,6 +124,17 @@ def test_fly_lose_the_radio_land_reset(flight: Flight) -> None:
         lat, lon = telemetry(events).lat, telemetry(events).lon
         assert lat is not None and lon is not None
         assert abs(lat - session.origin[0]) < 1e-3 and abs(lon - session.origin[1]) < 1e-3
+
+        # POSHOLD, the sticks let go: it stops where it is, in the place's wind (in ANGLE it
+        # drifts metres a second), and stays at its height.
+        radio.set(throttle=1275, mode=1000)
+        wait_for("POSHOLD", lambda: telemetry(events).mode == "POSHOLD", 3)
+        time.sleep(4)  # it brakes
+        held = position(session, events)
+        time.sleep(4)
+        moved = position(session, events)
+        assert math.dist(held[:2], moved[:2]) < 1.5 and abs(held[2] - moved[2]) < 1.5
+        radio.set(mode=1500)
 
         # The page goes quiet: Betaflight's failsafe lands it and disarms on touchdown.
         radio.on = False
@@ -165,3 +193,49 @@ def test_another_video_system_respawns_with_its_grid(flight: Flight) -> None:
         session.set_video("analog")
     wait_for("ready on analog", lambda: session.state == "ready" and len(made) == 3, 60)
     wait_for("the analog grid", lambda: grid() == (30, 13), 10)
+
+
+def hover_at(session: Session, events: Recorder, h: float) -> None:
+    """Ask for a hover at `h` m (Shoot Down's target) and wait until it holds there."""
+    asked = time.monotonic()
+    session.target("hover", h)
+    wait_for("armed", lambda: telemetry(events).armed, 15)
+    wait_for(f"{h:.0f} m up", lambda: position(session, events)[2] > h - 1.0, 40)
+    print(f"\n{h:.0f} m reached {time.monotonic() - asked:.1f} s after asking")
+    time.sleep(4)
+    t = telemetry(events)
+    assert t.mode == "POSHOLD" and t.armed
+    assert abs((t.alt_rel or 0) - h) < 1.5 and abs(t.climb) < 0.7
+    north, east, height = position(session, events)
+    assert abs(height - h) < 1.5  # the truth agrees
+    time.sleep(3)
+    assert math.dist((north, east), position(session, events)[:2]) < 1.5  # held there
+
+
+def test_flies_itself_as_a_target(flight: Flight) -> None:
+    """Shoot Down's target: Betaflight takes no ground station's commands, so the game flies it
+    on its own switches: armed, POSHOLD, up to the height and held there. Shot through a motor
+    it comes down; a reset (in place) and it goes up again; and it lands on its own."""
+    session, events, _ = flight
+    hover_at(session, events, 20.0)
+
+    session.hit("motor", 1, (0.0, 1.0, 0.0), (0.08, 0.08, 0.0))
+
+    def phase() -> str | None:
+        physics = session._physics  # pyright: ignore[reportPrivateUsage]
+        return physics.status.get("phase") if physics else None
+
+    wait_for("shot down", lambda: phase() in ("crashed", "ground"), 20)
+    print("shot down:", phase(), [m["text"] for m in events.of("log")][-6:])
+    assert position(session, events)[2] < 0.5
+
+    session.command("reset")
+    wait_for("back on the pad, disarmed", lambda: not telemetry(events).armed, 10)
+    wait_for("on the pad", lambda: math.dist(position(session, events)[:2], (0, 0)) < 0.1, 5)
+    hover_at(session, events, 10.0)
+
+    session.target("land")
+    wait_for("landed and disarmed", lambda: not telemetry(events).armed, 40)
+    assert position(session, events)[2] < 0.3
+    assert phase() == "ground"
+    assert not any("crash" in m.get("text", "") for m in events.of("log")[-5:])
