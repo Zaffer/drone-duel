@@ -21,4 +21,4 @@ offset_m = [0.06, 0.0, -0.02]
 [aux]
 arm = 5
 mode = 6
-modes = ["ANGLE", "HORIZON", "ACRO"]
+modes = ["POSHOLD", "ANGLE", "ACRO"]

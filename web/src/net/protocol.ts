@@ -883,10 +883,12 @@ export interface StatusMsg {
   heading_deg: number;
 }
 /**
- * Fly the session's ArduCopter as a ground station would, for a target to shoot at: "hover"
- * takes off from its pad (GUIDED, armed over MAVLink, a takeoff) and holds `height_m` above
- * it, or climbs or sinks to it if already up; "land" lands where it is (LAND). The page sends
- * no `rc` meanwhile: an idle receiver is played (firmware/ardupilot.py).
+ * Fly the session's quad itself, for a target to shoot at: "hover" takes off from its pad
+ * and holds `height_m` above it, or climbs or sinks to it if already up; "land" lands where it
+ * is. ArduCopter is flown as a ground station would (GUIDED, armed over MAVLink, a takeoff;
+ * LAND), with an idle receiver played (firmware/ardupilot.py); Betaflight, which takes no such
+ * commands, as a pilot on its switches would (POSHOLD; firmware/betaflight.py). The page sends
+ * no `rc` meanwhile.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "TargetMsg".

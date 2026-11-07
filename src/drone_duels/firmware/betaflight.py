@@ -22,6 +22,19 @@ where it is); the page's next sticks bring the link back.
 
 Reading it: MSP on UART2, as a ground station would (`BetaflightMsp`); its OSD over MSP
 DisplayPort on UART3, as a DJI air unit (firmware.inav.AirUnit, which polls for it).
+
+Flying itself (`hover`, `land`: a target to shoot at). Betaflight takes no commands from a
+ground station: its modes are on the radio's switches. So the game flies it as a pilot on its
+own modes would (the receiver's source is then "auto"), reading it over MSP: the mode switch
+centred (ANGLE), the arm switch low then high; the mode switch to POSHOLD (altitude and
+position hold, on the GPS: Betaflight arms only with it off) and the throttle up, past
+Betaflight's airmode threshold, which the hold modes wait for. In altitude hold the throttle
+stick asks for a climb or a descent, nothing within its deadband about the hover throttle
+(alt_hold_deadband, ap_hover_throttle in quad5.cli); its height target trails a fast climb, so
+the climb slows near the height asked, and the pilot goes on nudging it there. Landing, it
+comes down slowly in POSHOLD until Betaflight's touchdown detection disarms it (or it sits
+still on the ground: the arm switch goes low). A reset (`reset_in_place`) puts the arm switch
+low.
 """
 
 import hashlib
@@ -65,6 +78,30 @@ READY_S = 60.0
 boot grace, calibrates."""
 POLL_S = 0.5
 TELEMETRY_HZ = 10.0
+
+# Flying itself (the module's docstring): the sticks, µs, as quad5.cli sets them.
+ARM_HIGH = 2000
+MODE_POSHOLD, MODE_ANGLE = 1000, 1500
+THROTTLE_LOW = 1000
+HOVER_US = 1275
+"""ap_hover_throttle: Betaflight's default, and where this quad hovers in ANGLE (about 1280)."""
+ALT_HOLD_DEADBAND = 0.20
+"""alt_hold_deadband (20 %): the share of the stick's travel either side of the hover throttle
+that asks for no climb."""
+ALT_HOLD_CLIMB_MS = 5.0
+"""alt_hold_climb_rate (50): the climb or descent asked at full or (nearly) no throttle, m/s."""
+CLIMB_GAIN = 0.6
+"""Climb asked per metre below the height, 1/s."""
+CLIMB_MAX_MS, SINK_MAX_MS = 3.0, 2.0
+HELD_M = 0.3
+"""Within this of the height asked, the throttle stays at the hover throttle."""
+LAND_MS = 0.7
+"""Descent asked near the ground, landing, m/s (faster higher up, up to SINK_MAX_MS)."""
+STILL_S = 1.5
+"""On the ground, armed and still this long, landing: the arm switch goes low."""
+PILOT_HZ = 10.0
+ARM_S = 5.0
+FLY_TRY_S = 30.0
 
 OSD_GRIDS: dict[VideoSystem, dict[int, tuple[int, int]]] = {
     "analog": {0: (30, 13)},
@@ -128,6 +165,21 @@ MODES = (
 """Betaflight's flight modes by their boxes' permanent ids (msp/msp_box.c), the one shown first
 first; with none of them it flies ACRO."""
 GPS_FIX = 1
+
+
+def throttle_for(climb_ms: float) -> int:
+    """The throttle stick, µs, that asks Betaflight's altitude hold for `climb_ms` (m/s, up
+    positive): its stick factor (flight/alt_hold_multirotor.c), turned round. 0: the hover
+    throttle, in the deadband."""
+    if climb_ms == 0:
+        return HOVER_US
+    factor = max(-1.0, min(1.0, climb_ms / ALT_HOLD_CLIMB_MS))
+    if factor > 0:
+        high = HOVER_US + ALT_HOLD_DEADBAND * (2000 - HOVER_US)
+        return round(high + factor * (2000 - high))
+    low = HOVER_US - ALT_HOLD_DEADBAND * (HOVER_US - 1000)
+    # Never quite low: at the bottom of the stick altitude hold takes no stick at all.
+    return max(1060, round(low + factor * (low - 1000)))
 
 
 def blockers(flags: int) -> tuple[str, ...]:
@@ -292,7 +344,14 @@ class Betaflight(Firmware):
         self._rc_sock: socket.socket | None = None
         self._rc_lock = threading.Lock()
         self._rc_source = "idle"
-        """Who feeds Betaflight's receiver: "idle" (nobody yet), "page", or "lost"."""
+        """Who feeds Betaflight's receiver: "idle" (nobody yet), "page", "lost", or "auto" (the
+        game, flying it as a target)."""
+        self._auto_us: list[int] = list(IDLE_US)
+        """The sticks while it flies itself."""
+        self._fly_lock = threading.Lock()
+        self._fly_gen = 0
+        self._telemetry: dict[str, Any] | None = None
+        """The last telemetry read, as published."""
         self._t0 = time.monotonic()
         self._stopped = False
 
@@ -394,6 +453,125 @@ class Betaflight(Firmware):
             with self._rc_lock:
                 if self._rc_source == "idle":
                     self._send_rc(IDLE_US)
+                elif self._rc_source == "auto":
+                    self._send_rc(self._auto_us)
+
+    # Flying itself (the module's docstring).
+
+    def hover(self, height_m: float) -> None:
+        self._fly(lambda gen: self._hover(gen, height_m), "betaflight-hover")
+
+    def land(self) -> None:
+        self._fly(self._land, "betaflight-land")
+
+    def reset_in_place(self) -> None:
+        with self._fly_lock:
+            self._fly_gen += 1
+        with self._rc_lock:
+            if self._rc_source == "auto":
+                self._auto_us = list(IDLE_US)
+
+    def _fly(self, run: Callable[[int], None], name: str) -> None:
+        with self._fly_lock:
+            self._fly_gen += 1
+            gen = self._fly_gen
+        with self._rc_lock:
+            if self._rc_source != "auto":
+                self._rc_source = "auto"
+                self._auto_us = list(IDLE_US)
+        self._thread(lambda: run(gen), name)
+
+    def _current(self, gen: int) -> bool:
+        """Still the latest hover or land, with the radio still the game's, and running."""
+        return gen == self._fly_gen and self._rc_source == "auto" and not self._stop.is_set()
+
+    def _sticks(self, **channels: int) -> None:
+        index = {"throttle": 2, "arm": 4, "mode": 5}
+        with self._rc_lock:
+            for name, us in channels.items():
+                self._auto_us[index[name]] = us
+
+    def _say(self, level: str, text: str) -> None:
+        getattr(log, "warning" if level == "warn" else level)("%s", text)
+        self.events.publish({"ch": "log", "level": level, "source": "session", "text": text})
+
+    def _armed(self) -> bool:
+        t = self._telemetry
+        return bool(t and t["armed"])
+
+    def _arm(self, gen: int) -> bool:
+        """Arm it on the switches (ANGLE, throttle low); False if it would not before FLY_TRY_S,
+        or the flying was overtaken."""
+        deadline = time.monotonic() + FLY_TRY_S
+        said = ""
+        while self._current(gen):
+            self._sticks(arm=IDLE_US[4], mode=MODE_ANGLE, throttle=THROTTLE_LOW)
+            self._stop.wait(0.5)  # the arm switch seen low first, as Betaflight wants
+            self._sticks(arm=ARM_HIGH)
+            until = time.monotonic() + ARM_S
+            while self._current(gen) and time.monotonic() < until and not self._armed():
+                self._stop.wait(1 / PILOT_HZ)
+            if self._armed():
+                return True
+            blocked = (self._telemetry or {}).get("blockers") or []
+            why = blocked[0] if blocked else "no answer"
+            if time.monotonic() > deadline:
+                self._say("error", f"could not arm: {why}")
+                return False
+            if why != said:
+                said = why
+                self._say("warn", f"arming: {why}; trying again")
+        return False
+
+    def _hover(self, gen: int, height_m: float) -> None:
+        if not self._armed():
+            if not self._arm(gen):
+                return
+            self._say("info", f"taking off to {height_m:.0f} m above the pad")
+        else:
+            self._say("info", f"holding {height_m:.0f} m above the pad")
+        self._sticks(mode=MODE_POSHOLD)
+        flew = False
+        while self._current(gen):
+            t = self._telemetry
+            if t is None:
+                pass  # MSP is back in a moment: the sticks stay as they are
+            elif not t["armed"]:
+                if flew:  # Betaflight disarmed it (a crash): let go
+                    self._sticks(arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE)
+                    return
+            else:
+                flew = True
+                error = height_m - float(t["alt_rel"] or 0.0)
+                climb = 0.0 if abs(error) < HELD_M else CLIMB_GAIN * error
+                self._sticks(throttle=throttle_for(max(-SINK_MAX_MS, min(CLIMB_MAX_MS, climb))))
+            self._stop.wait(1 / PILOT_HZ)
+
+    def _land(self, gen: int) -> None:
+        if not self._armed():
+            self._sticks(arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE)
+            return
+        self._say("info", "landing")
+        self._sticks(mode=MODE_POSHOLD)
+        still_since: float | None = None
+        while self._current(gen):
+            t = self._telemetry
+            if t is None:
+                self._stop.wait(1 / PILOT_HZ)
+                continue
+            if not t["armed"]:
+                break
+            height = float(t["alt_rel"] or 0.0)
+            self._sticks(throttle=throttle_for(-max(LAND_MS, min(SINK_MAX_MS, 0.3 * height))))
+            if height < 0.5 and abs(t["climb"]) < 0.1:
+                still_since = still_since or time.monotonic()
+                if time.monotonic() - still_since > STILL_S:
+                    break
+            else:
+                still_since = None
+            self._stop.wait(1 / PILOT_HZ)
+        if self._current(gen):
+            self._sticks(arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE)
 
     # Stop.
 
@@ -463,7 +641,9 @@ class Betaflight(Firmware):
             try:
                 if msp is None:
                     msp = self.msp = BetaflightMsp(self.ctx.ports.betaflight_msp)
-                self.events.publish(msp.telemetry())
+                telemetry = msp.telemetry()
+                self._telemetry = telemetry
+                self.events.publish(telemetry)
                 failed = False
             except (OSError, struct.error) as exc:
                 if not failed:
@@ -472,6 +652,7 @@ class Betaflight(Firmware):
                 if msp is not None:
                     msp.close()
                 self.msp = None
+                self._telemetry = None
 
     def _osd(self, screen: OsdScreen) -> None:
         self.events.publish(osd_message(screen))
