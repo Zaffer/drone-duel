@@ -351,6 +351,15 @@ class ShootRuntime implements ModeRuntime {
       row("Stance", stance),
       row("Heart", `${s.hold.heart.toFixed(0)} bpm${breath ? ` · ${breath}` : ""}`),
     ];
+    const ob = s.obstacle;
+    const doing = { vault: "vaulting", climb: "climbing", push: "pushing through" };
+    const ahead = {
+      vault: "low wall · walk on or Space to vault",
+      climb: "high wall · Space to climb",
+      wall: "too high · lean in to push through",
+    };
+    if (ob.doing) rows.push(row("Ahead", doing[ob.doing]));
+    else if (ob.ahead) rows.push(row("Ahead", ahead[ob.ahead]));
     if (prefs().shoot.windMeter) {
       const m = w.meter();
       const rel = (((m.fromDeg - (s.heading * 180) / Math.PI) % 360) + 360) % 360;

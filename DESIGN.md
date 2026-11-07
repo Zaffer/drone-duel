@@ -484,9 +484,16 @@ The page's modules are in `web/src/shoot/`:
   the shakes, a forced breath at 14 s), the hold's wander and shiver by stance, heartbeats, the
   trigger's jerk, and a heart rate that walking and running raise.
 - **shooter.ts**: the person (stances; walking, sprinting at 6 m/s with the rifle down, jumping;
-  the drawn ground looked up ahead as they move, a rise over a step a wall, a drop a fall; the
-  camera on the sight or head up) and the shot: the trigger breaks, the jerk, 8 ms of lock time, the bullet leaves along
+  the drawn ground looked up ahead as they move; the camera on the sight or head up) and the shot: the trigger breaks, the jerk, 8 ms of lock time, the bullet leaves along
   the sight line tipped by the zero and spread by the ammunition's dispersion.
+- **obstacles.ts**: what they get over, by its rise over the feet: a step (to 0.45 m) walked
+  onto; a vault (to 1.1 m, waist high) by walking on into it or a jump; a climb (to 2.3 m) by a
+  jump, a grab of the top and a pull up, the rifle slung; higher, a wall, unless it is thin with
+  ground within 4 m beyond, which leaning into for 0.6 s pushes through. The tiles' ground is
+  heights from above, so bushes, hedges, crowns of trees and the mesh's glitches are solid blobs
+  to it: pushing through is the way out of them (and a thin wall too high to climb gives way the
+  same). Down, any drop: a fall, and landing over 6 m/s (some 1.8 m) a stagger. The HUD's
+  "Ahead" row says what is in front.
 - **rifle.ts**, **sights.ts**, **gunsounds.ts**: the first-person rifle and arms
   (tools/models/riflemodel.py; its measured points in the GLB's extras), the holo's reticle
   (at infinity, through its window) and the irons' aperture, and the rifle's sounds, those from
@@ -498,7 +505,7 @@ heartbeat's grew without end under about 20 fps and turned the view over.
 
 The numbers no source gives are marked EST where they are set. Not modelled yet: the spatial
 variation of the wind along a shot, prop imbalance after a blade is lost, and ricochets. Walls
-are only the drawn tiles' heights: photogrammetry bushes are solid, and an overhang is not seen.
+are only the drawn tiles' heights: an overhang is not seen, and nothing hurts in a fall.
 
 ## 8. Server ⇄ page protocol
 
