@@ -10,7 +10,7 @@
 
 import type { Pose } from "../net/server.ts";
 import { status } from "../state/session.ts";
-import { eulerOf } from "../world/geo.ts";
+import { eulerOf, neFrom } from "../world/geo.ts";
 import "./hud.css";
 import {
   clampToEdge,
@@ -443,8 +443,5 @@ function arrow(g: CanvasRenderingContext2D, size: number, fill: string, outline:
 
 /** Metres between two nearby points (flat earth). */
 function metresBetween(lat0: number, lon0: number, lat1: number, lon1: number): number {
-  const R = 6378137;
-  const dn = ((lat1 - lat0) * Math.PI * R) / 180;
-  const de = ((lon1 - lon0) * Math.PI * R * Math.cos((lat0 * Math.PI) / 180)) / 180;
-  return Math.hypot(dn, de);
+  return Math.hypot(...neFrom(lat0, lon0, lat1, lon1));
 }

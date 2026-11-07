@@ -114,9 +114,16 @@ export const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * 
 export const len3 = (a: Vec3): number => Math.hypot(a[0], a[1], a[2]);
 export const norm3 = (a: Vec3): Vec3 => scale3(a, 1 / (len3(a) || 1));
 
-/** Metres north and east of (lat0, lon0) to (lat, lon); flat earth, fine within kilometres. */
+// Small offsets in lat/lon (a pose carried on along its velocity, a point a few metres off),
+// flat earth, fine within kilometres. What moves or collides works in the local frame instead
+// (engine/frame.ts).
+
+/** WGS84's equatorial radius, m. */
+export const EARTH_R = 6378137;
+
+/** Metres north and east of (lat0, lon0) to (lat, lon). */
 export function neFrom(lat0: number, lon0: number, lat: number, lon: number): [number, number] {
-  const R = 6378137;
+  const R = EARTH_R;
   return [
     ((lat - lat0) * Math.PI * R) / 180,
     ((lon - lon0) * Math.PI * R * Math.cos((lat0 * Math.PI) / 180)) / 180,
@@ -125,7 +132,7 @@ export function neFrom(lat0: number, lon0: number, lat: number, lon: number): [n
 
 /** (lat, lon) `north`, `east` metres from (lat0, lon0). */
 export function moveBy(lat0: number, lon0: number, north: number, east: number): [number, number] {
-  const R = 6378137;
+  const R = EARTH_R;
   return [
     lat0 + (north / R) * (180 / Math.PI),
     lon0 + (east / (R * Math.cos((lat0 * Math.PI) / 180))) * (180 / Math.PI),

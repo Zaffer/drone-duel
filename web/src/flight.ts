@@ -390,11 +390,8 @@ export class Flight {
     const pose = body.poseAt(now);
     if (!pose) return;
     this.groundTold = now;
-    const R = 6378137;
-    const lat = pose.lat + ((pose.v[0] * GROUND_LEAD_S) / R) * (180 / Math.PI);
-    const lon =
-      pose.lon +
-      ((pose.v[1] * GROUND_LEAD_S) / (R * Math.cos((pose.lat * Math.PI) / 180))) * (180 / Math.PI);
+    const lead = GROUND_LEAD_S;
+    const [lat, lon] = moveBy(pose.lat, pose.lon, pose.v[0] * lead, pose.v[1] * lead);
     const ground = this.ground();
     if (ground) {
       // Down from just over it: a tree's crown it flies under is not its ground.

@@ -5,6 +5,7 @@
 import type * as C from "cesium";
 import type { Vehicle } from "../net/protocol.ts";
 import type { Pose } from "../net/server.ts";
+import { moveBy } from "../world/geo.ts";
 
 export interface Body {
   readonly spec: Vehicle;
@@ -27,12 +28,7 @@ export interface Body {
  * makes itself, stamped as they are made. */
 export function extrapolate(p: Pose, dt: number): Pose {
   if (dt <= 0) return p;
-  const R = 6378137;
   const d = Math.min(dt, 0.1);
-  return {
-    ...p,
-    lat: p.lat + ((p.v[0] * d) / R) * (180 / Math.PI),
-    lon: p.lon + ((p.v[1] * d) / (R * Math.cos((p.lat * Math.PI) / 180))) * (180 / Math.PI),
-    alt: p.alt - p.v[2] * d,
-  };
+  const [lat, lon] = moveBy(p.lat, p.lon, p.v[0] * d, p.v[1] * d);
+  return { ...p, lat, lon, alt: p.alt - p.v[2] * d };
 }

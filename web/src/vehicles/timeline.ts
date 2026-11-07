@@ -12,7 +12,7 @@
 // past the newest, on along its velocity and body rates for up to MAX_AHEAD_S, then held. Our own
 // aircraft is sampled with no delay; a peer's a jitter buffer behind (`buffer()`).
 
-import type { Quat, Vec3 } from "../world/geo.ts";
+import { EARTH_R, type Quat, type Vec3 } from "../world/geo.ts";
 
 export interface Sample {
   /** On the source's clock, s: the physics' sim time, or a peer's. */
@@ -53,7 +53,7 @@ const LATENESS_KEPT = 90;
 const BUFFER = { start: 0.1, min: 0.06, max: 0.25 };
 const BUFFER_SLEW = 0.05;
 
-const R = 6378137;
+const R = EARTH_R;
 const DEG = 180 / Math.PI;
 
 export class Timeline<S extends Sample> {
