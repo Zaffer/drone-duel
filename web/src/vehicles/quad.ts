@@ -1,9 +1,11 @@
 // The 5" quad's model: its four propellers turning with the rotors (pose.act[0..3], rad/s, in
 // ArduPilot's motor order). The model's propeller nodes are named by corner and turn about
 // their own +Y (tools/models/fpvmodel.py); each turns the way ArduPilot's quad X spins it, as
-// the old COP (fleet.js) drew it.
+// the old COP (fleet.js) drew it. A rotor shot away (its arm, motor or prop: the physics'
+// damage) has no prop drawn.
 
 import * as C from "cesium";
+import { damage } from "../state/session.ts";
 import type { Animate } from "./aircraft.ts";
 import { PropSpin, QUAD_SPIN } from "./props.ts";
 
@@ -49,9 +51,11 @@ function rig(model: C.Model): (Prop | null)[] {
 
 export const animateQuad: Animate = (model, pose, dt) => {
   const props = rig(model);
+  const lost = damage()?.lost;
   for (let i = 0; i < props.length; i++) {
     const p = props[i];
     if (!p) continue;
+    p.node.show = !lost?.[i];
     const angle = p.spin.step(pose.act[i] ?? 0, dt);
     C.Matrix4.fromRotation(C.Matrix3.fromRotationY(p.turn * angle, scratch3), scratch4);
     p.node.matrix = C.Matrix4.multiply(p.original, scratch4, scratchOut);

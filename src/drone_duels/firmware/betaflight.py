@@ -8,11 +8,11 @@ physics paces itself and Betaflight's clock follows.
 
 Settings: the vehicle's CLI files (firmware/betaflight/*.cli, each followed by its video
 system's: the OSD's grid and layout) are typed into a fresh eeprom by SITL itself (`--config`:
-load, save, exit) before it boots. A hash beside the eeprom says which settings it holds, so
-unchanged ones are not typed in again. `--config` exits 0 whatever it met: a setting it
-rejects shows only in its output (###ERROR ...###), which is read for one. It listens on ports
-of its own meanwhile (ports.SlotPorts.betaflight_config_sim_base): the physics' state arriving
-as it types the settings in crashes it.
+load, save, exit) before it boots. A hash beside the eeprom says which settings it holds, and
+which build saved them, so unchanged ones are not typed in again. `--config` exits 0 whatever it
+met: a setting it rejects shows only in its output (###ERROR ...###), which is read for one. It
+listens on ports of its own meanwhile (ports.SlotPorts.betaflight_config_sim_base): the physics'
+state arriving as it types the settings in crashes it.
 
 RC: SITL reads packets of a timestamp and 16 pulse widths on its RC port (RX_UDP). Until the
 page sends sticks a receiver sitting idle is played (throttle low, arm switch low, the rest
@@ -21,7 +21,8 @@ Betaflight's receiver loses its link (RXLOSS) and its own failsafe flies (quad5.
 where it is); the page's next sticks bring the link back.
 
 Reading it: MSP on UART2, as a ground station would (`BetaflightMsp`); its OSD over MSP
-DisplayPort on UART3, as a DJI air unit (firmware.inav.AirUnit, which polls for it).
+DisplayPort on UART3, as a DJI air unit (firmware.inav.AirUnit, which polls for it). MAVLink on
+UART4, for missions (telemetry.mission.MissionLink).
 
 Flying itself (`hover`, `land`: a target to shoot at). Betaflight takes no commands from a
 ground station: its modes are on the radio's switches. So the game flies it as a pilot on its
@@ -35,6 +36,14 @@ the climb slows near the height asked, and the pilot goes on nudging it there. L
 comes down slowly in POSHOLD until Betaflight's touchdown detection disarms it (or it sits
 still on the ground: the arm switch goes low). A reset (`reset_in_place`) puts the arm switch
 low.
+
+A path (`path`: Shoot Down's levels that fly) is a mission, flown by Betaflight's own autopilot
+(AUTOPILOT, on a switch of channel 10's that only the game sets: quad5.cli). Betaflight takes a
+mission over MAVLink, as from a ground station, but not while it flies one: up and holding in
+POSHOLD, the game uploads the path's waypoints and then sets the switch high. It flies them at
+ap_max_velocity, cutting the corners of those before the last (fly-by), and holds at the last;
+the switch going low and high again starts it over from the first, so the path goes round until
+a hover or a land overtakes it (the switch low: POSHOLD holds it where it is).
 """
 
 import hashlib
@@ -59,6 +68,13 @@ from drone_duels.session.base import (
     PhysicsProcess,
     SpawnContext,
     settings_files,
+)
+from drone_duels.telemetry.mission import (
+    ACCEPTED,
+    DENIED,
+    STATE_COMPLETE,
+    MissionLink,
+    result_name,
 )
 from drone_duels.video.osd import OsdScreen
 
@@ -100,6 +116,13 @@ LAND_MS = 0.7
 STILL_S = 1.5
 """On the ground, armed and still this long, landing: the arm switch goes low."""
 PILOT_HZ = 10.0
+AUTOPILOT_CHANNEL = 10
+AUTOPILOT_ON, AUTOPILOT_OFF = 2000, 1000
+"""Channel 10 (AUX6), AUTOPILOT's switch (quad5.cli): high flies the mission."""
+UPLOAD_S = 3.0
+"""Uploading a path, at most, s: Betaflight denies it until it has seen AUTOPILOT's switch low."""
+ROUND_AGAIN_OFF_S = 0.3
+"""Going round again: AUTOPILOT's switch low this long (RC goes at 50 Hz), then high."""
 ARM_S = 5.0
 FLY_TRY_S = 30.0
 
@@ -263,8 +286,12 @@ def commands(settings: str) -> list[str]:
     return out
 
 
-def settings_hash(settings: str) -> str:
-    return hashlib.sha256("\n".join(commands(settings)).encode()).hexdigest()[:16]
+def settings_hash(settings: str, binary: Path) -> str:
+    """The settings, and the build that saved them: another build may lay its eeprom out
+    otherwise, and boot on its defaults from an older one's."""
+    digest = hashlib.sha256("\n".join(commands(settings)).encode())
+    digest.update(binary.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def sitl_args(binary: Path, sim_base: int, tcp_base: int) -> list[str]:
@@ -279,7 +306,7 @@ def configure(binary: Path, workdir: Path, settings: str, sim_base: int, tcp_bas
     it did. Raises FirmwareError on a setting Betaflight rejects."""
     marker = workdir / "settings.hash"
     eeprom = workdir / "eeprom.bin"
-    digest = settings_hash(settings)
+    digest = settings_hash(settings, binary)
     if marker.exists() and marker.read_text().strip() == digest and eeprom.exists():
         return False
     eeprom.unlink(missing_ok=True)
@@ -354,6 +381,7 @@ class Betaflight(Firmware):
         """The last telemetry read, as published."""
         self._t0 = time.monotonic()
         self._stopped = False
+        self._missions: MissionLink | None = None
 
     @property
     def log_path(self) -> Path:
@@ -464,6 +492,9 @@ class Betaflight(Firmware):
     def land(self) -> None:
         self._fly(self._land, "betaflight-land")
 
+    def path(self, points: Sequence[tuple[float, float]], height_m: float) -> None:
+        self._fly(lambda gen: self._path(gen, list(points), height_m), "betaflight-path")
+
     def reset_in_place(self) -> None:
         with self._fly_lock:
             self._fly_gen += 1
@@ -486,7 +517,7 @@ class Betaflight(Firmware):
         return gen == self._fly_gen and self._rc_source == "auto" and not self._stop.is_set()
 
     def _sticks(self, **channels: int) -> None:
-        index = {"throttle": 2, "arm": 4, "mode": 5}
+        index = {"throttle": 2, "arm": 4, "mode": 5, "autopilot": AUTOPILOT_CHANNEL - 1}
         with self._rc_lock:
             for name, us in channels.items():
                 self._auto_us[index[name]] = us
@@ -505,7 +536,9 @@ class Betaflight(Firmware):
         deadline = time.monotonic() + FLY_TRY_S
         said = ""
         while self._current(gen):
-            self._sticks(arm=IDLE_US[4], mode=MODE_ANGLE, throttle=THROTTLE_LOW)
+            self._sticks(
+                arm=IDLE_US[4], mode=MODE_ANGLE, throttle=THROTTLE_LOW, autopilot=AUTOPILOT_OFF
+            )
             self._stop.wait(0.5)  # the arm switch seen low first, as Betaflight wants
             self._sticks(arm=ARM_HIGH)
             until = time.monotonic() + ARM_S
@@ -530,7 +563,7 @@ class Betaflight(Firmware):
             self._say("info", f"taking off to {height_m:.0f} m above the pad")
         else:
             self._say("info", f"holding {height_m:.0f} m above the pad")
-        self._sticks(mode=MODE_POSHOLD)
+        self._sticks(mode=MODE_POSHOLD, autopilot=AUTOPILOT_OFF)
         flew = False
         while self._current(gen):
             t = self._telemetry
@@ -538,7 +571,7 @@ class Betaflight(Firmware):
                 pass  # MSP is back in a moment: the sticks stay as they are
             elif not t["armed"]:
                 if flew:  # Betaflight disarmed it (a crash): let go
-                    self._sticks(arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE)
+                    self._let_go()
                     return
             else:
                 flew = True
@@ -547,12 +580,75 @@ class Betaflight(Firmware):
                 self._sticks(throttle=throttle_for(max(-SINK_MAX_MS, min(CLIMB_MAX_MS, climb))))
             self._stop.wait(1 / PILOT_HZ)
 
+    def _let_go(self) -> None:
+        """On the ground: the switches down."""
+        self._sticks(
+            arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE, autopilot=AUTOPILOT_OFF
+        )
+
+    def _path(self, gen: int, points: list[tuple[float, float]], height_m: float) -> None:
+        if not self._armed():
+            self._say("warn", "a path needs it up first: hover")
+            return
+        self._sticks(mode=MODE_POSHOLD, throttle=HOVER_US, autopilot=AUTOPILOT_OFF)
+        link = self._mission_link()
+        if link is None:
+            return
+        mission = [(lat, lon, height_m) for lat, lon in points]
+        result = None
+        deadline = time.monotonic() + UPLOAD_S
+        while self._current(gen) and time.monotonic() < deadline:
+            result = link.upload(mission)
+            if result != DENIED:  # denied: it has not seen the switch low yet
+                break
+            self._stop.wait(0.05)
+        if not self._current(gen):
+            return
+        if result != ACCEPTED:
+            self._say("error", f"Betaflight took no path: {result_name(result)}")
+            return
+        self._say("info", f"flying a path of {len(points)} waypoints, round and round")
+        self._sticks(autopilot=AUTOPILOT_ON)
+        while self._current(gen):
+            t = self._telemetry
+            if t is not None and not t["armed"]:  # down (shot, a crash): let go
+                self._let_go()
+                return
+            if link.current is not None and link.current[1] == STATE_COMPLETE:
+                # Round again: the switch low a moment (it holds), and high (from the first).
+                self._sticks(autopilot=AUTOPILOT_OFF)
+                self._stop.wait(ROUND_AGAIN_OFF_S)
+                link.current = None
+                self._sticks(autopilot=AUTOPILOT_ON)
+                # MISSION_CURRENT comes once a second: until it says the mission is under way.
+                until = time.monotonic() + 3
+                while (
+                    self._current(gen)
+                    and time.monotonic() < until
+                    and (link.current is None or link.current[1] == STATE_COMPLETE)
+                ):
+                    self._stop.wait(0.1)
+            self._stop.wait(1 / PILOT_HZ)
+
+    def _mission_link(self) -> MissionLink | None:
+        if self._missions is not None and not self._missions.closed:
+            return self._missions
+        try:
+            self._missions = MissionLink(self.ctx.ports.betaflight_mavlink)
+        except OSError as exc:
+            self._say(
+                "error",
+                f"Betaflight's MAVLink did not answer ({exc}): scripts/setup.sh builds it with it",
+            )
+            return None
+        return self._missions
+
     def _land(self, gen: int) -> None:
         if not self._armed():
-            self._sticks(arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE)
+            self._let_go()
             return
         self._say("info", "landing")
-        self._sticks(mode=MODE_POSHOLD)
+        self._sticks(mode=MODE_POSHOLD, autopilot=AUTOPILOT_OFF)
         still_since: float | None = None
         while self._current(gen):
             t = self._telemetry
@@ -571,7 +667,7 @@ class Betaflight(Firmware):
                 still_since = None
             self._stop.wait(1 / PILOT_HZ)
         if self._current(gen):
-            self._sticks(arm=IDLE_US[4], throttle=THROTTLE_LOW, mode=MODE_ANGLE)
+            self._let_go()
 
     # Stop.
 
@@ -589,6 +685,9 @@ class Betaflight(Firmware):
         if self.air_unit is not None:
             self.air_unit.stop()
             self.air_unit = None
+        if self._missions is not None:
+            self._missions.close()
+            self._missions = None
         if self.msp is not None:
             self.msp.close()
             self.msp = None

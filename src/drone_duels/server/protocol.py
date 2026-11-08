@@ -16,6 +16,8 @@ from drone_duels.content.schema import (
     Controller,
     Course,
     Location,
+    Payload,
+    PayloadSpec,
     Vehicle,
     Weapon,
     Wind,
@@ -33,13 +35,15 @@ VideoSystem = Literal["analog", "digital"]
 
 class SessionMsg(Msg):
     """Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a
-    crash: the physics stops dead), throw (a hand-launched wing), or stop."""
+    crash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a
+    payload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it."""
 
     ch: Literal["session"] = "session"
     action: Literal["start", "switch", "reset", "destroy", "throw", "stop"]
     location: str | None = None
     vehicle: str | None = None
     pad: int = Field(default=0, ge=0, description="the start pad: 0 player 1, 1 player 2")
+    payload: str | None = Field(default=None, description="start: a payload to fit, its id")
 
 
 class RcMsg(Msg):
@@ -89,28 +93,70 @@ class RadioSourceMsg(Msg):
     fly: bool = False
 
 
+PATH_POINTS = 30
+"""A path's waypoints, at most: a Betaflight mission's (pg/flight_plan.h, MAX_WAYPOINTS)."""
+
+
 class TargetMsg(Msg):
     """Fly the session's quad itself, for a target to shoot at: "hover" takes off from its pad
     and holds `height_m` above it, or climbs or sinks to it if already up; "land" lands where it
     is. ArduCopter is flown as a ground station would (GUIDED, armed over MAVLink, a takeoff;
     LAND), with an idle receiver played (firmware/ardupilot.py); Betaflight, which takes no such
     commands, as a pilot on its switches would (POSHOLD; firmware/betaflight.py). The page sends
-    no `rc` meanwhile."""
+    no `rc` meanwhile.
+
+    "go" (ArduCopter, up and in GUIDED after a hover) flies it on, a target the page sends a few
+    times a second: to a point on a path (`lat`, `lon`, `height_m`), with `vel_ned` as where it
+    is going next; facing `yaw_deg` if given. Straight to the firmware, not queued behind other
+    commands.
+
+    "path" (Betaflight, up after a hover) flies `points` (lat, lon) at `height_m`, round and
+    round, as a mission its own autopilot flies (firmware/betaflight.py), sent once; a hover
+    or a land takes it back. Straight to the firmware too."""
 
     ch: Literal["target"] = "target"
-    action: Literal["hover", "land"]
-    height_m: float = Field(ge=2, le=120, description="above the pad, m")
+    action: Literal["hover", "land", "go", "path"]
+    height_m: float = Field(
+        default=0.0, ge=-50, le=120, description="above the pad, m: hover's (2 at least), go's"
+    )
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    vel_ned: tuple[float, float, float] | None = Field(
+        default=None, description="go: the path's velocity there, m/s, north, east, down"
+    )
+    yaw_deg: float | None = Field(default=None, description="go: the heading to face")
+    points: list[tuple[float, float]] | None = Field(
+        default=None,
+        max_length=PATH_POINTS,
+        description="path: its waypoints, lat and lon, degrees",
+    )
+
+    @model_validator(mode="after")
+    def _what_each_needs(self) -> "TargetMsg":
+        if self.action == "hover" and self.height_m < 2:
+            raise ValueError("hover at 2 m above the pad at least")
+        if self.action == "go" and (self.lat is None or self.lon is None):
+            raise ValueError("go needs a point (lat, lon)")
+        if self.action == "path":
+            if self.points is None or len(self.points) < 2:
+                raise ValueError("a path needs two points at least")
+            if self.height_m < 2:
+                raise ValueError("a path at 2 m above the pad at least")
+            if any(not (-90 <= lat <= 90 and -180 <= lon <= 180) for lat, lon in self.points):
+                raise ValueError("a path's points are lat, lon in degrees")
+        return self
 
 
-HitPart = Literal["prop", "motor", "arm", "battery", "stack", "camera", "frame"]
-ROTOR_PARTS = ("prop", "motor", "arm")
-"""The parts that belong to one rotor: a hit on one names its motor."""
+HitPart = Literal["body", "battery", "arm", "payload"]
+ROTOR_PARTS = ("arm",)
+"""The parts that belong to one rotor (its arm, motor and prop): a hit on one names its motor."""
 
 
 class HitMsg(Msg):
     """A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.
-    The physics takes what the part did away (physics/quad/model.py: a prop's blade, a motor,
-    the power) and the impulse at the point it struck; the firmware flies on with what is left.
+    The physics takes what the part did away (physics/quad/model.py: an arm, that rotor; the
+    body, the power at once; the pack, the power a moment later; the payload goes off) and the
+    impulse at the point it struck; the firmware flies on with what is left.
     """
 
     ch: Literal["hit"] = "hit"
@@ -118,7 +164,7 @@ class HitMsg(Msg):
     motor: int | None = Field(
         default=None, ge=1, le=4,
         description="ArduPilot's motor number (1 front right, 2 rear left, 3 front left, "
-        "4 rear right) for a prop, motor or arm; None otherwise",
+        "4 rear right) for an arm; None otherwise",
     )
     impulse_ned: tuple[float, float, float] = Field(
         description="the momentum the bullet leaves in the vehicle, N·s, north, east, down"
@@ -165,6 +211,7 @@ class StatusMsg(Msg):
         default=None, description="the pad: lat, lon, ground m above sea level"
     )
     heading_deg: float = 0.0
+    payload: PayloadSpec | None = Field(default=None, description="the payload fitted, if any")
 
 
 class TelemetryMsg(Msg):
@@ -236,14 +283,15 @@ class LogMsg(Msg):
 class Damage(Msg):
     """What hits have taken from the quad so far (HitMsg)."""
 
-    thrust: list[float] = Field(
-        description="each motor's (1-4, ArduPilot's) thrust left at a given speed: 1 whole, "
-        "2/3 and 1/3 with a prop's blades shot off, 0 its prop gone or the motor dead"
+    lost: list[bool] = Field(
+        description="each motor's (1-4, ArduPilot's) rotor shot away: its arm, motor or prop "
+        "hit (the page stops drawing its prop)"
     )
     power: Literal["on", "failing", "off"] = Field(
-        description="the motors' power: a pierced pack holds briefly (failing), a hit stack or "
-        "a dead pack stops every motor (off)"
+        description="the motors' power: a body hit cuts it at once (off); a pierced pack holds "
+        "a moment (failing), then off"
     )
+    exploded: bool = Field(description="its payload has gone off: the quad is gone")
     hits: int = Field(description="hits taken since the last reset")
 
 
@@ -254,7 +302,7 @@ class PhysicsMsg(Msg):
     ch: Literal["physics"] = "physics"
     phase: str
     connected: bool
-    damage: Damage | None = Field(default=None, description="None: not hit since the reset")
+    damage: Damage | None = Field(default=None, description="None: whole since the reset")
 
 
 class RadioMsg(Msg):
@@ -283,6 +331,7 @@ class ContentMsg(Msg):
     courses: dict[str, Course]
     controllers: dict[str, Controller]
     weapons: dict[str, Weapon]
+    payloads: dict[str, Payload]
 
 
 class MapKeys(Msg):

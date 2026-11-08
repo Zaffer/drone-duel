@@ -130,18 +130,26 @@ export class Flight {
 
   private dynamicsData: () => Record<string, unknown> | null;
 
-  /** Start a vehicle at a location, on a pad (0 player 1, 1 player 2). */
-  start(locationId: string, vehicle: string, pad = 0): void {
+  /** Start a vehicle at a location, on a pad (0 player 1, 1 player 2), with a payload fitted
+   * (content/payloads: the mode's), if one is named. */
+  start(locationId: string, vehicle: string, pad = 0, payload: string | null = null): void {
     vehicleId(vehicle);
     link.send({ ch: "video", system: prefs().video.system });
-    link.send({ ch: "session", action: "start", location: locationId, vehicle, pad });
+    link.send({ ch: "session", action: "start", location: locationId, vehicle, pad, payload });
     sessionStarting(locationId, vehicle, pad);
   }
 
   switchVehicle(vehicle: string): void {
     vehicleId(vehicle);
     const s = status();
-    link.send({ ch: "session", action: "switch", location: null, vehicle, pad: s.pad });
+    link.send({
+      ch: "session",
+      action: "switch",
+      location: null,
+      vehicle,
+      pad: s.pad,
+      payload: null,
+    });
     sessionStarting(s.location, vehicle, s.pad);
   }
 
@@ -155,16 +163,31 @@ export class Flight {
         location: null,
         vehicle: null,
         pad: status().pad,
+        payload: null,
       });
   }
 
   throw(): void {
-    link.send({ ch: "session", action: "throw", location: null, vehicle: null, pad: 0 });
+    link.send({
+      ch: "session",
+      action: "throw",
+      location: null,
+      vehicle: null,
+      pad: 0,
+      payload: null,
+    });
   }
 
   /** The vehicle is destroyed (a crash or a strike in a duel): its physics stops dead. */
   destroy(): void {
-    link.send({ ch: "session", action: "destroy", location: null, vehicle: null, pad: 0 });
+    link.send({
+      ch: "session",
+      action: "destroy",
+      location: null,
+      vehicle: null,
+      pad: 0,
+      payload: null,
+    });
   }
 
   pose(now = performance.now()): Pose | null {
@@ -190,7 +213,14 @@ export class Flight {
     sounds.stopMotor();
     this.world.mouseCamera = true;
     link.send({ ch: "dynamics", on: false });
-    link.send({ ch: "session", action: "stop", location: null, vehicle: null, pad: 0 });
+    link.send({
+      ch: "session",
+      action: "stop",
+      location: null,
+      vehicle: null,
+      pad: 0,
+      payload: null,
+    });
   }
 
   // The vehicle's body follows the session: a new one for a new vehicle, once the pad's ground
@@ -199,7 +229,7 @@ export class Flight {
   private onStatus(): void {
     const s = status();
     if (!s.vehicle || !s.origin || s.state === "idle") return;
-    const key = `${s.location}/${s.vehicle}/${s.pad}`;
+    const key = `${s.location}/${s.vehicle}/${s.pad}/${s.payload?.name ?? ""}`;
     if (key === this.bodyKey) return;
     this.bodyKey = key;
     const spec = content()?.vehicles[s.vehicle];
@@ -210,7 +240,8 @@ export class Flight {
       [lat, lon] = moveBy(lat, lon, Math.cos(hd) * this.truckAhead, Math.sin(hd) * this.truckAhead);
     }
     const pad = { lat, lon, alt, heading_deg: s.heading_deg };
-    void this.spawnBody(key, spec, pad, s.origin);
+    // The payload the session fitted (Shoot Down's charge), drawn under it.
+    void this.spawnBody(key, { ...spec, payload: s.payload }, pad, s.origin);
   }
 
   private async spawnBody(

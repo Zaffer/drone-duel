@@ -71,6 +71,7 @@ class _Command:
     reason: str = ""
     of: object = None
     height_m: float = 0.0
+    payload: str | None = None
 
 
 class Session:
@@ -91,6 +92,8 @@ class Session:
         self.step = ""
         self.location: str | None = None
         self.vehicle: str | None = None
+        self.payload: str | None = None
+        """The payload fitted to it (content/payloads), kept by a switch."""
         self.pad = 0
         self.video: VideoSystem = "analog"
         self.wind: Wind | None = None
@@ -132,10 +135,11 @@ class Session:
         location: str | None = None,
         vehicle: str | None = None,
         pad: int = 0,
+        payload: str | None = None,
     ) -> None:
         if action in ("start", "switch", "stop"):
             self._cancel.set()  # overtake a spawn in progress
-        self._commands.put(_Command(action, location, vehicle, pad))
+        self._commands.put(_Command(action, location, vehicle, pad, payload=payload))
 
     def send_rc(self, us: Sequence[int]) -> None:
         """The pilot's channels, µs, from the server's radio (rc.pilot) or the page's."""
@@ -161,6 +165,31 @@ class Session:
         """Fly the vehicle as a target: "hover" `height_m` above its pad, or "land" (in order,
         after any command before it: a reset first respawns it)."""
         self._commands.put(_Command("target", reason=action, height_m=height_m))
+
+    def go(
+        self,
+        point: tuple[float, float, float],
+        vel_ned: tuple[float, float, float] | None,
+        yaw_deg: float | None,
+    ) -> None:
+        """Fly the target on (protocol.TargetMsg "go"): straight to the firmware, a few times a
+        second, while it is ready and has not crashed."""
+        firmware, physics = self._firmware, self._physics
+        if self.state != "ready" or firmware is None:
+            return
+        if physics is not None and physics.status.get("phase") == "crashed":
+            return
+        firmware.go(point, vel_ned, yaw_deg)
+
+    def path(self, points: Sequence[tuple[float, float]], height_m: float) -> None:
+        """Fly the target round a path (protocol.TargetMsg "path"): straight to the firmware,
+        while it is ready and has not crashed."""
+        firmware, physics = self._firmware, self._physics
+        if self.state != "ready" or firmware is None:
+            return
+        if physics is not None and physics.status.get("phase") == "crashed":
+            return
+        firmware.path(points, height_m)
 
     def hit(
         self,
@@ -215,6 +244,9 @@ class Session:
             "video": self.video,
             "origin": self.origin,
             "heading_deg": self.heading_deg,
+            "payload": (
+                self._spec.payload.model_dump() if self._spec and self._spec.payload else None
+            ),
         }
 
     # The worker.
@@ -234,7 +266,9 @@ class Session:
         if cmd.action == "start":
             location = self.content.location(cmd.location or "")
             vehicle = self.content.vehicle(cmd.vehicle or "").id
-            self.location, self.pad = location.id, cmd.pad
+            if cmd.payload is not None:
+                self.content.payload(cmd.payload)  # there is one
+            self.location, self.pad, self.payload = location.id, cmd.pad, cmd.payload
             self.wind = location.wind
             self._spawn(vehicle)
         elif cmd.action == "switch":
@@ -271,6 +305,7 @@ class Session:
         elif cmd.action == "stop":
             self._teardown()
             self.state, self.step, self.location, self.vehicle = "idle", "", None, None
+            self.payload = None
             self.origin = None
             self._status()
 
@@ -296,7 +331,7 @@ class Session:
         cancel = self._cancel
         assert self.location is not None
         location = self.content.location(self.location)
-        vehicle: Vehicle = self.content.vehicle(vehicle_id)
+        vehicle: Vehicle = self.content.fitted(vehicle_id, self.payload)
         pad = location.pads[min(self.pad, len(location.pads) - 1)]
         self.vehicle = vehicle_id
         self._spec = vehicle
@@ -320,7 +355,9 @@ class Session:
             ports=self.ports,
             video=self.video,
             wind=self.wind or location.wind,
-            workdir=LOGS / "slots" / str(self.ports.slot) / vehicle.id,
+            # Its own with a payload: ArduPilot keeps its parameters there between boots.
+            workdir=LOGS / "slots" / str(self.ports.slot)
+            / (vehicle.id + (f"+{self.payload}" if self.payload else "")),
             cancel=cancel,
         )
         physics = PhysicsProcess(ctx, self.events)

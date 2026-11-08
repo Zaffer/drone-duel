@@ -1,15 +1,18 @@
-// What a bullet can hit on the 5" quad, and what it does to each part (DESIGN.md §7, Shoot
-// Down). The parts are laid out as the drawn model (web/public/models/fpv-drone.glb, a stretched
-// X): the shooter aims at what they see. Body frame forward, right, down, metres, from the pose's
-// point (the model's origin, between the motors, under the frame).
+// What a bullet can hit on the 5" quad, and what it does (DESIGN.md §7, Shoot Down). The parts
+// are laid out as the drawn model (web/public/models/fpv-drone.glb, a stretched X): the shooter
+// aims at what they see. Body frame forward, right, down, metres, from the pose's point (the
+// model's origin, between the motors, under the frame: the physics' centre of mass).
 //
-// Each part is a box, a vertical cylinder (motors) or a disc (propellers). A bullet goes through
-// a quad: it loses a share of its momentum in each part it meets (that share is the push the
-// quad gets), and carries on. A propeller disc is mostly air: a bullet crossing it meets a blade
-// with the chance the three blades cover at that radius, 3c / 2πr (they are frozen for the
-// microseconds it takes: a 5" prop turns under a degree in that time).
+// What a hit does is the physics' (physics/quad/model.py), by part: an arm (the arm itself, its
+// motor and ESC, its prop) loses that rotor; the body (the stack, the plates, the camera) cuts
+// the power; the pack cuts it a moment later; a payload goes off. Each zone is a box, a
+// vertical cylinder (motors) or a disc (propellers). A bullet goes through a quad: it loses a
+// share of its momentum in each zone it meets (that share is the push the quad gets), and
+// carries on. A propeller disc is mostly air: a bullet crossing it meets a blade with the
+// chance the three blades cover at that radius, 3c / 2πr (they are frozen for the microseconds
+// it takes: a 5" prop turns under a degree in that time).
 
-import type { HitMsg } from "../net/protocol.ts";
+import type { HitMsg, PayloadSpec } from "../net/protocol.ts";
 import type { Vec3 } from "../world/geo.ts";
 
 export type Part = HitMsg["part"];
@@ -34,17 +37,22 @@ const ESC_RIGHT = 0.051;
 /** EST: a blade's chord, m (a 5" three-blade's at mid-span). */
 const CHORD = 0.012;
 
-/** A share of the bullet's momentum each part takes from it, as it goes through (EST: from
- * what is in the way; a motor's steel and copper or a pack's cells stop far more of it than
- * carbon plate or a polycarbonate blade). */
-export const MOMENTUM_SHARE: Record<Part, number> = {
+/** A share of the bullet's momentum each takes from it, as it goes through (EST: from what is
+ * in the way; a motor's steel and copper stop far more of it than carbon plate, a
+ * polycarbonate blade or an ESC's board). A pack's cells are some 2 g/cm³ (a 6S 1300 mAh pack
+ * is about 200 g in 100 cm³): 25 to 55 mm of them is like 5 to 11 cm of water, where M193 loses
+ * a tenth or so of its speed before it starts to yaw (some 12 cm in), so a pack takes a slight
+ * kick, not a shove. A charge's steel case and filling stop about what a motor does. */
+const SHARE = {
   prop: 0.01,
   arm: 0.04,
   motor: 0.35,
-  battery: 0.4,
+  esc: 0.05,
+  battery: 0.12,
   stack: 0.06,
   camera: 0.1,
   frame: 0.03,
+  payload: 0.35,
 };
 
 type Shape =
@@ -55,6 +63,10 @@ type Shape =
 export interface Zone {
   part: Part;
   motor: number | null;
+  /** What it is, for the player ("prop", "flight controller"...). */
+  label: string;
+  /** Its share of a bullet's momentum (SHARE). */
+  share: number;
   shape: Shape;
 }
 
@@ -74,18 +86,50 @@ const ARM_DOWN: [number, number] = [-0.005, 0];
 
 export const ZONES: Zone[] = [
   // The pack, strapped on top.
-  { part: "battery", motor: null, shape: box([-0.027, -0.012, -0.049], [0.027, 0.012, -0.022]) },
+  {
+    part: "battery",
+    motor: null,
+    label: "battery",
+    share: SHARE.battery,
+    shape: box([-0.027, -0.012, -0.049], [0.027, 0.012, -0.022]),
+  },
   // The flight controller and its receiver and VTX, between the plates.
-  { part: "stack", motor: null, shape: box([-0.02, -0.013, -0.019], [0.02, 0.013, -0.004]) },
+  {
+    part: "body",
+    motor: null,
+    label: "flight controller",
+    share: SHARE.stack,
+    shape: box([-0.02, -0.013, -0.019], [0.02, 0.013, -0.004]),
+  },
   // The camera at the nose.
-  { part: "camera", motor: null, shape: box([0.062, -0.008, -0.02], [0.078, 0.008, -0.004]) },
+  {
+    part: "body",
+    motor: null,
+    label: "camera",
+    share: SHARE.camera,
+    shape: box([0.062, -0.008, -0.02], [0.078, 0.008, -0.004]),
+  },
   // The plates round them: top and bottom.
-  { part: "frame", motor: null, shape: box([-0.075, -0.014, -0.022], [0.08, 0.014, -0.019]) },
-  { part: "frame", motor: null, shape: box([-0.075, -0.014, -0.004], [0.08, 0.014, 0]) },
+  {
+    part: "body",
+    motor: null,
+    label: "frame",
+    share: SHARE.frame,
+    shape: box([-0.075, -0.014, -0.022], [0.08, 0.014, -0.019]),
+  },
+  {
+    part: "body",
+    motor: null,
+    label: "frame",
+    share: SHARE.frame,
+    shape: box([-0.075, -0.014, -0.004], [0.08, 0.014, 0]),
+  },
   ...CORNERS.flatMap((c): Zone[] => [
     {
-      part: "motor",
+      part: "arm",
       motor: c.motor,
+      label: "motor",
+      share: SHARE.motor,
       shape: {
         kind: "cyl",
         at: [c.fwd * HUB_FWD, c.right * HUB_RIGHT],
@@ -93,19 +137,22 @@ export const ZONES: Zone[] = [
         down: [-0.027, -0.005],
       },
     },
-    // Each motor's own ESC, in a sleeve half way along its arm (the model's): hit, that motor
-    // stops.
+    // Each motor's own ESC, in a sleeve half way along its arm (the model's).
     {
-      part: "motor",
+      part: "arm",
       motor: c.motor,
+      label: "ESC",
+      share: SHARE.esc,
       shape: box(
         [c.fwd * ESC_FWD - 0.008, c.right * ESC_RIGHT - 0.008, -0.008],
         [c.fwd * ESC_FWD + 0.008, c.right * ESC_RIGHT + 0.008, 0.003],
       ),
     },
     {
-      part: "prop",
+      part: "arm",
       motor: c.motor,
+      label: "prop",
+      share: SHARE.prop,
       shape: {
         kind: "disc",
         at: [c.fwd * HUB_FWD, c.right * HUB_RIGHT],
@@ -117,6 +164,20 @@ export const ZONES: Zone[] = [
   ]),
 ];
 
+/** A payload's zone: its tube as a box along the body, as wide as the tube is across on
+ * average (√(π/4) of its diameter: a bullet crossing it meets as much of it). */
+export function payloadZone(p: PayloadSpec): Zone {
+  const [length, diameter] = p.size_m;
+  const half = (Math.sqrt(Math.PI / 4) * diameter) / 2;
+  return {
+    part: "payload",
+    motor: null,
+    label: p.name,
+    share: SHARE.payload,
+    shape: box([-length / 2, -half, p.below_m - half], [length / 2, half, p.below_m + half]),
+  };
+}
+
 export const ARMS: Arm[] = CORNERS.map((c) => ({
   motor: c.motor,
   from: [c.fwd * 0.025, c.right * 0.014],
@@ -126,20 +187,27 @@ export const ARMS: Arm[] = CORNERS.map((c) => ({
 export interface Strike {
   part: Part;
   motor: number | null;
+  label: string;
+  share: number;
   /** Along the segment, 0..1. */
   s: number;
   /** Where, body frame. */
   at: Vec3;
 }
 
-/** Where the segment `a` → `b` (body frame) enters each part it meets, nearest first. Blades are
- * drawn with `rand`. */
-export function strikes(a: Vec3, b: Vec3, rand: () => number = Math.random): Strike[] {
+/** Where the segment `a` → `b` (body frame) enters each zone it meets (ZONES, and `extra`: a
+ * payload's), nearest first. Blades are drawn with `rand`. */
+export function strikes(
+  a: Vec3,
+  b: Vec3,
+  rand: () => number = Math.random,
+  extra: readonly Zone[] = [],
+): Strike[] {
   const d: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   // Nothing within reach: a quick sphere test first.
   if (!nearSegment(a, d, 0.2)) return [];
   const out: Strike[] = [];
-  for (const z of ZONES) {
+  for (const z of [...ZONES, ...extra]) {
     const s = enter(z.shape, a, d);
     if (s === null) continue;
     const at: Vec3 = [a[0] + d[0] * s, a[1] + d[1] * s, a[2] + d[2] * s];
@@ -147,7 +215,7 @@ export function strikes(a: Vec3, b: Vec3, rand: () => number = Math.random): Str
       const r = Math.hypot(at[0] - z.shape.at[0], at[1] - z.shape.at[1]);
       if (rand() > Math.min(1, (3 * CHORD) / (2 * Math.PI * r))) continue;
     }
-    out.push({ part: z.part, motor: z.motor, s, at });
+    out.push({ part: z.part, motor: z.motor, label: z.label, share: z.share, s, at });
   }
   for (const arm of ARMS) {
     const s = enterArm(arm, a, d);
@@ -155,6 +223,8 @@ export function strikes(a: Vec3, b: Vec3, rand: () => number = Math.random): Str
       out.push({
         part: "arm",
         motor: arm.motor,
+        label: "arm",
+        share: SHARE.arm,
         s,
         at: [a[0] + d[0] * s, a[1] + d[1] * s, a[2] + d[2] * s],
       });

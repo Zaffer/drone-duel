@@ -102,7 +102,8 @@ class SlotPorts:
     @property
     def betaflight_tcp_base(self) -> int:
         """TCP, Betaflight's --tcpbaseport: UARTn on this + n. UART1 the CLI and MSP, UART2 MSP
-        (the ground station), UART3 MSP DisplayPort (the OSD, as to a DJI air unit)."""
+        (the ground station), UART3 MSP DisplayPort (the OSD, as to a DJI air unit), UART4
+        MAVLink (missions)."""
         return 7760 + SLOT_STRIDE * self.slot
 
     @property
@@ -112,6 +113,10 @@ class SlotPorts:
     @property
     def betaflight_osd(self) -> int:
         return self.betaflight_tcp_base + 3
+
+    @property
+    def betaflight_mavlink(self) -> int:
+        return self.betaflight_tcp_base + 4
 
     # Our own physics process.
     @property

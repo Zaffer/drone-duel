@@ -14,10 +14,13 @@ aux 2 3 1 900 1300 0 0
 aux 3 11 1 900 1300 0 0
 # The radio link lost (the page gone): Betaflight's failsafe lands it where it is, holding the
 # throttle it had through the guard time (not dropping it to low), and disarms on touchdown
-# (its impact detection: 100 g/s of jerk, with the sticks let go or the altitude held).
+# (its impact detection: 1500 g/s of jerk, with the sticks let go or the altitude held). On our
+# physics a mission starting (AUTOPILOT) jerks it past 500 g/s, and 1000 held (measured
+# 2026-11-08); a touchdown still passes 2500. Off, the failsafe disarms only when its landing
+# time (60 s) is up.
 set failsafe_procedure = AUTO-LAND
 rxfail 3 h
-set landing_disarm_threshold = 10
+set landing_disarm_threshold = 150
 
 # GPS and the compass: SITL's own, fed from the physics' true state.
 feature GPS
@@ -32,8 +35,17 @@ set alt_hold_deadband = 20
 set alt_hold_climb_rate = 50
 
 # UART2: MSP for the game's ground station (telemetry). UART3: MSP DisplayPort, the OSD, as to a
-# DJI air unit (functions MSP + VTX_MSP).
+# DJI air unit (functions MSP + VTX_MSP). UART4: MAVLink, for the game's missions (function
+# TELEMETRY_MAVLINK).
 serial 1 1 115200 57600 0 115200
 serial 2 131073 115200 57600 0 115200
+serial 3 512 115200 57600 0 115200
 set osd_displayport_device = MSP
 set osd_units = METRIC
+
+# Missions (Shoot Down's paths, drone_duels.firmware.betaflight): AUTOPILOT on AUX6 (channel 10,
+# the last Betaflight reads here: max_aux_channel 6) high, a switch only the game sets (the
+# controllers in content/ map 8 channels). It flies a mission's legs at ap_max_velocity, which is
+# also what POSHOLD's full stick asks (Betaflight's default is 5 m/s).
+aux 4 56 5 1700 2100 0 0
+set ap_max_velocity = 700

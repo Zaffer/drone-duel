@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from drone_duels.content.schema import Controller, Course, Location, Vehicle, Weapon
+from drone_duels.content.schema import Controller, Course, Location, Payload, Vehicle, Weapon
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTENT = ROOT / "content"
@@ -44,6 +44,7 @@ class Content:
     courses: dict[str, Course]
     controllers: dict[str, Controller]
     weapons: dict[str, Weapon]
+    payloads: dict[str, Payload]
 
     def location(self, location_id: str) -> Location:
         try:
@@ -57,6 +58,25 @@ class Content:
         except KeyError:
             raise ContentError(f"no vehicle {vehicle_id!r}") from None
 
+    def payload(self, payload_id: str) -> Payload:
+        try:
+            return self.payloads[payload_id]
+        except KeyError:
+            raise ContentError(f"no payload {payload_id!r}") from None
+
+    def fitted(self, vehicle_id: str, payload_id: str | None) -> Vehicle:
+        """The vehicle, with the payload fitted (its mass, its parts, its firmware's files after
+        the vehicle's), if one is named."""
+        vehicle = self.vehicle(vehicle_id)
+        if payload_id is None:
+            return vehicle
+        payload = self.payload(payload_id)
+        extra = payload.params.get(vehicle.firmware.kind, [])
+        firmware = vehicle.firmware.model_copy(
+            update={"params": [*vehicle.firmware.params, *extra]}
+        )
+        return vehicle.model_copy(update={"payload": payload.spec(), "firmware": firmware})
+
 
 def load(directory: Path = CONTENT) -> Content:
     content = Content(
@@ -65,6 +85,7 @@ def load(directory: Path = CONTENT) -> Content:
         courses=_load_dir(Course, directory / "courses"),
         controllers=_load_dir(Controller, directory / "controllers"),
         weapons=_load_dir(Weapon, directory / "weapons"),
+        payloads=_load_dir(Payload, directory / "payloads"),
     )
     _check_references(content)
     return content
@@ -75,5 +96,8 @@ def _check_references(c: Content) -> None:
     for course in c.courses.values():
         if course.location not in c.locations:
             problems.append(f"course {course.id}: no location {course.location!r}")
+    for vehicle in c.vehicles.values():
+        if vehicle.payload is not None:
+            problems.append(f"vehicle {vehicle.id}: a payload is fitted by a mode, not the file")
     if problems:
         raise ContentError("\n".join(problems))

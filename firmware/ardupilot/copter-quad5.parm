@@ -98,7 +98,13 @@ LOIT_ACC_MAX_M   8
 LOIT_BRK_ACC_M   5
 LOIT_BRK_JRK_M   10
 LOIT_BRK_DELAY   0.25
+# And flying itself (AUTO, GUIDED: Shoot Down's paths, whose targets these shape): a 5 inch's,
+# not a survey copter's (ArduCopter's defaults: 2.5 m/s² across, 1 m/s² up and down, a jerk of
+# 1 m/s³).
 WP_SPD           10
+WP_ACC           5
+WP_ACC_Z         3
+WP_JERK          10
 
 # The OSD. An analog quad's flight controller has an OSD chip (OSD_TYPE 1, MAX7456) lay
 # ArduPilot's OSD into the camera's video; SITL has none, so it sends the same screen over MSP

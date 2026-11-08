@@ -41,3 +41,28 @@ def test_a_missing_reference_is_an_error(tmp_path: Path) -> None:
     f.write_text(f.read_text().replace('location = "area-xo"', 'location = "atlantis"'))
     with pytest.raises(ContentError, match="no location 'atlantis'"):
         load(root)
+
+
+def test_a_payload_is_fitted_by_a_mode_not_a_vehicle(tmp_path: Path) -> None:
+    """Shoot Down's charge: fitted to whichever quad it starts, with that firmware's files after
+    the vehicle's; a vehicle's own file cannot carry one."""
+    c = load()
+    for vehicle_id in ("quad5", "quad5-betaflight"):
+        vehicle = c.vehicle(vehicle_id)
+        assert vehicle.payload is None
+        fitted = c.fitted(vehicle_id, "charge")
+        assert fitted.payload == c.payload("charge").spec()
+        assert fitted.payload is not None and fitted.payload.lethal_m == 5.0
+        extra = c.payload("charge").params.get(vehicle.firmware.kind, [])
+        assert fitted.firmware.params == [*vehicle.firmware.params, *extra]
+    assert c.fitted("quad5", "charge").firmware.params[-1] == "ardupilot/copter-quad5-charge.parm"
+    assert c.fitted("quad5", None) == c.vehicle("quad5")
+    with pytest.raises(ContentError, match="no payload 'anvil'"):
+        c.fitted("quad5", "anvil")
+
+    root = _copy(tmp_path)
+    f = root / "vehicles" / "quad5.toml"
+    payload = (CONTENT / "payloads" / "charge.toml").read_text().split("[params]")[0]
+    f.write_text(f.read_text() + "\n[payload]\n" + payload)
+    with pytest.raises(ContentError, match="quad5: a payload is fitted by a mode"):
+        load(root)

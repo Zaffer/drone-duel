@@ -3,7 +3,7 @@
 // from its channel; the true pose is not here (it is a stream: link.poses()).
 
 import { computed, signal } from "alien-signals";
-import type { LogMsg, OsdMsg, PlanMsg, StatusMsg, TelemetryMsg } from "../net/protocol.ts";
+import type { Damage, LogMsg, OsdMsg, PlanMsg, StatusMsg, TelemetryMsg } from "../net/protocol.ts";
 import { link } from "../net/server.ts";
 import { toast } from "./app.ts";
 
@@ -17,6 +17,7 @@ const IDLE: StatusMsg = {
   video: "analog",
   origin: null,
   heading_deg: 0,
+  payload: null,
 };
 
 export const status = signal<StatusMsg>(IDLE);
@@ -26,6 +27,8 @@ export const plan = signal<PlanMsg | null>(null);
 export const log = signal<LogMsg[]>([]);
 /** What the physics says the vehicle is doing: "ground", "hand", "flying", "crashed"... */
 export const phase = signal<string>("");
+/** What hits have taken from it (Shoot Down), or null: whole. */
+export const damage = signal<Damage | null>(null);
 export const ready = computed(() => status().state === "ready");
 
 const LOG_KEPT = 50;
@@ -38,6 +41,7 @@ export function sessionStarting(location: string | null, vehicle: string, pad: n
   telemetry(null);
   osd(null);
   plan(null);
+  damage(null);
 }
 
 /** Feed the signals from the server link. Once, at start. */
@@ -53,7 +57,10 @@ export function wireSession(): void {
   link.on("telemetry").subscribe((t) => telemetry(t));
   link.on("osd").subscribe((o) => osd(o));
   link.on("plan").subscribe((p) => plan(p));
-  link.on("physics").subscribe((p) => phase(p.phase));
+  link.on("physics").subscribe((p) => {
+    phase(p.phase);
+    damage(p.damage ?? null);
+  });
   link.on("log").subscribe((l) => {
     log([...log().slice(-(LOG_KEPT - 1)), l]);
     if (l.source === "server" && l.level === "error") toast(l.text, "bad", 10000);

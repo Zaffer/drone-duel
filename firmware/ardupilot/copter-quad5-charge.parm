@@ -1,0 +1,6 @@
+# The 5" quad (copter-quad5.parm) carrying Shoot Down's charge (content/payloads/charge.toml):
+# 1.17 kg in all (physics.quad.plant.with_payload). Loaded after the vehicle's files.
+
+# Hover takes 0.35 of ArduPilot's throttle with the charge (esc.hover_thrust; tests hold it):
+# thrust to weight 3.0. ArduPilot learns it in flight as the pack sags.
+MOT_THST_HOVER   0.35

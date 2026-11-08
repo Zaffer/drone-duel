@@ -61,6 +61,12 @@ ACM_MODES = {name: number for number, name in mavutil.mode_mapping_acm.items()}
 """ArduCopter's flight modes by name: GUIDED 4, LAND 9..."""
 POSITION_ONLY = 0x0DF8
 """SET_POSITION_TARGET's type mask: use the position, ignore velocity, acceleration and yaw."""
+# POSITION_TARGET_TYPEMASK's bits: what SET_POSITION_TARGET_* leaves out.
+IGNORE_POSITION = 0x0007
+IGNORE_VELOCITY = 0x0038
+IGNORE_ACCEL = 0x01C0
+IGNORE_YAW = 0x0400
+IGNORE_YAW_RATE = 0x0800
 
 
 def mode_name(custom_mode: int) -> str:
@@ -260,6 +266,32 @@ class VehicleLink:
                 apm.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, POSITION_ONLY,
                 round(lat * 1e7), round(lon * 1e7), alt_rel,
                 0, 0, 0, 0, 0, 0, 0, 0,
+            )
+        )
+
+    def set_target(
+        self,
+        point: tuple[float, float, float],
+        vel_ned: tuple[float, float, float] | None,
+        yaw_deg: float | None,
+    ) -> None:
+        """In GUIDED, a point along a path (SET_POSITION_TARGET_GLOBAL_INT): `point` (lat, lon, m
+        above home) with `vel_ned` (m/s), the path's velocity there, as its feed-forward; facing
+        `yaw_deg` if given. ArduCopter takes it as a position target moving on."""
+        mask = IGNORE_ACCEL | IGNORE_YAW_RATE
+        if vel_ned is None:
+            mask |= IGNORE_VELOCITY
+        if yaw_deg is None:
+            mask |= IGNORE_YAW
+        lat, lon, alt = point
+        vn, ve, vd = vel_ned or (0.0, 0.0, 0.0)
+        yaw = math.radians(yaw_deg or 0.0)
+        self._send(
+            lambda mav: mav.set_position_target_global_int_send(
+                0, self.sysid, apm.MAV_COMP_ID_AUTOPILOT1,
+                apm.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, mask,
+                round(lat * 1e7), round(lon * 1e7), alt,
+                vn, ve, vd, 0, 0, 0, yaw, 0,
             )
         )
 

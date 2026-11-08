@@ -285,6 +285,17 @@ def test_configure_types_settings_in_once(tmp_path: Path) -> None:
     assert betaflight.configure(sitl, work, "set a = 2\n", 9605, 7760)
 
 
+def test_configure_again_after_a_rebuild(tmp_path: Path) -> None:
+    """Another build may lay its eeprom out otherwise: the same settings are typed in again."""
+    sitl = fake_sitl(tmp_path, "[CONFIG] Config file processed, EEPROM saved")
+    work = tmp_path / "work"
+    work.mkdir()
+    assert betaflight.configure(sitl, work, "set a = 1\n", 9605, 7760)
+    sitl.write_text(sitl.read_text() + "# rebuilt\n")
+    assert betaflight.configure(sitl, work, "set a = 1\n", 9605, 7760)
+    assert not betaflight.configure(sitl, work, "set a = 1\n", 9605, 7760)
+
+
 def test_configure_says_what_betaflight_rejected(tmp_path: Path) -> None:
     sitl = fake_sitl(tmp_path, "###ERROR IN set: INVALID NAME: osd_bogus_pos = 1###")
     work = tmp_path / "work"

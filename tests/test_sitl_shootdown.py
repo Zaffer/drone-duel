@@ -1,9 +1,11 @@
 """Shoot Down for real: ArduCopter SITL flies itself up to hover over the pad as a ground station
-would ask it (Session.target), a hit kills a motor in the physics and it comes down, and a reset
-and a new hover put it back up. Slot 1, as test_sitl_quad.py (which has finished with it by
-then).
+would ask it (Session.target), a hit takes an arm in the physics and it comes down, and a reset
+and a new hover put it back up. With Shoot Down's charge fitted it carries it up, follows a
+path (Session.go: a point moving on, with its velocity), and a hit on the charge sets it off.
+Slot 1, as test_sitl_quad.py (which has finished with it by then).
 """
 
+import math
 import time
 from collections.abc import Iterator
 
@@ -29,8 +31,7 @@ VD = POSE_FIELDS.index("vd")
 HEIGHT = 30.0
 
 
-@pytest.fixture
-def shoot() -> Iterator[tuple[Session, Recorder]]:
+def spawn(vehicle: str, payload: str | None = None) -> Iterator[tuple[Session, Recorder]]:
     events = Recorder()
     made: list[Firmware] = []
 
@@ -42,7 +43,7 @@ def shoot() -> Iterator[tuple[Session, Recorder]]:
     session = Session(load(), events, slot=SLOT, firmware_factory=factory)
     session.start()
     try:
-        session.command("start", location="billy-bishop", vehicle="quad5")
+        session.command("start", location="billy-bishop", vehicle=vehicle, payload=payload)
         wait_for("ready", lambda: session.state in ("ready", "failed"), 180)
         assert session.state == "ready", session.step
         yield session, events
@@ -53,6 +54,16 @@ def shoot() -> Iterator[tuple[Session, Recorder]]:
             assert firmware.sitl is not None and firmware.sitl.poll() is not None
             assert firmware.router is not None and firmware.router.poll() is not None
             assert firmware.physics.proc is not None and firmware.physics.proc.poll() is not None
+
+
+@pytest.fixture
+def shoot() -> Iterator[tuple[Session, Recorder]]:
+    yield from spawn("quad5")
+
+
+@pytest.fixture
+def charged() -> Iterator[tuple[Session, Recorder]]:
+    yield from spawn("quad5", "charge")
 
 
 def height(session: Session, events: Recorder) -> float:
@@ -90,7 +101,7 @@ def test_hover_shoot_a_motor_reset_and_hover_again(shoot: tuple[Session, Recorde
 
     # A bullet through motor 1 (front right), pushing it east, off centre.
     shot = time.monotonic()
-    session.hit("motor", 1, (0.0, 1.0, 0.0), (0.08, 0.08, 0.0))
+    session.hit("arm", 1, (0.0, 1.0, 0.0), (0.08, 0.08, 0.0))
     fastest = 0.0
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
@@ -110,7 +121,7 @@ def test_hover_shoot_a_motor_reset_and_hover_again(shoot: tuple[Session, Recorde
     physics = [PhysicsMsg.model_validate(m) for m in events.of("physics")]
     damaged = [m for m in physics if m.damage is not None]
     assert damaged and damaged[-1].damage is not None
-    assert damaged[-1].damage.thrust == [0.0, 1.0, 1.0, 1.0]
+    assert damaged[-1].damage.lost == [True, False, False, False]
 
     # Respawn and up again: a reset (ArduCopter boots again) and a hover queued behind it.
     asked = time.monotonic()
@@ -128,3 +139,44 @@ def test_hover_shoot_a_motor_reset_and_hover_again(shoot: tuple[Session, Recorde
     session.target("land")
     wait_for("landed", lambda: height(session, events) < 0.2, 30)
     wait_for("disarmed", lambda: (t := events.telemetry()) is not None and not t.armed, 20)
+
+
+def speed(events: Recorder) -> tuple[float, float]:
+    """The truth's horizontal speed, m/s, and its heading of travel, degrees."""
+    pose = events.pose()
+    assert pose is not None
+    vn, ve = pose[POSE_FIELDS.index("vn")], pose[POSE_FIELDS.index("ve")]
+    return math.hypot(vn, ve), math.degrees(math.atan2(ve, vn)) % 360
+
+
+def test_the_charged_quad_follows_a_path_and_its_charge_goes_off(
+    charged: tuple[Session, Recorder],
+) -> None:
+    session, events = charged
+    took = hover_at(session, events, HEIGHT)
+    print(f"\nloaded hover: {HEIGHT:.0f} m held {took:.1f} s after asking")
+    origin = session.origin
+    assert origin is not None
+    lat0, lon0 = origin[0], origin[1]
+    deg_e = 1 / (111_320 * math.cos(math.radians(lat0)))
+
+    # A point moving east at 5 m/s, sent at 5 Hz with its velocity: it follows.
+    start = time.monotonic()
+    fastest = 0.0
+    while (t := time.monotonic() - start) < 8:
+        session.go((lat0, lon0 + 5 * t * deg_e, HEIGHT), (0.0, 5.0, 0.0), 90.0)
+        fastest = max(fastest, speed(events)[0])
+        time.sleep(0.2)
+    v, heading = speed(events)
+    print(f"following east at 5 m/s: {v:.1f} m/s heading {heading:.0f}°, at most {fastest:.1f}")
+    assert 4.0 < v < 6.0 and abs(heading - 90) < 15
+    assert abs(height(session, events) - HEIGHT) < 2
+
+    # A hit on its charge: it goes off, and the power with it.
+    session.hit("payload", None, (0.0, 0.0, 0.0), (0.0, 0.0, 0.035))
+    wait_for(
+        "the charge going off",
+        lambda: (d := PhysicsMsg.model_validate(events.of("physics")[-1]).damage) is not None
+        and d.exploded and d.power == "off",
+        5,
+    )

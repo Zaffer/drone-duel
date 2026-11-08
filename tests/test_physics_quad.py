@@ -28,6 +28,7 @@ from drone_duels.physics.quad.plant import (
     airframe,
     ned_quat,
     skyflow_quat,
+    with_payload,
     yaw_quat,
 )
 from drone_duels.server.protocol import POSE_FIELDS
@@ -196,6 +197,25 @@ def test_parameters_come_from_the_plant() -> None:
     assert params["MOT_THST_HOVER"] == pytest.approx(hover, abs=0.015)
     assert params["MOT_BAT_VOLT_MAX"] == pytest.approx(esc.CELLS * esc.CELL_FULL)
     assert params["BATT_CAPACITY"] == esc.CAPACITY_MAH
+
+
+def test_the_charged_quads_hover_throttle_comes_from_the_plant() -> None:
+    """copter-quad5-charge.parm's hover throttle is the plant's carrying Shoot Down's charge."""
+    from drone_duels.content import store
+
+    payload = store.load().payload("charge")
+    params = {}
+    for path in (PARM, PARM.with_name("copter-quad5-charge.parm")):
+        for line in path.read_text().splitlines():
+            words = line.split("#")[0].split()
+            if len(words) == 2:
+                params[words[0]] = float(words[1])
+    frame = with_payload(airframe("racer5in"), payload.mass_kg, *payload.size_m, payload.below_m)
+    pack = esc.Battery()
+    pack.step(frame, np.full(4, frame.hover_speed), 0.01)
+    lo, hi = params["MOT_SPIN_MIN"], params["MOT_SPIN_MAX"]
+    hover = esc.hover_thrust(frame, lo, hi, params["MOT_THST_EXPO"], pack.voltage, pack.resting)
+    assert params["MOT_THST_HOVER"] == pytest.approx(hover, abs=0.015)
 
 
 # The harness: ArduPilot's outputs in, its frames out.
@@ -383,10 +403,10 @@ def twins(plant: Plant, heading_deg: float = 0.0) -> tuple[QuadModel, QuadModel]
     return out[0], out[1]
 
 
-def test_a_dead_motor_at_hover_rolls_yaws_and_falls(plant: Plant) -> None:
+def test_a_lost_rotor_at_hover_rolls_yaws_and_falls(plant: Plant) -> None:
     hit, whole = twins(plant)
     pwm = [hover_pwm(hit)] * 4
-    hit.hit("motor", 1, NO_PUSH, NO_PUSH)  # front right, CCW
+    hit.hit("arm", 1, NO_PUSH, NO_PUSH)  # front right, CCW
     out = fly(hit, pwm, 0.4)[-1]
     ref = fly(whole, pwm, 0.4)[-1]
     rotor = MOTOR_OF_ROTOR.index(0)
@@ -396,51 +416,34 @@ def test_a_dead_motor_at_hover_rolls_yaws_and_falls(plant: Plant) -> None:
     assert q < -1.0  # ...and pitches nose down
     assert r < -0.5  # and the CCW rotor's drag no longer turns it clockwise: it yaws left
     assert out.velocity[2] > ref.velocity[2] + 0.5  # sinking
-    assert hit.damage_summary() == {"thrust": [0.0, 1.0, 1.0, 1.0], "power": "on", "hits": 1}
+    assert hit.damage_summary() == {
+        "lost": [True, False, False, False], "power": "on", "exploded": False, "hits": 1
+    }
 
 
-@pytest.mark.parametrize("part", ["motor", "arm"])
-def test_a_dead_rotor_stays_dead_whatever_the_firmware_asks(plant: Plant, part: str) -> None:
+def test_a_lost_rotor_stays_lost_whatever_the_firmware_asks(plant: Plant) -> None:
     hit, _ = twins(plant)
-    hit.hit(part, 3, NO_PUSH, NO_PUSH)
+    hit.hit("arm", 3, NO_PUSH, NO_PUSH)
     fly(hit, [2000] * 4, 0.3)
     rotors = hit.s[ROTORS]
-    dead = MOTOR_OF_ROTOR.index(2)
-    assert rotors[dead] < 1.0
-    assert all(rotors[i] > 0.9 * plant.frame.rotor_max for i in range(4) if i != dead)
+    gone = MOTOR_OF_ROTOR.index(2)
+    assert rotors[gone] < 1.0
+    assert all(rotors[i] > 0.9 * plant.frame.rotor_max for i in range(4) if i != gone)
 
 
-def test_a_prop_hit_takes_a_blade_a_third_of_its_thrust(plant: Plant) -> None:
+def test_a_lost_rotor_makes_no_thrust_at_any_speed(plant: Plant) -> None:
     model, _ = twins(plant)
     w = plant.frame.hover_speed
     s = model.s.copy()
     u = Plant.inputs(np.full(4, w))
     whole = plant.statedot(s, u)
-    rotor = MOTOR_OF_ROTOR.index(1)  # motor 2, rear left
-    for blades_left in (2, 1, 0, 0):  # a fourth hit on a bare hub takes nothing more
-        model.hit("prop", 2, NO_PUSH, NO_PUSH)
-        assert model.damage.blades[rotor] == blades_left
-        hit = plant.statedot(s, u, model._params)  # pyright: ignore[reportPrivateUsage]
-        # Up (NWU z) by the lost share of one rotor's thrust over the mass, at the same speed.
-        lost = (1 - blades_left / 3) * plant.frame.thrust(w) / plant.frame.mass
-        assert whole[5] - hit[5] == pytest.approx(lost, rel=1e-6)
-        np.testing.assert_allclose(hit[ROTORS], whole[ROTORS])  # the motor turns it as fast
-    summary = model.damage_summary()
-    assert summary is not None and summary["thrust"] == [1.0, 0.0, 1.0, 1.0]
+    model.hit("arm", 2, NO_PUSH, NO_PUSH)
+    model.hit("arm", 2, NO_PUSH, NO_PUSH)  # a second hit on it takes nothing more
+    hit = plant.statedot(s, u, model._params)  # pyright: ignore[reportPrivateUsage]
+    # Up (NWU z) by one rotor's thrust over the mass.
+    assert whole[5] - hit[5] == pytest.approx(plant.frame.thrust(w) / plant.frame.mass, rel=1e-6)
     # The airframe's own parameters are untouched: the plant is shared.
     np.testing.assert_allclose(plant.statedot(s, u), whole)
-
-
-def test_one_blade_off_is_a_third_of_thrust_in_flight(plant: Plant) -> None:
-    hit, whole = twins(plant)
-    hit.hit("prop", 4, NO_PUSH, NO_PUSH)
-    pwm = [hover_pwm(hit)] * 4
-    fly(hit, pwm, 0.05)
-    fly(whole, pwm, 0.05)
-    rotor = MOTOR_OF_ROTOR.index(3)
-    assert hit.s[ROTORS][rotor] == pytest.approx(whole.s[ROTORS][rotor], rel=1e-6)
-    out = fly(hit, pwm, 0.3)[-1]
-    assert out.velocity[2] > fly(whole, pwm, 0.3)[-1].velocity[2] + 0.1
 
 
 @pytest.mark.parametrize("heading", [0.0, 90.0])
@@ -451,7 +454,8 @@ def test_an_impulse_changes_velocity_by_j_over_m_and_spins_it_off_centre(
     pwm = [hover_pwm(hit)] * 4
     j = 0.5  # N·s, north
     above = 0.05  # struck 5 cm above the centre of mass
-    hit.hit("frame", None, (j, 0.0, 0.0), (0.0, 0.0, -above))
+    hit.hit("body", None, (j, 0.0, 0.0), (0.0, 0.0, -above))
+    whole.hit("body", None, NO_PUSH, NO_PUSH)  # the power off in both: only the push differs
     out, ref = fly(hit, pwm, DT)[-1], fly(whole, pwm, DT)[-1]
     dv = np.subtract(out.velocity, ref.velocity)
     assert dv[0] == pytest.approx(j / plant.frame.mass, rel=0.01)
@@ -466,19 +470,24 @@ def test_an_impulse_changes_velocity_by_j_over_m_and_spins_it_off_centre(
     else:
         assert dw[0] == pytest.approx(-above * j / inertia[0][0], rel=0.02)
         assert abs(dw[1]) < 0.01 * abs(dw[0])
-    assert hit.damage_summary() == {"thrust": [1.0] * 4, "power": "on", "hits": 1}
     # One frame only: after it, the two fly alike again (apart from where it went).
     a = fly(hit, pwm, 0.01)[-1]
     b = fly(whole, pwm, 0.01)[-1]
     assert np.subtract(a.velocity, b.velocity)[0] == pytest.approx(dv[0], rel=0.05)
 
 
-def test_a_stack_hit_stops_every_motor_at_once(plant: Plant) -> None:
+def test_a_body_hit_cuts_the_power_at_once(plant: Plant) -> None:
     hit, _ = twins(plant)
-    hit.hit("stack", None, NO_PUSH, NO_PUSH)
-    assert hit.damage_summary() == {"thrust": [1.0] * 4, "power": "off", "hits": 1}
+    hit.hit("body", None, NO_PUSH, NO_PUSH)
+    assert hit.damage_summary() == {
+        "lost": [False] * 4, "power": "off", "exploded": False, "hits": 1
+    }
+    # Driven no longer from the first frame: the rotors only slow.
+    first = fly(hit, [2000] * 4, DT)
+    assert np.all(hit.s[ROTORS] < plant.frame.hover_speed)
     fly(hit, [2000] * 4, 0.2)
     assert np.all(hit.s[ROTORS] < 0.01 * plant.frame.hover_speed)
+    assert first[-1].battery_v > 20  # the pack is whole: the flight controller reads it
 
 
 def test_a_pierced_pack_holds_then_dies(plant: Plant) -> None:
@@ -494,20 +503,57 @@ def test_a_pierced_pack_holds_then_dies(plant: Plant) -> None:
     assert out.battery_v == 0.0
     summary = hit.damage_summary()
     assert summary is not None and summary["power"] == "off"
+    # A body hit while it holds cuts it at once.
+    other, _ = twins(plant)
+    other.hit("battery", None, NO_PUSH, NO_PUSH)
+    other.hit("body", None, NO_PUSH, NO_PUSH)
+    assert other.damage_summary()["power"] == "off"  # pyright: ignore[reportOptionalSubscript]
 
 
-@pytest.mark.parametrize("part", ["camera", "frame"])
-def test_a_camera_or_frame_hit_takes_nothing(plant: Plant, part: str) -> None:
-    hit, whole = twins(plant)
-    pwm = [hover_pwm(hit)] * 4
-    hit.hit(part, None, NO_PUSH, NO_PUSH)
-    a, b = fly(hit, pwm, 0.3)[-1], fly(whole, pwm, 0.3)[-1]
-    assert a.velocity == pytest.approx(b.velocity) and a.gyro == pytest.approx(b.gyro)
+def test_a_payload_hit_sets_it_off(plant: Plant) -> None:
+    hit, _ = twins(plant)
+    hit.payload = True
+    hit.hit("payload", None, NO_PUSH, NO_PUSH)
+    assert hit.damage_summary() == {
+        "lost": [False] * 4, "power": "off", "exploded": True, "hits": 1
+    }
+    bare, _ = twins(plant)  # nothing to set off
+    bare.hit("payload", None, NO_PUSH, NO_PUSH)
+    summary = bare.damage_summary()
+    assert summary is not None and not summary["exploded"] and summary["power"] == "on"
+
+
+def test_coming_down_sets_a_payload_off_one_time_in_two(plant: Plant) -> None:
+    gone = 0
+    tries = 40
+    for seed in range(tries):
+        model = QuadModel(plant.frame, ORIGIN, 0.0, None, plant=plant, seed=seed, payload=True)
+        s = Plant.rest_state((0.0, 0.0, -20.0), 0.0)
+        model.s, model.phase = s, "flying"
+        model.hit("body", None, NO_PUSH, NO_PUSH)
+        while model.phase == "flying":
+            fly(model, [1000] * 4, 0.1)
+        assert model.phase == "crashed"
+        gone += model.damage.exploded
+    assert 0.25 * tries < gone < 0.75 * tries
+
+
+def test_a_payload_is_carried_as_mass() -> None:
+    frame = airframe("racer5in")
+    loaded = with_payload(frame, 0.4, 0.12, 0.06, 0.035)
+    assert loaded.mass == pytest.approx(frame.mass + 0.4)
+    inertia, before = loaded.values["inertia"], frame.values["inertia"]
+    # Rolling and pitching carry it round 35 mm under: more than turning about its own axis.
+    assert inertia[0][0] - before[0][0] > 0.4 * 0.035**2
+    assert inertia[1][1] - before[1][1] > 0.4 * 0.035**2
+    assert inertia[2][2] > before[2][2]
+    assert frame.values["inertia"][0][0] == 0.0025  # the airframe's own are untouched
+    assert loaded.hover_speed > frame.hover_speed
 
 
 def test_shot_down_it_falls_and_crashes(plant: Plant) -> None:
     hit, _ = twins(plant)
-    hit.hit("motor", 4, (0.0, 0.3, 0.0), (0.0, 0.1, 0.0))
+    hit.hit("arm", 4, (0.0, 0.3, 0.0), (0.0, 0.1, 0.0))
     outs = []
     while hit.phase == "flying" and len(outs) < 10 * HZ:
         outs += fly(hit, [hover_pwm(hit)] * 4, 0.1)
@@ -517,7 +563,8 @@ def test_shot_down_it_falls_and_crashes(plant: Plant) -> None:
 
 def test_a_reset_mends_it(plant: Plant) -> None:
     hit, whole = twins(plant)
-    for part, motor in (("prop", 1), ("motor", 2), ("battery", None), ("stack", None)):
+    hit.payload = True
+    for part, motor in (("arm", 1), ("battery", None), ("body", None), ("payload", None)):
         hit.hit(part, motor, (0.2, 0.0, 0.0), (0.05, 0.0, 0.0))
     hit.reset()
     assert hit.damage_summary() is None
@@ -566,7 +613,9 @@ def test_the_runner_takes_hits_and_says_what_they_took() -> None:
             self.hits.append(args)
 
         def damage(self) -> dict[str, Any] | None:
-            return {"thrust": [0.0, 1, 1, 1], "power": "on", "hits": 1} if self.hits else None
+            summary = {"lost": [True, False, False, False], "power": "on", "exploded": False,
+                       "hits": 1}
+            return summary if self.hits else None
 
     p = ports.slot(7)
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -577,15 +626,15 @@ def test_the_runner_takes_hits_and_says_what_they_took() -> None:
     t.start()
     try:
         assert json.loads(server.recv(65536))["damage"] is None
-        msg = {"t": "hit", "part": "motor", "motor": 1, "impulse_ned": [0.1, 0, 0],
+        msg = {"t": "hit", "part": "arm", "motor": 1, "impulse_ned": [0.1, 0, 0],
                "at_frd": [0.1, 0.1, 0]}
         server.sendto(json.dumps(msg).encode(), ("127.0.0.1", p.physics_control))
         while True:
             status = json.loads(server.recv(65536))
             if status.get("damage"):
                 break
-        assert backend.hits == [("motor", 1, (0.1, 0.0, 0.0), (0.1, 0.1, 0.0))]
-        assert status["damage"]["thrust"] == [0.0, 1, 1, 1]
+        assert backend.hits == [("arm", 1, (0.1, 0.0, 0.0), (0.1, 0.1, 0.0))]
+        assert status["damage"]["lost"] == [True, False, False, False]
     finally:
         server.sendto(b'{"t":"stop"}', ("127.0.0.1", p.physics_control))
         t.join(2)

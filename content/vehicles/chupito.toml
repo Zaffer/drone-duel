@@ -1,4 +1,4 @@
-name = "TBS Chupito"
+name = "TBS Chupito (INAV)"
 blurb = "An 800 mm flying wing on INAV 9.1. Hand launched: throw it."
 kind = "fixedwing"
 model = "/vendor/chupito/chupito_v6.glb"

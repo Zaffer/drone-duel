@@ -280,9 +280,9 @@ def test_a_target_flies_the_firmware_in_order_and_hits_go_to_the_physics() -> No
         events.wait_state("ready")
         physics = FakePhysics()
         s._physics = cast(PhysicsProcess, physics)  # the truck has none; stand one in
-        s.hit("motor", 1, (0.5, 0.0, 0.0), (0.1, 0.1, 0.0))
+        s.hit("arm", 1, (0.5, 0.0, 0.0), (0.1, 0.1, 0.0))
         assert physics.sent == [
-            {"t": "hit", "part": "motor", "motor": 1, "impulse_ned": [0.5, 0.0, 0.0],
+            {"t": "hit", "part": "arm", "motor": 1, "impulse_ned": [0.5, 0.0, 0.0],
              "at_frd": [0.1, 0.1, 0.0]}
         ]
         cast(Any, physics).status = {"phase": "crashed"}

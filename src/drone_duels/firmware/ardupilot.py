@@ -349,6 +349,16 @@ class ArduCopter(Firmware):
     def land(self) -> None:
         self._fly(self._land, "ardupilot-land")
 
+    def go(
+        self,
+        point: tuple[float, float, float],
+        vel_ned: tuple[float, float, float] | None,
+        yaw_deg: float | None,
+    ) -> None:
+        # In GUIDED since the hover; a later hover or land takes it from here.
+        if self.link is not None:
+            self.link.set_target(point, vel_ned, yaw_deg)
+
     def _fly(self, run: Callable[[int], None], name: str) -> None:
         with self._fly_lock:
             self._fly_gen += 1

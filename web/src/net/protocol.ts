@@ -22,6 +22,8 @@ export interface Protocol {
   LogMsg?: LogMsg;
   MapKeys?: MapKeys;
   OsdMsg?: OsdMsg;
+  Payload?: Payload;
+  PayloadSpec?: PayloadSpec;
   PhysicsMsg?: PhysicsMsg;
   PhysicsSpec?: PhysicsSpec;
   PlanItem?: PlanItem;
@@ -169,6 +171,9 @@ export interface ContentMsg {
   weapons: {
     [k: string]: Weapon;
   };
+  payloads: {
+    [k: string]: Payload;
+  };
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -264,6 +269,10 @@ export interface Vehicle {
   aux: AuxSpec | null;
   dynamics_overlay: boolean;
   blurb: string;
+  /**
+   * fitted by the session (a start's payload, content/payloads), not in its file
+   */
+  payload: PayloadSpec | null;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -286,6 +295,34 @@ export interface PhysicsSpec {
    * the model's airframe id (racer5in, chupito, truck)
    */
   airframe: string;
+}
+/**
+ * A charge strapped under a quad (Shoot Down fits it, whichever quad: content/payloads):
+ * carried as part of its mass, drawn under it, a part a bullet can hit. Hit, or (one time in
+ * two) when the quad comes down on the ground after a hit, it goes off
+ * (physics/quad/model.py).
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "PayloadSpec".
+ */
+export interface PayloadSpec {
+  name: string;
+  mass_kg: number;
+  /**
+   * a tube along the quad, forward: its length and diameter
+   *
+   * @minItems 2
+   * @maxItems 2
+   */
+  size_m: [number, number];
+  /**
+   * its axis below the quad's centre of mass
+   */
+  below_m: number;
+  /**
+   * within this of where it goes off, a person is killed
+   */
+  lethal_m: number;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -565,6 +602,38 @@ export interface Weapon {
   blurb: string;
 }
 /**
+ * A payload a mode fits to the vehicle it starts (content/payloads/*.toml).
+ *
+ * This interface was referenced by `Protocol`'s JSON-Schema
+ * via the `definition` "Payload".
+ */
+export interface Payload {
+  name: string;
+  mass_kg: number;
+  /**
+   * a tube along the quad, forward: its length and diameter
+   *
+   * @minItems 2
+   * @maxItems 2
+   */
+  size_m: [number, number];
+  /**
+   * its axis below the quad's centre of mass
+   */
+  below_m: number;
+  /**
+   * within this of where it goes off, a person is killed
+   */
+  lethal_m: number;
+  id: string;
+  /**
+   * parameter / CLI files, after the vehicle's, for a firmware that carries it
+   */
+  params: {
+    [k: string]: string[];
+  };
+}
+/**
  * What hits have taken from the quad so far (HitMsg).
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -572,13 +641,17 @@ export interface Weapon {
  */
 export interface Damage {
   /**
-   * each motor's (1-4, ArduPilot's) thrust left at a given speed: 1 whole, 2/3 and 1/3 with a prop's blades shot off, 0 its prop gone or the motor dead
+   * each motor's (1-4, ArduPilot's) rotor shot away: its arm, motor or prop hit (the page stops drawing its prop)
    */
-  thrust: number[];
+  lost: boolean[];
   /**
-   * the motors' power: a pierced pack holds briefly (failing), a hit stack or a dead pack stops every motor (off)
+   * the motors' power: a body hit cuts it at once (off); a pierced pack holds a moment (failing), then off
    */
   power: "on" | "failing" | "off";
+  /**
+   * its payload has gone off: the quad is gone
+   */
+  exploded: boolean;
   /**
    * hits taken since the last reset
    */
@@ -618,17 +691,18 @@ export interface GroundMsg {
 }
 /**
  * A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.
- * The physics takes what the part did away (physics/quad/model.py: a prop's blade, a motor,
- * the power) and the impulse at the point it struck; the firmware flies on with what is left.
+ * The physics takes what the part did away (physics/quad/model.py: an arm, that rotor; the
+ * body, the power at once; the pack, the power a moment later; the payload goes off) and the
+ * impulse at the point it struck; the firmware flies on with what is left.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "HitMsg".
  */
 export interface HitMsg {
   ch: "hit";
-  part: "prop" | "motor" | "arm" | "battery" | "stack" | "camera" | "frame";
+  part: "body" | "battery" | "arm" | "payload";
   /**
-   * ArduPilot's motor number (1 front right, 2 rear left, 3 front left, 4 rear right) for a prop, motor or arm; None otherwise
+   * ArduPilot's motor number (1 front right, 2 rear left, 3 front left, 4 rear right) for an arm; None otherwise
    */
   motor: number | null;
   /**
@@ -686,7 +760,7 @@ export interface PhysicsMsg {
   phase: string;
   connected: boolean;
   /**
-   * None: not hit since the reset
+   * None: whole since the reset
    */
   damage: Damage | null;
 }
@@ -846,7 +920,8 @@ export interface RcMsg {
 }
 /**
  * Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a
- * crash: the physics stops dead), throw (a hand-launched wing), or stop.
+ * crash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a
+ * payload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "SessionMsg".
@@ -860,6 +935,10 @@ export interface SessionMsg {
    * the start pad: 0 player 1, 1 player 2
    */
   pad: number;
+  /**
+   * start: a payload to fit, its id
+   */
+  payload: string | null;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema
@@ -881,6 +960,10 @@ export interface StatusMsg {
    */
   origin: [number, number, number] | null;
   heading_deg: number;
+  /**
+   * the payload fitted, if any
+   */
+  payload: PayloadSpec | null;
 }
 /**
  * Fly the session's quad itself, for a target to shoot at: "hover" takes off from its pad
@@ -890,16 +973,39 @@ export interface StatusMsg {
  * commands, as a pilot on its switches would (POSHOLD; firmware/betaflight.py). The page sends
  * no `rc` meanwhile.
  *
+ * "go" (ArduCopter, up and in GUIDED after a hover) flies it on, a target the page sends a few
+ * times a second: to a point on a path (`lat`, `lon`, `height_m`), with `vel_ned` as where it
+ * is going next; facing `yaw_deg` if given. Straight to the firmware, not queued behind other
+ * commands.
+ *
+ * "path" (Betaflight, up after a hover) flies `points` (lat, lon) at `height_m`, round and
+ * round, as a mission its own autopilot flies (firmware/betaflight.py), sent once; a hover
+ * or a land takes it back. Straight to the firmware too.
+ *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "TargetMsg".
  */
 export interface TargetMsg {
   ch: "target";
-  action: "hover" | "land";
+  action: "hover" | "land" | "go" | "path";
   /**
-   * above the pad, m
+   * above the pad, m: hover's (2 at least), go's
    */
   height_m: number;
+  lat: number | null;
+  lon: number | null;
+  /**
+   * go: the path's velocity there, m/s, north, east, down
+   */
+  vel_ned: [number, number, number] | null;
+  /**
+   * go: the heading to face
+   */
+  yaw_deg: number | null;
+  /**
+   * path: its waypoints, lat and lon, degrees
+   */
+  points: [number, number][] | null;
 }
 /**
  * What a ground station sees, from MAVLink (ArduPilot) or MSP (INAV): the map and the dials

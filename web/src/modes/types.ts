@@ -34,6 +34,9 @@ export interface ModeDef {
   /** The mode places the camera itself and nobody flies the vehicle from this page (Shoot
    * Down: the player is on the ground; the vehicle is the target). */
   ownsView?: boolean;
+  /** A payload the mode fits to whichever vehicle it starts (content/payloads; Shoot Down's
+   * charge). */
+  payload?: string;
   /** Free Fly: the runtime for a flight. */
   run?(flight: Flight): ModeRuntime;
 }

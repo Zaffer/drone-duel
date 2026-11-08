@@ -1,23 +1,35 @@
 import { describe, expect, test } from "bun:test";
 import { Air, shear } from "../src/shoot/air.ts";
 import { Hold } from "../src/shoot/hold.ts";
+import {
+  type LevelId,
+  levelsFor,
+  PATH_POINTS,
+  pathAt,
+  pathWaypoints,
+} from "../src/shoot/levels.ts";
 import { Recoil, recoilImpulse } from "../src/shoot/recoil.ts";
-import { strikes } from "../src/shoot/target.ts";
+import { payloadZone, strikes } from "../src/shoot/target.ts";
 
 const never = () => 1; // a blade is never in the way
 const always = () => 0; // a blade is always in the way
 
 describe("what a bullet hits on the quad", () => {
   test("straight down through the middle: the pack, the plates, the stack, in order", () => {
-    const hit = strikes([0, 0, -1], [0, 0, 1], never).map((s) => s.part);
-    expect(hit).toEqual(["battery", "frame", "stack", "frame"]);
+    const hit = strikes([0, 0, -1], [0, 0, 1], never).map((s) => [s.part, s.label]);
+    expect(hit).toEqual([
+      ["battery", "battery"],
+      ["body", "frame"],
+      ["body", "flight controller"],
+      ["body", "frame"],
+    ]);
   });
 
   test("down through motor 1 (front right): its prop (a blade in the way) and its bell", () => {
     const hit = strikes([0.0868, 0.1051, -1], [0.0868, 0.1051, 1], always);
-    expect(hit.map((s) => [s.part, s.motor])).toEqual([["motor", 1]]);
+    expect(hit.map((s) => [s.part, s.motor, s.label])).toEqual([["arm", 1, "motor"]]);
     const offHub = strikes([0.0868 + 0.04, 0.1051, -1], [0.0868 + 0.04, 0.1051, 1], always);
-    expect(offHub.map((s) => [s.part, s.motor])).toEqual([["prop", 1]]);
+    expect(offHub.map((s) => [s.part, s.motor, s.label])).toEqual([["arm", 1, "prop"]]);
     const clear = strikes([0.0868 + 0.04, 0.1051, -1], [0.0868 + 0.04, 0.1051, 1], never);
     expect(clear).toEqual([]);
   });
@@ -25,14 +37,90 @@ describe("what a bullet hits on the quad", () => {
   test("level from the side, through the rear left arm", () => {
     // Motor 2 is rear left: its arm runs from (-0.025, -0.014) to (-0.0868, -0.1051).
     const hit = strikes([-0.06, 1, -0.0025], [-0.06, -1, -0.0025], never);
-    const arms = hit.filter((s) => s.part === "arm").map((s) => s.motor);
+    const arms = hit.filter((s) => s.label === "arm").map((s) => s.motor);
     expect(arms).toContain(2);
     expect(arms).toContain(4);
+  });
+
+  test("a payload under it is hit from below, before anything else", () => {
+    const charge = payloadZone({
+      name: "charge",
+      mass_kg: 0.4,
+      size_m: [0.12, 0.06],
+      below_m: 0.035,
+      lethal_m: 5,
+    });
+    const up = strikes([0, 0, 1], [0, 0, -1], never, [charge]);
+    expect(up[0]?.part).toBe("payload");
+    expect(up.map((s) => s.part)).toContain("battery");
+    // Without one, the same shot meets the body first.
+    expect(strikes([0, 0, 1], [0, 0, -1], never)[0]?.part).toBe("body");
   });
 
   test("a near miss is a miss", () => {
     expect(strikes([0, 0.3, -1], [0, 0.3, 1], always)).toEqual([]);
     expect(strikes([5, 0, -0.1], [5.4, 0, -0.1], always)).toEqual([]);
+  });
+});
+
+describe("the levels' paths", () => {
+  const hover: [number, number, number] = [10, 20, 30];
+  const across: [number, number, number] = [1, 0, 0];
+  const away: [number, number, number] = [0, 1, 0];
+
+  for (const id of ["line", "circle", "eight"] as const) {
+    test(`${id}: starts at the hover, and its velocity is its rate of change`, () => {
+      expect(pathAt(id, 0, hover, across, away).at).toEqual(hover);
+      for (const t of [0.5, 3, 4.2, 11]) {
+        const a = pathAt(id, t, hover, across, away);
+        const b = pathAt(id, t + 1e-4, hover, across, away);
+        for (let i = 0; i < 3; i++) {
+          expect((b.at[i]! - a.at[i]!) / 1e-4).toBeCloseTo(a.vel[i]!, 2);
+        }
+        expect(a.at[2]).toBe(30);
+      }
+    });
+  }
+
+  test("the figure eight crosses the hover point both ways at its top speed", () => {
+    const top = Math.max(
+      ...Array.from({ length: 400 }, (_, i) =>
+        Math.hypot(...pathAt("eight", i * 0.1, hover, across, away).vel),
+      ),
+    );
+    expect(top).toBeCloseTo(8, 1);
+  });
+
+  test("what each drone can fly", () => {
+    const paths: LevelId[] = ["hover", "line", "circle", "eight"];
+    expect(levelsFor("hover").map((l) => l.id)).toEqual(["hover"]);
+    expect(levelsFor("targets").map((l) => l.id)).toEqual(paths);
+    expect(levelsFor("mission").map((l) => l.id)).toEqual(paths);
+  });
+
+  test("a mission's waypoints: whole laps of the same shapes, as many as a mission takes", () => {
+    for (const id of ["line", "circle", "eight"] as const) {
+      const w = pathWaypoints(id, hover, across, away);
+      expect(w.length).toBe(PATH_POINTS);
+      for (const p of w) expect(p[2]).toBe(hover[2]);
+      // Whole laps: the line ends at its far end, the circle and the eight back at the hover.
+      const last = w[w.length - 1]!;
+      if (id === "line") expect(last).toEqual([hover[0] - 25, hover[1], hover[2]]);
+      else expect(Math.hypot(last[0] - hover[0], last[1] - hover[1])).toBeLessThan(1e-9);
+    }
+    // The line, end to end across the view; the circle on its circle, through the hover point.
+    const line = pathWaypoints("line", hover, across, away);
+    expect(line.slice(0, 3).map((p) => p[0] - hover[0])).toEqual([25, -25, 25]);
+    for (const p of pathWaypoints("circle", hover, across, away)) {
+      expect(Math.hypot(p[0] - hover[0], p[1] - (hover[1] + 20))).toBeCloseTo(20, 9);
+    }
+    // The eight crosses itself at the hover point, 25 m either side across, 12.5 away.
+    const eight = pathWaypoints("eight", hover, across, away);
+    const xs = eight.map((p) => p[0] - hover[0]);
+    const ys = eight.map((p) => p[1] - hover[1]);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(25);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(-25);
+    expect(Math.max(...ys.map(Math.abs))).toBeLessThanOrEqual(12.5);
   });
 });
 

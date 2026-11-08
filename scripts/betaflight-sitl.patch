@@ -6,6 +6,8 @@ drone-duels' changes to Betaflight's SITL (scripts/setup.sh applies them; drone_
 - It listens on 127.0.0.1 only: its RC port would take sticks from the network.
 - The OSD, sent over MSP DisplayPort as to a DJI air unit: stock SITL builds without one.
 - State arriving before its virtual sensors exist is dropped: it crashed SITL as it booted.
+- MAVLink telemetry on a UART, for missions from a ground station (Shoot Down's paths): stock
+  SITL builds with no telemetry at all.
 
 diff --git a/src/main/drivers/serial_tcp.c b/src/main/drivers/serial_tcp.c
 index a922cc7..c20cc99 100644
@@ -112,10 +114,10 @@ index ee216ef..018de19 100644
  
      ret = pthread_create(&udpWorker, NULL, udpThread, NULL);
 diff --git a/src/platform/SIMULATOR/target/SITL/target.h b/src/platform/SIMULATOR/target/SITL/target.h
-index 69d3250..cd70fb7 100644
+index 69d3250..40effe0 100644
 --- a/src/platform/SIMULATOR/target/SITL/target.h
 +++ b/src/platform/SIMULATOR/target/SITL/target.h
-@@ -99,6 +99,14 @@
+@@ -99,6 +99,19 @@
  
  #define USABLE_TIMER_CHANNEL_COUNT 0
  
@@ -127,10 +129,15 @@ index 69d3250..cd70fb7 100644
 +#define USE_MSP_DISPLAYPORT
 +#define USE_OSD_OVER_MSP_DISPLAYPORT
 +
++// drone-duels: MAVLink on a UART, for missions from a ground station (stock SITL builds with no
++// telemetry at all).
++#define USE_TELEMETRY
++#define USE_TELEMETRY_MAVLINK
++
  #define USE_UART1
  #define USE_UART2
  #define USE_UART3
-@@ -135,7 +143,6 @@
+@@ -135,7 +148,6 @@
  #undef USE_TELEMETRY_LTM
  #undef USE_ADC
  #undef USE_VCP
@@ -138,7 +145,7 @@ index 69d3250..cd70fb7 100644
  #undef USE_RX_PPM
  #undef USE_RX_PWM
  #undef USE_SERIALRX
-@@ -152,7 +159,6 @@
+@@ -152,7 +164,6 @@
  #undef USE_TELEMETRY_HOTT
  #undef USE_TELEMETRY_SMARTPORT
  #undef USE_RESOURCE_MGMT

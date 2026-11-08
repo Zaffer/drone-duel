@@ -20,7 +20,7 @@ import { type Quat, rotate, type Vec3 } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
 import { type Load, Round, type Setting, STEP_S } from "./ballistics.ts";
 import { gunSounds } from "./gunsounds.ts";
-import { MOMENTUM_SHARE, type Strike, strikes } from "./target.ts";
+import { type Strike, strikes, type Zone } from "./target.ts";
 
 /** A round is lost once this old, s, this slow, m/s, or this far, m. */
 const MAX_S = 5;
@@ -73,6 +73,8 @@ export class Rounds {
   ear: Vec3 = [0, 0, 1.6];
   earRight: Vec3 = [1, 0, 0];
   onHit: ((h: HitReport) => void) | null = null;
+  /** What the drone carries a bullet can hit too (its payload). */
+  extraZones: Zone[] = [];
   /** Rounds that went into the ground. */
   groundHits = 0;
 
@@ -222,13 +224,13 @@ export class Rounds {
       const ned: Vec3 = [p[1] - d[1], p[0] - d[0], -(p[2] - d[2])];
       return rotate(conj(pose.q), ned);
     };
-    for (const s of strikes(toBody(a), toBody(b))) {
-      const key = `${s.part}:${s.motor}`;
+    for (const s of strikes(toBody(a), toBody(b), Math.random, this.extraZones)) {
+      const key = `${s.label}:${s.motor}`;
       if (f.hit.has(key)) continue;
       f.hit.add(key);
       const r = f.round;
       const speed = r.speed;
-      const share = MOMENTUM_SHARE[s.part];
+      const share = s.share;
       const j = share * r.load.massKg * speed;
       const v = r.v;
       const impulseNed: [number, number, number] = [
@@ -256,7 +258,7 @@ export class Rounds {
         where[2] - this.ear[2],
       );
       this.spark(where);
-      gunSounds.hit(range, this.pan(where), s.part === "motor" || s.part === "battery");
+      gunSounds.hit(range, this.pan(where), s.share > 0.1);
       this.onHit?.({ strike: s, where, speed, range });
     }
   }

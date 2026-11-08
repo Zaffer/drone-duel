@@ -127,6 +127,24 @@ def airframe(name: str) -> Airframe:
         raise ValueError(f"no quad airframe {name!r}: one of {sorted(AIRFRAMES)}") from None
 
 
+def with_payload(frame: Airframe, mass_kg: float, length_m: float, diameter_m: float,
+                 below_m: float) -> Airframe:
+    """`frame` carrying a payload (content's PayloadSpec): a solid tube along the body, its axis
+    `below_m` under the centre of mass. Its mass adds to the frame's, and its inertia (its own
+    as a solid cylinder, and the parallel axis' m d² for roll and pitch) to the frame's. The
+    centre of mass moves down by m d / (M + m), about a centimetre for a 0.4 kg charge 3 cm under
+    a 5 inch: not modelled (SkyFlow-Dynamics' rotors are placed about it), nor the tube's drag."""
+    m, r, d = mass_kg, diameter_m / 2, below_m
+    along = 0.5 * m * r * r
+    across = m * (3 * r * r + length_m * length_m) / 12
+    inertia = [list(row) for row in frame.values["inertia"]]
+    inertia[0][0] += along + m * d * d
+    inertia[1][1] += across + m * d * d
+    inertia[2][2] += across
+    values = {**frame.values, "mass": frame.mass + m, "inertia": inertia}
+    return Airframe(f"{frame.name}+payload", values)
+
+
 class Plant:
     """The airframe's dynamics, jitted: `advance` one firmware frame, `statedot` and `imu` for
     the tests. Arrays are SkyFlow's flat state (13 + 4) and inputs (9 + 4)."""
@@ -177,7 +195,7 @@ class Plant:
 
     def damaged_params(self, rotor_share: np.ndarray) -> jax.Array:
         """The airframe's parameters with each rotor's (racer5in's order) thrust and drag-torque
-        coefficients (ct2, cq2) scaled by `rotor_share`: a prop with blades shot off. Packed as
+        coefficients (ct2, cq2) scaled by `rotor_share`: 0 for a rotor shot away. Packed as
         the built ones are, the same shape, so `advance` is not traced again."""
         values = {k: v for k, v in self.frame.values.items() if k != "limits"}
         for name in ("ct2", "cq2"):

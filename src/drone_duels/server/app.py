@@ -186,6 +186,7 @@ def create_app(
             courses=content.courses,
             controllers=content.controllers,
             weapons=content.weapons,
+            payloads=content.payloads,
         )
 
     @app.get("/api/config")
@@ -291,13 +292,18 @@ def handle(session: Session, text: str) -> object:
         case GroundMsg():
             session.set_ground(msg.lat, msg.lon, msg.alt)
         case SessionMsg():
-            session.command(msg.action, msg.location, msg.vehicle, msg.pad)
+            session.command(msg.action, msg.location, msg.vehicle, msg.pad, msg.payload)
         case WindMsg():
             session.set_wind(msg.wind, msg.gust_now)
         case VideoMsg():
             session.set_video(msg.system)
         case DynamicsMsg():
             session.set_dynamics(msg.on)
+        case TargetMsg(action="go"):
+            assert msg.lat is not None and msg.lon is not None  # the message holds it
+            session.go((msg.lat, msg.lon, msg.height_m), msg.vel_ned, msg.yaw_deg)
+        case TargetMsg(action="path"):
+            session.path(msg.points or [], msg.height_m)
         case TargetMsg():
             session.target(msg.action, msg.height_m)
         case HitMsg():

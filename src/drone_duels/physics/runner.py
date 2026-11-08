@@ -104,11 +104,13 @@ def make_backend(
     heading_deg: float,
     wind: dict[str, Any],
     firmware: str = "ardupilot-copter",
+    payload: dict[str, Any] | None = None,
 ) -> Backend:
     if kind == "quad":
         from drone_duels.physics.quad.backend import QuadBackend
 
-        return QuadBackend(airframe, ports.slot(slot), origin, heading_deg, wind, firmware)
+        return QuadBackend(airframe, ports.slot(slot), origin, heading_deg, wind, firmware,
+                           payload)
     if kind == "wing":
         from drone_duels.physics.wing.backend import WingBackend
 
@@ -215,12 +217,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--wind", default="{}", help="the location's wind, as JSON")
     parser.add_argument("--firmware", default="ardupilot-copter",
                         help="the firmware flying it (content's FirmwareKind)")
+    parser.add_argument("--payload", default=None,
+                        help="what it carries (content's PayloadSpec), as JSON")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s",
                         stream=sys.stdout)
     lat, lon, alt = (float(x) for x in args.origin.split(","))
+    payload = json.loads(args.payload) if args.payload else None
     backend = make_backend(args.kind, args.airframe, args.slot, (lat, lon, alt), args.heading,
-                           json.loads(args.wind), args.firmware)
+                           json.loads(args.wind), args.firmware, payload)
     run(backend, args.slot)
 
 

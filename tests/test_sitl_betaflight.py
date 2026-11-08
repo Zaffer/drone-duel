@@ -225,7 +225,7 @@ def test_flies_itself_as_a_target(flight: Flight) -> None:
     session, events, _ = flight
     hover_at(session, events, 20.0)
 
-    session.hit("motor", 1, (0.0, 1.0, 0.0), (0.08, 0.08, 0.0))
+    session.hit("arm", 1, (0.0, 1.0, 0.0), (0.08, 0.08, 0.0))
 
     def phase() -> str | None:
         physics = session._physics  # pyright: ignore[reportPrivateUsage]
@@ -245,3 +245,56 @@ def test_flies_itself_as_a_target(flight: Flight) -> None:
     assert position(session, events)[2] < 0.3
     assert phase() == "ground"
     assert not any("crash" in m.get("text", "") for m in events.of("log")[-5:])
+
+
+def test_flies_a_path_round_and_round(flight: Flight) -> None:
+    """Shoot Down's paths: Betaflight's own autopilot flies them, as a mission the game uploads
+    over MAVLink (firmware/betaflight.py). A 40 m square north of the pad: it flies the
+    corners, holds at the last, and goes round again; a hover takes it back and it holds where
+    it is; then it lands."""
+    session, events, _ = flight
+    assert session.origin is not None
+    frame = LocalFrame(session.origin[0], session.origin[1])
+    wait_for("telemetry", lambda: events.telemetry() is not None, 10)
+    hover_at(session, events, 20.0)
+    corners = [(30.0, -20.0), (70.0, -20.0), (70.0, 20.0), (30.0, 20.0)]
+    session.path([frame.to_latlon(n, e) for n, e in corners], 20.0)
+    wait_for("AUTOPILOT", lambda: telemetry(events).mode == "AUTOPILOT", 10)
+
+    # Round once, and on to the first corner again.
+    closest = [math.inf] * len(corners)
+    again = math.inf
+    fastest, lowest, highest = 0.0, math.inf, 0.0
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        north, east, height = position(session, events)
+        t = telemetry(events)
+        assert t.armed, "it disarmed flying the path"
+        fastest = max(fastest, t.groundspeed)
+        lowest, highest = min(lowest, height), max(highest, height)
+        for i, corner in enumerate(corners):
+            closest[i] = min(closest[i], math.dist((north, east), corner))
+        if closest[-1] < 3:  # round once: on to the first again
+            again = min(again, math.dist((north, east), corners[0]))
+            if again < 12:
+                break
+        time.sleep(0.1)
+    print(f"\npath: closest to each corner {[round(c, 1) for c in closest]} m, back to the "
+          f"first {again:.1f} m; up to {fastest:.1f} m/s; {lowest:.1f}..{highest:.1f} m up")
+    assert all(c < 12 for c in closest[:-1]), "the corners before the last, cut (fly-by)"
+    assert closest[-1] < 3, "the last, flown to"
+    assert again < 12, "round again"
+    assert 5 < fastest < 12  # ap_max_velocity 7 m/s, and its overshoot
+    assert 17 < lowest and highest < 23
+
+    # A hover takes it back: it brakes and holds where it is.
+    session.target("hover", 20.0)
+    wait_for("POSHOLD", lambda: telemetry(events).mode == "POSHOLD", 5)
+    wait_for("stopped", lambda: telemetry(events).groundspeed < 0.5, 15)
+    time.sleep(3)  # it settles
+    held = position(session, events)
+    time.sleep(4)
+    assert math.dist(held[:2], position(session, events)[:2]) < 1.5
+
+    session.target("land")
+    wait_for("landed and disarmed", lambda: not telemetry(events).armed, 60)

@@ -5,8 +5,14 @@
 //
 // The shooter starts 100 m behind the pad, facing it; the drone takes off from the pad and holds
 // 30 m above it (the server flies it, as a ground station would, or Betaflight's pilot on its
-// switches: target hover). Once it is down
-// (crashed, or on the ground after a hit) it comes back after a few seconds: reset and hover.
+// switches: target hover). Then, level by level (shoot/levels.ts), it flies: a line across the
+// view, a circle, a figure eight (ArduCopter, the page sending it targets: target go; Betaflight,
+// a mission of the path's waypoints, sent once: target path). It carries a charge (content's
+// payloads: the mode fits it, whichever quad), which goes off when it is hit or one time in two
+// when the drone comes down (the physics decides); the shooter is killed within its lethal
+// radius. Once the drone is down (crashed, on the ground after a hit, or blown up) it comes back
+// after a few seconds, at the next level: reset and hover. Killed, the shooter tries the same
+// level again.
 
 import { effect } from "alien-signals";
 import * as C from "cesium";
@@ -16,19 +22,22 @@ import type { Ground } from "../../engine/ground.ts";
 import { loop } from "../../engine/loop.ts";
 import type { Flight, ModeRuntime } from "../../flight.ts";
 import { radio } from "../../input/radio.ts";
-import type { Weapon } from "../../net/protocol.ts";
+import type { PayloadSpec, Weapon } from "../../net/protocol.ts";
 import { link, type Pose } from "../../net/server.ts";
 import { Air } from "../../shoot/air.ts";
 import { airAt, setting } from "../../shoot/ballistics.ts";
+import { Blasts } from "../../shoot/blast.ts";
 import { setSpeedOfSound } from "../../shoot/gunsounds.ts";
+import { type Flies, type Level, levelsFor, pathAt, pathWaypoints } from "../../shoot/levels.ts";
 import { rifleGeometry } from "../../shoot/rifle.ts";
 import { Rounds } from "../../shoot/rounds.ts";
 import { Shooter } from "../../shoot/shooter.ts";
 import { Sights } from "../../shoot/sights.ts";
-import { content, toast, wind } from "../../state/app.ts";
+import { payloadZone } from "../../shoot/target.ts";
+import { content, vehicle as currentVehicle, toast, wind } from "../../state/app.ts";
 import { hudBanner, hudPanel } from "../../state/hud.ts";
 import { prefs } from "../../state/prefs.ts";
-import { phase, status } from "../../state/session.ts";
+import { damage, phase, status } from "../../state/session.ts";
 import { h } from "../../ui/h.ts";
 import type { RigContext } from "../../views/rigs.ts";
 import { mapOffset, moveBy, type Vec3 } from "../../world/geo.ts";
@@ -45,6 +54,14 @@ const BODY_HZ = 240;
  * this long, s. */
 const BEAM_RAD = 0.002;
 const LASE_SHOW_S = 8;
+/** At a level that flies, it holds its hover this long first, s; then a target goes to it this
+ * often, Hz. */
+const HOLD_FIRST_S = 3;
+const GO_HZ = 5;
+/** The shooter's chest, this far below their eye, m: where a blast's distance is measured. */
+const CHEST_BELOW_EYE_M = 0.3;
+/** The payload Shoot Down fits to its target (content/payloads). */
+const PAYLOAD = "charge";
 
 const COMPASS = [
   "N",
@@ -79,10 +96,40 @@ export const shoot: ModeDef = {
     ),
   pickHint: "The drone to shoot at",
   ownsView: true,
+  payload: PAYLOAD,
   run: (flight) => new ShootRuntime(flight),
 };
 
-type DroneState = "starting" | "climbing" | "hovering" | "hit" | "down";
+type DroneState = "starting" | "climbing" | "hovering" | "flying" | "hit" | "down";
+
+/** A target for the session's quad: the generated type has every field. */
+function target(t: {
+  action: "hover" | "go" | "path";
+  height_m?: number;
+  lat?: number;
+  lon?: number;
+  vel_ned?: [number, number, number];
+  yaw_deg?: number;
+  points?: [number, number][];
+}) {
+  return {
+    ch: "target" as const,
+    action: t.action,
+    height_m: t.height_m ?? 0,
+    lat: t.lat ?? null,
+    lon: t.lon ?? null,
+    vel_ned: t.vel_ned ?? null,
+    yaw_deg: t.yaw_deg ?? null,
+    points: t.points ?? null,
+  };
+}
+
+/** How this firmware flies a path (shoot/levels.ts). */
+function fliesFor(kind: string | undefined): Flies {
+  if (kind === "ardupilot-copter") return "targets";
+  if (kind === "betaflight") return "mission";
+  return "hover";
+}
 
 class ShootRuntime implements ModeRuntime {
   readonly ownsView = true;
@@ -97,12 +144,27 @@ class ShootRuntime implements ModeRuntime {
   private ground: Ground | null = null;
   private drone: DroneState = "starting";
   private hoverSent = false;
+  /** How it flies a path, the levels it can fly, and which it is at. */
+  private flies: Flies;
+  private levels: Level[];
+  private level = 0;
+  private payload: PayloadSpec | null;
+  /** When it reached its hover, and when it was last sent a target (performance.now()). */
+  private hoverAt: number | null = null;
+  private lastGo = 0;
+  /** This level's mission went (Betaflight). */
+  private pathSent = false;
+  private blasts: Blasts | null = null;
+  /** Its charge has gone off (drawn); the shooter was killed by it. */
+  private blown = false;
+  private killed = false;
   private firstShotAt: number | null = null;
   private shotsAtThis = 0;
   private stats = {
     shots: 0,
     hits: 0,
     downs: 0,
+    deaths: 0,
     best: null as number | null,
     last: null as number | null,
   };
@@ -113,6 +175,11 @@ class ShootRuntime implements ModeRuntime {
 
   constructor(private readonly flight: Flight) {
     this.weapon = Object.values(content()?.weapons ?? {})[0] ?? null;
+    const spec = currentVehicle();
+    // Fitted by the session (the mode's start names it): the content's, until it says.
+    this.payload = content()?.payloads[PAYLOAD] ?? null;
+    this.flies = fliesFor(spec?.firmware.kind);
+    this.levels = levelsFor(this.flies);
     radio.onFoot = true;
     this.sights = new Sights(flight.world, flight.world.viewer.container as HTMLElement);
     if (!this.weapon) toast("No weapon in content/weapons", "bad", 8000);
@@ -123,6 +190,9 @@ class ShootRuntime implements ModeRuntime {
         const s = status();
         const p = phase();
         this.onSession(s.state, p);
+      }),
+      effect(() => {
+        if (damage()?.exploded && !this.blown) this.blowUp();
       }),
     );
     void this.setup();
@@ -169,26 +239,15 @@ class ShootRuntime implements ModeRuntime {
       const body = flight.body();
       return body ? (now: number) => body.poseAt(now) : null;
     });
+    this.rounds.extraZones = this.payload ? [payloadZone(this.payload)] : [];
+    this.blasts = new Blasts(flight.world, ground.frame);
     this.rounds.onHit = (hit) => {
       this.stats.hits++;
-      const p = hit.strike.part;
-      if (p !== "camera" && p !== "frame") this.damaged.add(`${p}${hit.strike.motor ?? ""}`);
-      if (this.drone === "hovering" || this.drone === "climbing") this.drone = "hit";
-      const what = {
-        prop: "prop",
-        motor: "motor",
-        arm: "arm",
-        battery: "battery",
-        stack: "flight controller",
-        camera: "camera",
-        frame: "frame",
-      }[p];
-      const motor = hit.strike.motor ? ` ${hit.strike.motor}` : "";
-      toast(
-        `Hit: ${what}${motor} at ${hit.range.toFixed(0)} m, ${hit.speed.toFixed(0)} m/s`,
-        "good",
-        2500,
-      );
+      const { label, motor } = hit.strike;
+      const what = `${label}${motor ? ` ${motor}` : ""}`;
+      this.damaged.add(what);
+      if (this.drone !== "down") this.drone = "hit";
+      toast(`Hit: ${what} at ${hit.range.toFixed(0)} m, ${hit.speed.toFixed(0)} m/s`, "good", 2500);
     };
     const geometry = await rifleGeometry(`/${weapon.model}`);
     if (this.disposed) return;
@@ -227,9 +286,17 @@ class ShootRuntime implements ModeRuntime {
       this.damaged.clear();
       this.firstShotAt = null;
       this.shotsAtThis = 0;
-      link.send({ ch: "target", action: "hover", height_m: HOVER_M });
-      hudBanner({ big: "", small: "The drone is taking off" });
-      setTimeout(() => this.drone === "climbing" && hudBanner(null), 4000);
+      this.hoverAt = null;
+      this.pathSent = false;
+      this.blown = false;
+      this.killed = false;
+      link.send(target({ action: "hover", height_m: HOVER_M }));
+      const lv = this.levels[this.level];
+      hudBanner({
+        big: "",
+        small: `Level ${this.level + 1} of ${this.levels.length}: ${lv?.name ?? ""}. ${lv?.brief ?? ""}`,
+      });
+      setTimeout(() => this.drone === "climbing" && hudBanner(null), 6000);
     }
     const down =
       p === "crashed" || (p === "ground" && this.damaged.size > 0 && this.drone !== "climbing");
@@ -239,21 +306,110 @@ class ShootRuntime implements ModeRuntime {
   private downed(): void {
     const now = performance.now();
     this.drone = "down";
-    this.stats.downs++;
-    const t = this.firstShotAt === null ? null : (now - this.firstShotAt) / 1000;
-    this.stats.last = t;
-    if (t !== null && (this.stats.best === null || t < this.stats.best)) this.stats.best = t;
-    hudBanner({
-      big: "DOWN",
-      small: `${this.shotsAtThis} shot${this.shotsAtThis === 1 ? "" : "s"}${t !== null ? ` · ${t.toFixed(1)} s` : ""}`,
-      tone: "leaf",
-    });
+    if (!this.killed) {
+      this.stats.downs++;
+      const t = this.firstShotAt === null ? null : (now - this.firstShotAt) / 1000;
+      this.stats.last = t;
+      if (t !== null && (this.stats.best === null || t < this.stats.best)) this.stats.best = t;
+      hudBanner({
+        big: "DOWN",
+        small: `${this.shotsAtThis} shot${this.shotsAtThis === 1 ? "" : "s"}${t !== null ? ` · ${t.toFixed(1)} s` : ""}`,
+        tone: "leaf",
+      });
+    }
     setTimeout(() => {
       if (this.disposed || this.drone !== "down") return;
-      hudBanner({ big: "", small: "Another drone" });
+      // Killed, the same level again; else the next (from the first, after the last).
+      if (!this.killed) this.level = (this.level + 1) % this.levels.length;
+      hudBanner({
+        big: "",
+        small: this.level === 0 && !this.killed ? "From the top" : "Another drone",
+      });
       this.hoverSent = false;
       this.flight.reset();
     }, RESPAWN_S * 1000);
+  }
+
+  /** Its charge went off (the physics says so): the blast where it is drawn, and the shooter
+   * killed if within its lethal radius. The drone is gone: down. */
+  private blowUp(): void {
+    this.blown = true;
+    const s = this.shooter;
+    const ground = this.ground;
+    const now = performance.now();
+    const pose = this.flight.body()?.poseAt(now);
+    if (!s || !ground || !pose || !this.blasts) return;
+    const at = ground.frame.fromSim(pose.lat, pose.lon, pose.alt);
+    const under = ground.heightAt(at[0], at[1], at[2] + 5);
+    const ear = s.eyeLocal;
+    const rel: Vec3 = [at[0] - ear[0], at[1] - ear[1], at[2] - ear[2]];
+    const range = Math.hypot(...rel);
+    const pan = (rel[0] * Math.cos(s.heading) - rel[1] * Math.sin(s.heading)) / (range || 1);
+    this.blasts.burst(at, under === undefined ? 99 : at[2] - under, ear, pan, now);
+    const chest: Vec3 = [ear[0], ear[1], ear[2] - CHEST_BELOW_EYE_M];
+    const away = Math.hypot(at[0] - chest[0], at[1] - chest[1], at[2] - chest[2]);
+    if (this.payload && away < this.payload.lethal_m) {
+      this.killed = true;
+      this.stats.deaths++;
+      hudBanner({
+        big: "KILLED",
+        small: `Its charge went off ${away.toFixed(1)} m from you`,
+        tone: "rose",
+      });
+    }
+    if (this.drone !== "down") this.downed();
+  }
+
+  /** At a level that flies: its path, as targets every so often (ArduCopter) or a mission sent
+   * once (Betaflight). */
+  private fly(now: number, pose: Pose | null): void {
+    const lv = this.levels[this.level];
+    const s = this.shooter;
+    const ground = this.ground;
+    const pad = this.flight.pad();
+    if (!lv || lv.id === "hover" || !s || !ground || !pad || !pose) return;
+    if (
+      this.drone === "hovering" &&
+      this.hoverAt !== null &&
+      now - this.hoverAt > HOLD_FIRST_S * 1000
+    ) {
+      this.drone = "flying";
+      this.hoverAt = now;
+    }
+    if (this.drone !== "flying") return;
+    const frame = ground.frame;
+    const padAt = frame.fromSim(pad.lat, pad.lon, pad.alt);
+    const hover: Vec3 = [padAt[0], padAt[1], padAt[2] + HOVER_M];
+    const hd = (pad.heading_deg * Math.PI) / 180;
+    const away: Vec3 = [Math.sin(hd), Math.cos(hd), 0];
+    const across: Vec3 = [Math.cos(hd), -Math.sin(hd), 0];
+    if (this.flies === "mission") {
+      if (this.pathSent) return;
+      this.pathSent = true;
+      const points = pathWaypoints(lv.id, hover, across, away).map((w): [number, number] => {
+        const g = frame.toGeo(w);
+        return [g.lat, g.lon];
+      });
+      link.send(target({ action: "path", points, height_m: HOVER_M }));
+      return;
+    }
+    if (now - this.lastGo < 1000 / GO_HZ) return;
+    this.lastGo = now;
+    const yaw = (v: Vec3) => (Math.atan2(v[0], v[1]) * 180) / Math.PI;
+    const ned = (v: Vec3): [number, number, number] => [v[1], v[0], -v[2]];
+    const p = pathAt(lv.id, (now - (this.hoverAt ?? now)) / 1000, hover, across, away);
+    const geo = frame.toGeo(p.at);
+    const moving = Math.hypot(...p.vel) > 0.5;
+    link.send(
+      target({
+        action: "go",
+        lat: geo.lat,
+        lon: geo.lon,
+        height_m: p.at[2] - padAt[2],
+        vel_ned: ned(p.vel),
+        ...(moving ? { yaw_deg: yaw(p.vel) } : {}),
+      }),
+    );
   }
 
   /** Each frame, once the body has stepped and the rounds flown: the eye, the rifle, the sight,
@@ -275,6 +431,7 @@ class ShootRuntime implements ModeRuntime {
     }
     this.sights.draw(picture);
     this.droneSound(now, pose);
+    this.blasts?.update(now);
     if (
       this.drone === "climbing" &&
       pose &&
@@ -282,6 +439,16 @@ class ShootRuntime implements ModeRuntime {
     ) {
       this.drone = "hovering";
     }
+    // Up to height: the clock for a level that flies starts.
+    if (
+      this.drone === "hovering" &&
+      this.hoverAt === null &&
+      pose &&
+      pose.alt - (this.flight.pad()?.alt ?? 0) > HOVER_M - 2
+    ) {
+      this.hoverAt = now;
+    }
+    this.fly(now, pose);
     if (now - this.lastPanel > 100) {
       this.lastPanel = now;
       this.drawPanel(now);
@@ -307,7 +474,7 @@ class ShootRuntime implements ModeRuntime {
     const each = heardPose.act.map((w) => rotorNorm("multirotor", w));
     const mean = each.reduce((a, b) => a + b, 0) / 4;
     sounds.heard(
-      phase() === "crashed" || droneGain(range) <= 0
+      phase() === "crashed" || this.blown || droneGain(range) <= 0
         ? []
         : [{ id: "target", kind: "multirotor", level: mean, rpmNorm: mean, each, range, pan }],
     );
@@ -395,19 +562,22 @@ class ShootRuntime implements ModeRuntime {
       );
     }
     if (this.lase && now < this.lase.until) rows.push(row("", this.lase.text, "lrf"));
+    const lv = this.levels[this.level];
+    rows.push(row("Level", `${this.level + 1}/${this.levels.length} · ${lv?.name ?? ""}`));
     const droneText = {
       starting: "starting",
       climbing: "taking off",
       hovering: `hovering ${HOVER_M} m`,
+      flying: `flying: ${lv?.name.toLowerCase() ?? ""}`,
       hit: this.damaged.size ? `hit: ${[...this.damaged].join(", ")}` : "hit",
-      down: "down",
+      down: this.blown ? "blown up" : "down",
     }[this.drone];
     rows.push(row("Drone", droneText, this.drone === "down" ? "good" : ""));
     const st = this.stats;
     rows.push(
       row(
         "Score",
-        `${st.downs} down · ${st.hits} hits / ${st.shots} shots${st.best !== null ? ` · best ${st.best.toFixed(1)} s` : ""}`,
+        `${st.downs} down · ${st.hits} hits / ${st.shots} shots${st.deaths ? ` · killed ${st.deaths}` : ""}${st.best !== null ? ` · best ${st.best.toFixed(1)} s` : ""}`,
       ),
     );
     if (document.pointerLockElement !== this.flight.world.scene.canvas)
@@ -428,6 +598,7 @@ class ShootRuntime implements ModeRuntime {
     for (const d of this.disposers) d();
     this.shooter?.dispose();
     this.rounds?.dispose();
+    this.blasts?.dispose();
     this.sights.dispose();
     sounds.heard([]);
     hudPanel(null);

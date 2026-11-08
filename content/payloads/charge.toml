@@ -1,0 +1,14 @@
+# Shoot Down's charge, fitted to whichever quad is the target (web/src/modes/shoot: its start
+# names it). EST: the size and mass of a hand grenade (the M67's 0.4 kg; FM 3-23.30 gives it a
+# fatality radius of 5 m and a casualty radius of 15 m) in a 60 mm tube, strapped under the frame
+# along it: its axis 35 mm under the centre of mass (the frame's underside, the tube's radius and
+# a strap).
+name = "charge"
+mass_kg = 0.4
+size_m = [0.12, 0.06]
+below_m = 0.035
+lethal_m = 5.0
+
+# The 5" quad's hover throttle with it on (the files are for the 5" quad, the only quad here).
+[params]
+ardupilot-copter = ["ardupilot/copter-quad5-charge.parm"]

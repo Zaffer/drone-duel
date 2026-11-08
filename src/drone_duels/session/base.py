@@ -131,6 +131,8 @@ class PhysicsProcess:
             "--firmware",
             ctx.vehicle.firmware.kind,
         ]
+        if (payload := ctx.vehicle.payload) is not None:
+            args += ["--payload", payload.model_dump_json()]
         ctx.workdir.mkdir(parents=True, exist_ok=True)
         out = (ctx.workdir / "physics.log").open("ab")
         log.info("physics: %s", " ".join(args))
@@ -269,6 +271,29 @@ class Firmware(ABC):
     def land(self) -> None:
         """Land where it is, as a ground station would ask (see `hover`)."""
         self._cannot_fly_itself()
+
+    def go(
+        self,
+        point: tuple[float, float, float],
+        vel_ned: tuple[float, float, float] | None,
+        yaw_deg: float | None,
+    ) -> None:
+        """Up and flying itself (after `hover`): on along a path, a point on it (lat, lon, m
+        above the pad) with the path's velocity there, sent a few times a second
+        (protocol.TargetMsg "go"). At once, on the caller's thread. Not every firmware can: this
+        one says so, once."""
+        if not getattr(self, "_said_cannot_go", False):
+            self._said_cannot_go = True
+            self._cannot_fly_itself()
+
+    def path(self, points: Sequence[tuple[float, float]], height_m: float) -> None:
+        """Up and flying itself (after `hover`): round and round `points` (lat, lon) at
+        `height_m` above the pad, as a mission of its own (protocol.TargetMsg "path"), until a
+        hover or a land overtakes it. Returns at once. Not every firmware can: this one says
+        so, once."""
+        if not getattr(self, "_said_cannot_path", False):
+            self._said_cannot_path = True
+            self._cannot_fly_itself()
 
     def _cannot_fly_itself(self) -> None:
         log.warning("%s cannot fly itself here", self.name)

@@ -5,7 +5,7 @@
   "$defs": {
     "SessionMsg": {
       "additionalProperties": false,
-      "description": "Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop.",
+      "description": "Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a\npayload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it.",
       "properties": {
         "ch": {
           "const": "session",
@@ -50,6 +50,18 @@
           "description": "the start pad: 0 player 1, 1 player 2",
           "minimum": 0,
           "type": "integer"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "start: a payload to fit, its id"
         }
       },
       "required": [
@@ -57,7 +69,8 @@
         "action",
         "location",
         "vehicle",
-        "pad"
+        "pad",
+        "payload"
       ],
       "title": "SessionMsg",
       "type": "object"
@@ -265,7 +278,7 @@
     },
     "TargetMsg": {
       "additionalProperties": false,
-      "description": "Fly the session's quad itself, for a target to shoot at: \"hover\" takes off from its pad\nand holds `height_m` above it, or climbs or sinks to it if already up; \"land\" lands where it\nis. ArduCopter is flown as a ground station would (GUIDED, armed over MAVLink, a takeoff;\nLAND), with an idle receiver played (firmware/ardupilot.py); Betaflight, which takes no such\ncommands, as a pilot on its switches would (POSHOLD; firmware/betaflight.py). The page sends\nno `rc` meanwhile.",
+      "description": "Fly the session's quad itself, for a target to shoot at: \"hover\" takes off from its pad\nand holds `height_m` above it, or climbs or sinks to it if already up; \"land\" lands where it\nis. ArduCopter is flown as a ground station would (GUIDED, armed over MAVLink, a takeoff;\nLAND), with an idle receiver played (firmware/ardupilot.py); Betaflight, which takes no such\ncommands, as a pilot on its switches would (POSHOLD; firmware/betaflight.py). The page sends\nno `rc` meanwhile.\n\n\"go\" (ArduCopter, up and in GUIDED after a hover) flies it on, a target the page sends a few\ntimes a second: to a point on a path (`lat`, `lon`, `height_m`), with `vel_ned` as where it\nis going next; facing `yaw_deg` if given. Straight to the firmware, not queued behind other\ncommands.\n\n\"path\" (Betaflight, up after a hover) flies `points` (lat, lon) at `height_m`, round and\nround, as a mission its own autopilot flies (firmware/betaflight.py), sent once; a hover\nor a land takes it back. Straight to the firmware too.",
       "properties": {
         "ch": {
           "const": "target",
@@ -275,28 +288,127 @@
         "action": {
           "enum": [
             "hover",
-            "land"
+            "land",
+            "go",
+            "path"
           ],
           "type": "string"
         },
         "height_m": {
-          "description": "above the pad, m",
+          "default": 0.0,
+          "description": "above the pad, m: hover's (2 at least), go's",
           "maximum": 120,
-          "minimum": 2,
+          "minimum": -50,
           "type": "number"
+        },
+        "lat": {
+          "anyOf": [
+            {
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lon": {
+          "anyOf": [
+            {
+              "maximum": 180,
+              "minimum": -180,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vel_ned": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array",
+              "items": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "additionalItems": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "go: the path's velocity there, m/s, north, east, down"
+        },
+        "yaw_deg": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "go: the heading to face"
+        },
+        "points": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array",
+                "items": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "additionalItems": false
+              },
+              "maxItems": 30,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "path: its waypoints, lat and lon, degrees"
         }
       },
       "required": [
         "ch",
         "action",
-        "height_m"
+        "height_m",
+        "lat",
+        "lon",
+        "vel_ned",
+        "yaw_deg",
+        "points"
       ],
       "title": "TargetMsg",
       "type": "object"
     },
     "HitMsg": {
       "additionalProperties": false,
-      "description": "A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.\nThe physics takes what the part did away (physics/quad/model.py: a prop's blade, a motor,\nthe power) and the impulse at the point it struck; the firmware flies on with what is left.",
+      "description": "A bullet struck the vehicle, as the page traced it: which part, and the momentum it left.\nThe physics takes what the part did away (physics/quad/model.py: an arm, that rotor; the\nbody, the power at once; the pack, the power a moment later; the payload goes off) and the\nimpulse at the point it struck; the firmware flies on with what is left.",
       "properties": {
         "ch": {
           "const": "hit",
@@ -305,13 +417,10 @@
         },
         "part": {
           "enum": [
-            "prop",
-            "motor",
-            "arm",
+            "body",
             "battery",
-            "stack",
-            "camera",
-            "frame"
+            "arm",
+            "payload"
           ],
           "type": "string"
         },
@@ -327,7 +436,7 @@
             }
           ],
           "default": null,
-          "description": "ArduPilot's motor number (1 front right, 2 rear left, 3 front left, 4 rear right) for a prop, motor or arm; None otherwise"
+          "description": "ArduPilot's motor number (1 front right, 2 rear left, 3 front left, 4 rear right) for an arm; None otherwise"
         },
         "impulse_ned": {
           "description": "the momentum the bullet leaves in the vehicle, N\u00b7s, north, east, down",
@@ -374,6 +483,56 @@
         "at_frd"
       ],
       "title": "HitMsg",
+      "type": "object"
+    },
+    "PayloadSpec": {
+      "additionalProperties": false,
+      "description": "A charge strapped under a quad (Shoot Down fits it, whichever quad: content/payloads):\ncarried as part of its mass, drawn under it, a part a bullet can hit. Hit, or (one time in\ntwo) when the quad comes down on the ground after a hit, it goes off\n(physics/quad/model.py).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mass_kg": {
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "type": "number"
+        },
+        "size_m": {
+          "description": "a tube along the quad, forward: its length and diameter",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "below_m": {
+          "description": "its axis below the quad's centre of mass",
+          "maximum": 0.2,
+          "minimum": 0,
+          "type": "number"
+        },
+        "lethal_m": {
+          "description": "within this of where it goes off, a person is killed",
+          "exclusiveMinimum": 0,
+          "maximum": 50,
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "mass_kg",
+        "size_m",
+        "below_m",
+        "lethal_m"
+      ],
+      "title": "PayloadSpec",
       "type": "object"
     },
     "StatusMsg": {
@@ -462,6 +621,18 @@
         "heading_deg": {
           "default": 0.0,
           "type": "number"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PayloadSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the payload fitted, if any"
         }
       },
       "required": [
@@ -473,7 +644,8 @@
         "step",
         "video",
         "origin",
-        "heading_deg"
+        "heading_deg",
+        "payload"
       ],
       "title": "StatusMsg",
       "type": "object"
@@ -834,15 +1006,15 @@
       "additionalProperties": false,
       "description": "What hits have taken from the quad so far (HitMsg).",
       "properties": {
-        "thrust": {
-          "description": "each motor's (1-4, ArduPilot's) thrust left at a given speed: 1 whole, 2/3 and 1/3 with a prop's blades shot off, 0 its prop gone or the motor dead",
+        "lost": {
+          "description": "each motor's (1-4, ArduPilot's) rotor shot away: its arm, motor or prop hit (the page stops drawing its prop)",
           "items": {
-            "type": "number"
+            "type": "boolean"
           },
           "type": "array"
         },
         "power": {
-          "description": "the motors' power: a pierced pack holds briefly (failing), a hit stack or a dead pack stops every motor (off)",
+          "description": "the motors' power: a body hit cuts it at once (off); a pierced pack holds a moment (failing), then off",
           "enum": [
             "on",
             "failing",
@@ -850,14 +1022,19 @@
           ],
           "type": "string"
         },
+        "exploded": {
+          "description": "its payload has gone off: the quad is gone",
+          "type": "boolean"
+        },
         "hits": {
           "description": "hits taken since the last reset",
           "type": "integer"
         }
       },
       "required": [
-        "thrust",
+        "lost",
         "power",
+        "exploded",
         "hits"
       ],
       "title": "Damage",
@@ -888,7 +1065,7 @@
             }
           ],
           "default": null,
-          "description": "None: not hit since the reset"
+          "description": "None: whole since the reset"
         }
       },
       "required": [
@@ -1377,6 +1554,79 @@
       "title": "Location",
       "type": "object"
     },
+    "Payload": {
+      "additionalProperties": false,
+      "description": "A payload a mode fits to the vehicle it starts (content/payloads/*.toml).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mass_kg": {
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "type": "number"
+        },
+        "size_m": {
+          "description": "a tube along the quad, forward: its length and diameter",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "below_m": {
+          "description": "its axis below the quad's centre of mass",
+          "maximum": 0.2,
+          "minimum": 0,
+          "type": "number"
+        },
+        "lethal_m": {
+          "description": "within this of where it goes off, a person is killed",
+          "exclusiveMinimum": 0,
+          "maximum": 50,
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "parameter / CLI files, after the vehicle's, for a firmware that carries it",
+          "propertyNames": {
+            "enum": [
+              "ardupilot-copter",
+              "betaflight",
+              "inav",
+              "none"
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "mass_kg",
+        "size_m",
+        "below_m",
+        "lethal_m",
+        "id",
+        "params"
+      ],
+      "title": "Payload",
+      "type": "object"
+    },
     "PhysicsSpec": {
       "additionalProperties": false,
       "properties": {
@@ -1487,6 +1737,18 @@
         "blurb": {
           "default": "",
           "type": "string"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PayloadSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "fitted by the session (a start's payload, content/payloads), not in its file"
         }
       },
       "required": [
@@ -1500,7 +1762,8 @@
         "launch",
         "aux",
         "dynamics_overlay",
-        "blurb"
+        "blurb",
+        "payload"
       ],
       "title": "Vehicle",
       "type": "object"
@@ -1615,6 +1878,12 @@
             "$ref": "#/$defs/Weapon"
           },
           "type": "object"
+        },
+        "payloads": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Payload"
+          },
+          "type": "object"
         }
       },
       "required": [
@@ -1622,7 +1891,8 @@
         "vehicles",
         "courses",
         "controllers",
-        "weapons"
+        "weapons",
+        "payloads"
       ],
       "title": "ContentMsg",
       "type": "object"
@@ -1745,6 +2015,12 @@
     },
     "OsdMsg": {
       "$ref": "#/$defs/OsdMsg"
+    },
+    "Payload": {
+      "$ref": "#/$defs/Payload"
+    },
+    "PayloadSpec": {
+      "$ref": "#/$defs/PayloadSpec"
     },
     "PhysicsMsg": {
       "$ref": "#/$defs/PhysicsMsg"

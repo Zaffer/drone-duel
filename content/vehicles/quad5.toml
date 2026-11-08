@@ -1,4 +1,4 @@
-name = "5\" FPV quad"
+name = "5\" FPV quad (ArduPilot)"
 blurb = "A 5 inch freestyle quad on ArduCopter 4.7, SkyFlow-Dynamics' racer5in physics."
 kind = "multirotor"
 model = "models/fpv-drone.glb"

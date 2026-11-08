@@ -420,17 +420,27 @@ and mode switches act only when they move, and the idle 1000 µs throttle is abo
 at `WP_SPD_UP`'s 2.5 m/s); a reset respawns ArduCopter (48 s to ready, 32 of them waiting for
 the EKF), then 10 m in 8 s.
 
-**Hits** (`hit` in §8) damage the plant by part (`physics/quad/model.py`, `Damage`): a prop loses
-a blade of three each hit (that rotor's `ct2` and `cq2` scaled by the blades left, repacked with
-`pack_params`, the same shape so nothing is jitted again); a motor or arm hit kills that rotor
-(commanded 0 whatever ArduPilot asks: it spins down with the motor lag); the stack stops all four
-at once; a pierced pack holds 0.3 s (EST, the reasoning is beside `BATTERY_HOLD_S`) and then
-stops all four; the camera and frame lose nothing. Every hit leaves its momentum as SkyFlow's
+**Hits** (`hit` in §8) damage the plant by part (`physics/quad/model.py`, `Damage`), four of
+them: an **arm** (the arm, its motor and ESC, its prop) loses that rotor: its `ct2` and `cq2` to
+0, repacked with `pack_params` (the same shape, so nothing is jitted again), and its motor
+unpowered; the other three fly on, and the page stops drawing its prop. A prop with one blade
+shot off is no better: out of balance by some six times the quad's weight at hover, it shakes
+the motor off or floods the gyros (the reasoning is beside `ROTOR_PARTS`). The **body** (the
+stack, the plates and the wiring between them, the camera) cuts the power to all four at once.
+The **battery**, pierced, holds 0.3 s and then dies (EST, the reasoning beside
+`BATTERY_HOLD_S`), reading dead to the flight controller too. A **payload** (content/payloads,
+fitted by a mode to whichever vehicle it starts: Shoot Down's 0.4 kg charge, carried in the
+plant's mass and inertia by `plant.with_payload`, with its firmware's files after the vehicle's:
+ArduCopter's hover throttle, 0.35) goes off when hit, or one time in two when the quad comes
+down (crashed, or onto the ground after a hit: the game's rule); gone off, the power is off and
+the page draws the blast instead of the quad. The kick each part takes is its share of the
+bullet's momentum (`shoot/target.ts`, zone by zone: a pack's slight, 0.12, the reasoning beside
+it). Every hit leaves its momentum as SkyFlow's
 external force over the next frame (F = J / dt, W) and its moment about the centre of mass as
-the external torque (B). ArduCopter then flies what is left, as it would: one motor gone, the
+the external torque (B). ArduCopter then flies what is left, as it would: one rotor gone, the
 quad yaws away, tumbles and falls (SITL, from 30 m: 18 m/s into the ground 4 s later, crashed).
-The prop's imbalance (vibration) is not modelled. A reset mends it all; the physics' status
-carries the damage, and `physics` (§8) passes it to the page.
+A reset mends it all; the physics' status carries the damage, and `physics` (§8) passes it to
+the page.
 
 **On Betaflight** (`quad5-betaflight`, the same airframe and plant): Betaflight 2026.6's SITL,
 built from source by `scripts/setup.sh` with `scripts/betaflight-sitl.patch`. The patch makes
@@ -452,7 +462,9 @@ Betaflight's own PIDs and rates fly it. `bridges/betaflight.py`:
 - Its motors come as µs (1000 stopped, 1055 armed idle, 2000 full), the range the ESC map reads,
   reordered from Betaflight's quad X (rear right first) to ArduPilot's.
 - RC goes over UDP from the adapter (an idle receiver until the page's sticks come), telemetry
-  over MSP, the OSD over MSP DisplayPort polled as a DJI air unit polls it (INAV's `AirUnit`).
+  over MSP, the OSD over MSP DisplayPort polled as a DJI air unit polls it (INAV's `AirUnit`),
+  missions over MAVLink on UART4 (`telemetry/mission.py`; stock SITL builds without telemetry,
+  so scripts/betaflight-sitl.patch adds it).
 - The mode switch is laid out as ArduCopter's: low POSHOLD (Betaflight's altitude hold and GPS
   position hold together), middle ANGLE, high ACRO. Betaflight arms only with POSHOLD off, and
   the hold modes take over once the throttle has been raised after arming; in them the
@@ -460,16 +472,26 @@ Betaflight's own PIDs and rates fly it. `bridges/betaflight.py`:
   hover throttle (1275 µs, where this quad hovers in ANGLE).
 - A link lost (§8): Betaflight's own failsafe lands it where it is (AUTO-LAND, holding the
   throttle through the guard time; its altitude and position hold fly the descent) and disarms
-  on the touchdown's jerk. SITL has no battery: no pack voltage. A reset leaves it running (no
+  on the touchdown's jerk (`landing_disarm_threshold` 150: 1500 g/s; a mission starting jerks it
+  past 500 on our physics, and a touchdown past 2500, measured 2026-11-08). SITL has no battery: no pack voltage. A reset leaves it running (no
   EKF to upset).
 - **Flying itself** (a target, `target` in §8): Betaflight takes no commands from a ground
-  station (its MAVLink takes missions but no arming or modes, and SITL builds without it), so
-  the game flies it as a pilot on its own modes would (`Betaflight.hover`, `land`), reading it
+  station (its MAVLink takes missions but no arming or modes), so the game flies it as a pilot
+  on its own modes would (`Betaflight.hover`, `land`), reading it
   over MSP: arm switch up in ANGLE, POSHOLD, then the throttle stick for the climb asked (0.6 m/s
   a metre below the height, at most 3 m/s), back in the deadband within 0.3 m, and on nudging it
   there (its height target trails a fast climb). Landing comes down in POSHOLD until
   Betaflight's touchdown detection disarms it. A reset in place (`Firmware.reset_in_place`)
   puts the arm switch low, or it would fly off the pad again.
+- **A path** (`Betaflight.path`, `target path`) is a mission its own autopilot flies: up and
+  holding in POSHOLD, the game uploads the waypoints over MAVLink, as a ground station would,
+  and sets AUTOPILOT's switch (channel 10, which no controller here maps) high. Betaflight denies
+  a mission while it flies one, so a new one goes in with the switch low (POSHOLD holds it), in
+  about 0.1 s. It flies the legs at `ap_max_velocity` (7 m/s; also POSHOLD's full stick),
+  cutting the corners of the waypoints before the last and holding at the last; the switch low
+  and high again starts it over, so a path goes round until a hover or a land takes it back.
+  Measured (2026-11-08, SITL): a 40 m square, within 0.6 to 2.5 m of its corners, up to 11 m/s,
+  20 m ± 1.5; round again; after a hover, still within 1.5 m.
 - Measured (2026-11-06, SITL): ready 8 s after the start; Betaflight's attitude within 2° of the
   truth in flight (its compass has a 2° declination). In ANGLE the place's wind took it 25 m in
   10 s; in POSHOLD it held within 0.6 m. As a target: 30 m held 11 s after asking from the pad,
@@ -522,7 +544,7 @@ A mode is a pair of plugins with one lifecycle, `setup → running → finished`
 | Free Fly | 1 | Any vehicle, switch at will (the pause menu), no score. Practice missions here with QGC. |
 | Duel | 2 (P2P) | Turns. The pilot (quad or Chupito) strikes the truck; the driver (truck) evades. A strike scores; a crash spends the aircraft. Swap each turn. Today's duelmatch rules carry over. |
 | Race | 2 (P2P) | Live, side by side. Each player flies their own sim and sees the other as a ghost (no collisions). Countdown start from the host. A gate counts when the segment between two true poses crosses its rectangle in the right direction, from GO (the countdown waits for the session it started to be ready). The next gate wears a chevron on each side, the one after it dots; the next three shade from ember to the rest's pale. Lap and total times; first to finish wins. |
-| Shoot Down | 1 | On foot with a rifle; a real quad hovers 30 m over the pad, 100 m in front. Bring it down. No score but shots, hits, downs and the time from the first shot to a down (§7.1). |
+| Shoot Down | 1 | On foot with a rifle; a real quad 30 m over the pad, 100 m in front, level by level: it hovers, flies a line, a circle, a figure eight, carrying a charge. Bring it down. No score but shots, hits, downs, deaths and the time from the first shot to a down (§7.1). |
 
 The peer link stays Trystero over Nostr relays (WebRTC, no server), one room per match. Peers
 exchange poses at 30 Hz for the ghost or truck, events (strike, gate, crash, finish) with a
@@ -542,9 +564,28 @@ saw it (favouring the shooter).
 The player is a person on the ground with an 11.5" AR-15 (content/weapons/ar15-sbr.toml: its
 mass, twist, magazine, sights, zero, and the cartridge, M193, with each number's source). The
 target is the session's own vehicle, the 5" quad on ArduCopter or Betaflight and
-SkyFlow-Dynamics: the page asks for `target hover` and the server flies it up, as a ground
-station would (ArduCopter) or as a pilot on its switches would (Betaflight, §6.2). Nobody flies it
-from the page (`ModeDef.ownsView`: no rig, feed, operator, sticks or motor in the player's ears).
+SkyFlow-Dynamics, with Shoot Down's charge fitted (`ModeDef.payload`: the start names it, the
+session fits it, and its status says so, for the page to draw it): the page asks for
+`target hover` and the server flies it up, as a ground station would (ArduCopter) or as a pilot
+on its switches would (Betaflight, §6.2). Nobody flies it from the page (`ModeDef.ownsView`: no
+rig, feed, operator, sticks or motor in the player's ears).
+
+**Levels** (`shoot/levels.ts`): 1 hover; 2 a line across the view, 50 m; 3 a 40 m circle; 4 a
+figure eight 50 m across. Down, the next level comes up (after the last, the first); killed, the
+same again. From level 2 the page flies ArduCopter (up to 6, 7 and 8 m/s), 3 s after it reaches
+its hover: `target go` five times a second, a point on the path with the path's velocity there
+as the feed-forward (ArduCopter's position controller follows the path rather than chasing a
+point). ArduCopter's own guidance shapes what it flies (copter-quad5.parm's WP_ACC 5 m/s², its
+60° lean), as it would a real one's; each path eases up to its speed over 4 s. Measured
+(2026-11-07, SITL, the free map): the line ±27 m at up to 6.4 m/s, the circle 46 m across at up
+to 8.6, the eight 54 × 31 m at up to 9.0. Betaflight flies them as missions (§6.2): `target
+path`, once, the path's 30 waypoints (whole laps: the line end to end, the circle 10 a lap, the
+eight 15), at its own 7 m/s. Measured (2026-11-08, the free map): the line ±25 m, at up to 8.8
+m/s. With the charge Betaflight climbs at half its rate and holds a metre or two low at first:
+its hover throttle (ap_hover_throttle) is the bare quad's. The charge goes off when a bullet
+hits it, or one time in two when the quad comes down (the physics decides, §6.2); within its
+`lethal_m` (5 m, the M67's fatality radius) the shooter is killed.
+
 The page's modules are in `web/src/shoot/`:
 
 - **ballistics.ts**: a point mass on the G7 drag table scaled by the BC, through the moving air
@@ -556,8 +597,12 @@ The page's modules are in `web/src/shoot/`:
   (MIL-F-8785C's log profile, Dryden-sized turbulence, 1 − cos gusts). The bullets fly through
   it and the wind meter reads it; the drone's physics draws its own gusts from the same settings.
 - **target.ts**: the quad's parts as the drawn model lays them out (props as discs a blade crosses
-  with the chance the blades cover, motors, ESC sleeves, arms, pack, stack, camera, plates), and
-  the share of the bullet's momentum each takes as it passes through.
+  with the chance the blades cover, motors, ESC sleeves, arms, pack, stack, camera, plates, and
+  a payload's tube), each zone the part it belongs to (arm, body, battery, payload) and the share
+  of the bullet's momentum it takes as it passes through.
+- **blast.ts**: a charge going off: a flash, a fireball, fragments, smoke for some seconds, dust
+  near the ground; heard when its sound arrives. The quad and its payload (drawn under it by
+  vehicles/aircraft.ts) are no longer drawn.
 - **rounds.ts**: rounds stepped in real time against the drone's drawn pose at the same moment
   (favouring the shooter, as the duel's strikes) and the ground; tracers, dust, sparks. A hit
   goes to the server as `hit` (part, motor, impulse, where) and the physics does the rest. Each
@@ -598,7 +643,9 @@ held off straight up and down: stepped a frame at a time by Euler, the heartbeat
 end under about 20 fps and turned the view over.
 
 The numbers no source gives are marked EST where they are set. Not modelled yet: the spatial
-variation of the wind along a shot, prop imbalance after a blade is lost, and ricochets. Walls
+variation of the wind along a shot, the AR's bolt carrier cycling in the recoil, a payload's
+drag and the centimetre it lowers the centre of mass, wounds (only death, inside the lethal
+radius), and ricochets. Walls
 are the tiles' heights as the feet meet them: an overhang lower than 2.8 m over the feet is a
 wall, and nothing hurts in a fall.
 
@@ -609,14 +656,14 @@ high-rate pose channel.
 
 | Direction | Channel | Rate | Content |
 |---|---|---|---|
-| page → server | `session` | on demand | start, switch, reset, destroy |
+| page → server | `session` | on demand | start (with a payload fitted, if named), switch, reset, destroy |
 | page → server | `rc` | 250 Hz | 16 channels in µs, sequence number; only while the page's controller flies (§12) |
 | page → server | `ground` | 20 Hz | ground height under the aircraft |
 | page → server | `wind` | on change | speed, direction, turbulence, gust trigger |
 | page → server | `video` | on change | analog or digital (sets the OSD grid, §10) |
 | page → server | `radio_source` | on change | stream the radio as the server reads it; and whether it flies (§12) |
-| page → server | `target` | on demand | the quad flies itself: hover at a height over the pad, or land (§6.2) |
-| page → server | `hit` | per hit | a bullet struck a part (and which motor's): the impulse, where; straight to the physics (§6.2) |
+| page → server | `target` | on demand; `go` 5 Hz | the quad flies itself: hover at a height over the pad, or land (§6.2); go on along a path, a point on it with its velocity (ArduCopter, §7.1); fly a path round and round as a mission (Betaflight, §6.2) |
+| page → server | `hit` | per hit | a bullet struck a part (arm with its motor, body, battery, payload): the impulse, where; straight to the physics (§6.2). A payload reaching the shooter is sent as a hit too |
 | server → page | `status` | on change | slot, vehicle, firmware state, arming blockers |
 | server → page | `pose` | 120 Hz | sim time, true position, attitude, velocity, body rates, rotor/servo state (binary) |
 | server → page | `osd` | per draw | the firmware's DisplayPort screen |

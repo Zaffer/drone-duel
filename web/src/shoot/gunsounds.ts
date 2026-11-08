@@ -104,6 +104,32 @@ export const gunSounds = {
       pan,
     );
   },
+  /** A charge going off `range` m away: the crack of the detonation, the blast's low roar
+   * rolling on, and its echo off the country round; the highs gone with range. */
+  boom(range: number, pan: number): void {
+    const f = far(range, 30);
+    sounds.custom(
+      (a) => {
+        noise(a, { dur: 0.02, gain: 1.0 * f.gain, attack: 0.0005, filter: { f: f.lowpass } });
+        noise(a, {
+          dur: 0.9,
+          gain: 1.0 * f.gain,
+          attack: 0.002,
+          filter: { f: Math.min(3000, f.lowpass), f1: 120 },
+        });
+        tone(a, { f: 60, f1: 25, dur: 0.6, gain: 1.0 * f.gain, attack: 0.002 });
+        noise(a, {
+          at: 0.5,
+          dur: 2.5,
+          gain: 0.25 * f.gain,
+          attack: 0.3,
+          filter: { f: 500, f1: 120 },
+        });
+      },
+      range / speedOfSound,
+      pan,
+    );
+  },
   /** A miss landing in the ground `range` m away. */
   thud(range: number, pan: number): void {
     const f = far(range, 6);

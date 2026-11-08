@@ -92,7 +92,8 @@ if [ ! -x "$EXT/inav/inav_SITL" ]; then
     rm -f "$zip"
 fi
 # Betaflight SITL, the Betaflight 5" quad's firmware (drone_duels.firmware.betaflight): built from
-# source (gcc and make), with scripts/betaflight-sitl.patch (its ports as arguments, the OSD).
+# source (gcc and make), with scripts/betaflight-sitl.patch (its ports as arguments, the OSD,
+# MAVLink).
 # Submodules are fetched first, one at a time: the build's own fetching runs them in parallel,
 # and they race on .git/config.
 BF_TAG="${BF_TAG:-2026.6.2}"
@@ -101,10 +102,17 @@ if [ ! -d "$BF/.git" ]; then
     git clone --branch "$BF_TAG" --depth 1 https://github.com/betaflight/betaflight.git "$BF"
     git -C "$BF" submodule update --init --depth 1
 fi
-if ! grep -q tcpBasePort "$BF/src/main/drivers/serial_tcp.c"; then
-    git -C "$BF" apply "$ROOT/scripts/betaflight-sitl.patch"
+# A checkout patched with an older patch is put back and patched again, and rebuilt.
+BF_BUILD=0
+if ! git -C "$BF" diff --quiet &&
+    ! git -C "$BF" apply --reverse --check "$ROOT/scripts/betaflight-sitl.patch" 2>/dev/null; then
+    git -C "$BF" checkout -- .
 fi
-if [ ! -x "$BF/obj/main/betaflight_SITL.elf" ]; then
+if git -C "$BF" diff --quiet; then
+    git -C "$BF" apply "$ROOT/scripts/betaflight-sitl.patch"
+    BF_BUILD=1
+fi
+if [ "$BF_BUILD" = 1 ] || [ ! -x "$BF/obj/main/betaflight_SITL.elf" ]; then
     make -C "$BF" TARGET=SITL -j"$(nproc)"
 fi
 

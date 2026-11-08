@@ -16,7 +16,7 @@ import numpy as np
 from drone_duels.bridges.ardupilot_json import JsonBridge
 from drone_duels.bridges.betaflight import BetaflightBridge
 from drone_duels.physics.quad.model import QuadModel
-from drone_duels.physics.quad.plant import Plant, airframe
+from drone_duels.physics.quad.plant import Plant, airframe, with_payload
 from drone_duels.ports import SlotPorts
 
 log = logging.getLogger(__name__)
@@ -31,11 +31,17 @@ class QuadBackend:
         heading_deg: float,
         wind: dict[str, Any],
         firmware: str = "ardupilot-copter",
+        payload: dict[str, Any] | None = None,
     ) -> None:
         frame = airframe(airframe_name)
+        if payload is not None:
+            length, diameter = payload["size_m"]
+            frame = with_payload(frame, payload["mass_kg"], length, diameter, payload["below_m"])
         plant = Plant(frame)
         plant.warm()
-        self.model = QuadModel(frame, origin, heading_deg, wind, plant=plant)
+        self.model = QuadModel(
+            frame, origin, heading_deg, wind, plant=plant, payload=payload is not None
+        )
         self.model.esc.command(np.zeros(4), 25.2)  # jit the ESC map too
         self.bridge: JsonBridge | BetaflightBridge
         if firmware == "betaflight":

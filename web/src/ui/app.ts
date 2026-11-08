@@ -404,7 +404,7 @@ export function mountApp(root: HTMLElement, world: World): void {
         screen("menu");
       });
       // Started first, so the mode sees this session starting, not the last one's "ready".
-      f.start(loc.id, vehicle, pad);
+      f.start(loc.id, vehicle, pad, def?.payload ?? null);
       f.mode = attach(f);
     } catch (err) {
       console.error("could not start the flight", err);

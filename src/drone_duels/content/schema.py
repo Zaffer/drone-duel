@@ -1,4 +1,5 @@
-"""What content/*.toml holds: places, vehicles, race courses, radio profiles and weapons.
+"""What content/*.toml holds: places, vehicles, race courses, radio profiles, weapons and
+payloads.
 
 Each file is one model. Every key is checked: an unknown key or a missing one is an error naming
 the file and the key, so a typo never becomes a silent default (DESIGN.md §5).
@@ -96,6 +97,23 @@ class AuxSpec(Strict):
     launch: int | None = Field(default=None, ge=5, le=16)
 
 
+class PayloadSpec(Strict):
+    """A charge strapped under a quad (Shoot Down fits it, whichever quad: content/payloads):
+    carried as part of its mass, drawn under it, a part a bullet can hit. Hit, or (one time in
+    two) when the quad comes down on the ground after a hit, it goes off
+    (physics/quad/model.py)."""
+
+    name: str
+    mass_kg: float = Field(gt=0, le=2)
+    size_m: tuple[float, float] = Field(
+        description="a tube along the quad, forward: its length and diameter"
+    )
+    below_m: float = Field(ge=0, le=0.2, description="its axis below the quad's centre of mass")
+    lethal_m: float = Field(
+        gt=0, le=50, description="within this of where it goes off, a person is killed"
+    )
+
+
 class Vehicle(Strict):
     id: str
     name: str
@@ -108,6 +126,23 @@ class Vehicle(Strict):
     aux: AuxSpec | None = None
     dynamics_overlay: bool = False
     blurb: str = ""
+    payload: PayloadSpec | None = Field(
+        default=None,
+        description="fitted by the session (a start's payload, content/payloads), not in its file",
+    )
+
+
+class Payload(PayloadSpec):
+    """A payload a mode fits to the vehicle it starts (content/payloads/*.toml)."""
+
+    id: str
+    params: dict[FirmwareKind, list[str]] = Field(
+        default_factory=dict,
+        description="parameter / CLI files, after the vehicle's, for a firmware that carries it",
+    )
+
+    def spec(self) -> PayloadSpec:
+        return PayloadSpec.model_validate(self.model_dump(exclude={"id", "params"}))
 
 
 class GateFrame(Strict):
