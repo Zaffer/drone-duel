@@ -26,4 +26,6 @@ bc_g7 = 0.124
 muzzle_ms = 853.0
 # 26 gr of WC844 (EST: the M193 load's usual charge).
 powder_g = 1.68
-tracer_every = 1
+# Every fourth round an M196 tracer (red tip), the usual 4:1 belt mix; rifle magazines are
+# usually loaded with none, or a few at the bottom.
+tracer_every = 4
