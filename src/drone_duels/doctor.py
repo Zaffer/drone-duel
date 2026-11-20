@@ -35,6 +35,8 @@ def checks() -> list[tuple[str, Callable[[], bool], str]]:
          "scripts/setup.sh"),
         ("OSD fonts", lambda: (EXTERNAL / "ardupilot/libraries/AP_OSD/fonts").is_dir()
          and (EXTERNAL / "web/betaflight/default.mcm").exists(), "scripts/setup.sh"),
+        ("the web version's simulator", lambda: (EXTERNAL / "web/sim/sim.wasm").exists(),
+         "optional: scripts/setup-web.sh, for `duels web`"),
         ("a map key", lambda: bool(map_keys().google_maps_api_key or map_keys().cesium_ion_token),
          f"optional: GOOGLE_MAPS_API_KEY in {ENV_FILE.name} for photorealistic 3D tiles"),
     ]

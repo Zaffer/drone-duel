@@ -41,3 +41,24 @@ describe("the engine's fences", () => {
     expect(await offenders(/Math\.ceil\(dt \/ /, [])).toEqual([]);
   });
 });
+
+// The web version's simulator runs in a worker, with no page around it (DESIGN.md §18).
+describe("the simulator's fence", () => {
+  test("sim/ takes nothing of the page's: its own modules, and the protocol's types", async () => {
+    const out: string[] = [];
+    for (const [f, t] of text) {
+      if (!f.startsWith("sim/")) continue;
+      for (const m of (await t).matchAll(/^import (type )?[^;]*? from "([^"]+)";/gms)) {
+        const [, typeOnly, from] = m;
+        const own = from!.startsWith("./");
+        const types = typeOnly !== undefined && from === "../net/protocol.ts";
+        if (!own && !types) out.push(`${f}: ${from}`);
+      }
+      const code = (await t)
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("//") && !l.trimStart().startsWith("*"));
+      if (code.some((l) => /\b(document|window)\./.test(l))) out.push(`${f}: the page's globals`);
+    }
+    expect(out).toEqual([]);
+  });
+});

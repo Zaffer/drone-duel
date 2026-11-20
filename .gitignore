@@ -12,3 +12,4 @@ eeprom.bin
 .env.local
 web/node_modules/
 web/dist/
+web/dist-web/

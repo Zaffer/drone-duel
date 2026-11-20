@@ -16,6 +16,10 @@ firmware's own OSD, as analog NTSC over a 5.8 GHz link
 ([analog-vision](https://github.com/Synetic-Labs/Analog-Vision)) or clean digital. Set the wind,
 turbulence and gusts live. Plan ArduPilot missions in QGroundControl and watch them flown.
 
+There is a **web version** too: the same page with no server and nothing to install, flying
+Betaflight's 5" quad (the real firmware, compiled to WebAssembly) and the truck, in Free Fly,
+Race and Duel. See [The web version](#the-web-version).
+
 ## Setup
 
 ```bash
@@ -50,6 +54,26 @@ R reset · B vehicle · T throw (the wing) · D dynamics overlay (the wing) · N
 
 **ArduPilot practice.** QGroundControl connects on UDP 14550: plan and upload a mission, fly it
 in AUTO, and watch it in the Map view.
+
+## The web version
+
+```bash
+scripts/setup-web.sh      # once: emsdk, cudaflight; builds the simulator (WebAssembly)
+uv run duels web          # builds web/dist-web/ and serves it on http://localhost:8600/drone-duels/
+```
+
+A static page: the whole simulator runs in a worker in the browser. Betaflight is
+[cudaflight](https://github.com/Synetic-Labs/cudaflight)'s lockstep build of the real firmware,
+compiled to WebAssembly with the quad's plant (SkyFlow-Dynamics' `racer5in`, as generated C)
+in the same module; the page reads it as it reads the native one, telemetry over MSP and the
+OSD over MSP DisplayPort. It flies the Betaflight 5" quad and drives the truck in Free Fly,
+Race and Duel, on the free map (type your own Google Maps key into Options → Graphics for 3D
+tiles; it stays in your browser). ArduPilot, INAV, Shoot Down and QGroundControl need the
+game's server.
+
+`.github/workflows/pages.yml` publishes `web/dist-web/` to GitHub Pages on every push to
+`main`. The
+simulator's module contains Betaflight, so it is GPL-3.0. DESIGN.md §18 has the design.
 
 ## Content
 

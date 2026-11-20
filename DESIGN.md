@@ -178,11 +178,10 @@ until 2026-11-04, measured at 3440×1400 in chase view:
 Uncapped, the frame is now 3.8 ms in FPV and 10.3 ms in chase at 3440×1400 (14 fps and 67 ms in
 chase before).
 
-**Later, all in the browser.** The seams stay: input → sim → timeline → renderer. The physics
-and the firmware (WebAssembly) would run in a dedicated Worker on a fixed step, the radio read
-there through WebHID (dedicated workers, Chrome 131+), so the sticks still never wait on
-drawing, and the poses would reach the same timeline through a SharedArrayBuffer (which needs
-the page cross-origin isolated).
+**All in the browser** is the web version (§18): the same seams, input → sim → timeline →
+renderer, with the firmware and the physics (one WebAssembly module) in a dedicated Worker on
+a fixed step, so the sticks still never wait on drawing. The poses reach the same timeline as
+posted messages, stamped with sim time as the server's are.
 
 ### 3.2 The page's engine
 
@@ -270,6 +269,8 @@ drone-duels/
   router/sitl.conf
   scripts/setup.sh          ArduPilot, INAV, Betaflight (built with betaflight-sitl.patch),
                             mavlink-router, bun, web deps, Chupito GLB
+  scripts/setup-web.sh      the web version's simulator (§18): emsdk, cudaflight (built with
+                            cudaflight-web.patch) and web/wasm/ to external/web/sim/sim.wasm
   tools/                    gen_protocol_ts.py (pydantic → web/src/net/protocol.ts),
                             models/ (fpvmodel, truckmodel, operatormodel, operatortextures,
                             gltf, fbx: GLB asset builders)
@@ -291,6 +292,7 @@ drone-duels/
     video/                  osd (MSP DisplayPort, fonts)
     rc/                     RcSink, failsafe, channel maps
     world/                  geo, elevation
+    webdata.py              the web version's data, and what is generated for it (§18)
     record/                 flight recorder (logs/flights/)
   web/
     package.json  tsconfig.json  biome.json
@@ -312,12 +314,16 @@ drone-duels/
       dynamics/             wing dynamics overlay
       input/                actions (the controls' tables), radio, mapping, calibration
       audio/
+      sim/                  the web version's simulator, in a worker (§18): module (the
+                            WebAssembly), quad, weather, msp, vehicle, session, worker
+    wasm/                   the simulator's C: bfweb.c (Betaflight's harness), plant.c,
+                            sfd.c/.h (SkyFlow-Dynamics' generated C backend)
     test/                   bun test
   tests/                    pytest (physics goldens, bridges, content, session, protocol)
 ```
 
 `external/` (git-ignored, from `scripts/setup.sh`) keeps ArduPilot, INAV, Betaflight and
-mavlink-router.
+mavlink-router; `scripts/setup-web.sh` adds emsdk, cudaflight and the built simulator.
 The web libraries (Cesium, Rapier, Trystero, milsymbol, alien-signals) become bun dependencies
 pinned in `web/package.json`, no longer tarballs copied by hand. analog-vision is a git
 dependency, `github:Synetic-Labs/Analog-Vision#<commit>` (its `package.json` exports
@@ -918,3 +924,96 @@ Each phase ends green on `scripts/check.sh` and is committed.
 4. **Duel.** The peer link, lobby and turns, the pilot choosing the quad or the Chupito.
 5. **Race.** Course files, gate rendering, crossing detection, live ghosts, timing and results.
 6. **Polish.** Audio, the doctor, the Playwright smoke test, README, CLAUDE.md.
+
+## 18. The web version
+
+The same game as a static page: no server, no install. `uv run duels web` builds it into
+`web/dist-web/` and serves it (from a folder, as GitHub Pages serves a repository's);
+`.github/workflows/pages.yml` publishes it to GitHub Pages on every push to `main`. It flies **Betaflight's 5" quad** and
+drives the truck, in **Free Fly, Race and Duel**. Not in it: ArduPilot and INAV (their SITLs
+are not built for the browser), so the ArduCopter quad and the Chupito; Shoot Down (its target
+flies itself, over MAVLink or on the server's switches, and takes hits); the dynamics overlay;
+QGroundControl; the radio read through Linux.
+
+```
+ Chrome, one page
+   main thread: the page, as it is (§3, §9-§12)
+        │  net/server.ts `link`: the server's messages (§8), posted, not sent
+   worker "simulator" (web/src/sim/)
+        session.ts    what drone_duels.session does: start, switch, reset, status, RC watchdog
+        vehicle.ts    one quad: a millisecond of the model, then a millisecond of Betaflight
+        quad.ts       physics/quad/model.py and esc.py: ESCs, pack, ground contact, crash
+        weather.ts    physics/core/weather.py: shear, Dryden turbulence, gusts
+        msp.ts        the ground station's MSP (UART2) and the air unit's DisplayPort (UART3)
+        module.ts ──► sim.wasm: Betaflight + the plant, one instance a quad
+```
+
+**One seam.** The page talks to its server through `link` (messages by channel, poses) and
+`api` (content, config, prefs). The web build (`DUELS_WEB`, `net/target.ts`) swaps both: `link`
+is a `WorkerLink` whose worker takes and sends the same protocol messages, and `api` reads files
+beside the page (`data/`, written by `drone_duels.webdata`: the content it can fly, each quad's
+CLI settings and airframe, the OSD font) and keeps prefs in the browser. Nothing above that
+seam knows which game it is in; the web-only differences in the UI are a handful of `WEB`
+checks (no Shoot Down, no Exit, the player's own map key). `sim/` imports nothing of the
+page's (`web/test/fence.test.ts`), so the worker's bundle has no Cesium and no DOM.
+
+**Betaflight** is cudaflight's `SITL_LOCKSTEP` target (Synetic-Labs/cudaflight, on Betaflight
+2026.6.1; the game's native SITL is 2026.6.2), compiled with Emscripten. That target is
+Betaflight on a virtual clock that advances only inside a step call, single threaded, with no
+sockets: sensors and RC go in and motors come out by direct call, which is what a browser can
+run. `scripts/cudaflight-web.patch` adds what the page needs (wasm-ld takes no linker script, so
+the parameter groups' registry is found by section name; the OSD over MSP DisplayPort, SD and
+HD, as the native build's patch does) and `web/wasm/bfweb.c` is its harness: the boot, the
+sensors set by stock SITL's own scaling and conventions, an eeprom in memory, and UARTs as
+rings in memory. So the firmware is read the way a real one is: telemetry over MSP on UART2
+and the OSD over MSP DisplayPort on UART3 (§2.2 holds: the dials and the map never see the
+physics). The LLVM instancer cudaflight uses for fleets is not needed: another quad is another
+instance of the module.
+
+A setting takes effect at boot, as on a board. So a start boots one instance on defaults, types
+the vehicle's CLI files in through Betaflight's own CLI parser (a line it rejects fails the
+start) and keeps the eeprom image; the instance that flies boots on it. Its first seconds (the
+gyro's calibration, the arming grace) are stepped through at once rather than waited for.
+Measured (2026-11-20, bun on this machine): 70 ms from the start message to ready to arm, and
+18.5 s of flight stepped in 280 ms, 65 times real time.
+
+**The plant** is SkyFlow-Dynamics' racer5in, the same numbers the server flies, from a
+generated C backend (`skyflow_dynamics/backends/c.py`: SymPy's C printer over the same
+expressions the JAX backend is lambdified from; its tests replay the golden vectors and agree
+with the JAX backend to 1e-12 on a step). `web/wasm/sfd.c` is that output, checked in;
+`tests/test_web.py` compiles it and holds it to the JAX backend at the pin the server runs
+(1e-11 on a step, 1e-8 over a thousand), and `duels gen-web` rewrites it once the pinned
+skyflow-dynamics has the C backend. The model around the plant is `sim/quad.ts`, a port of
+`physics/quad/model.py` and `esc.py` held to them by a flight: `webdata.reference_flight` flies
+Python's model through a script of motor outputs (the pad, up, a push on each axis, down onto
+its legs, stopped) and `web/test/sim-quad.test.ts` flies the page's through the same, within a
+micrometre after 7.5 s.
+
+**Time.** The native Betaflight SITL keeps its own clock and follows the physics' pacing (§3).
+Here they are in lockstep: each frame is one millisecond of the model, then one of the
+firmware, in one module. The worker's timer runs every 4 ms and steps the quad up to now; the
+sticks' message steps it at once, so they reach the firmware within a frame. A stall longer
+than 100 ms (the machine asleep) is not caught up. Measured in Chrome (2026-11-20, headless on
+the RTX 4090, 1600×900, the free map): 60 fps, the pose carried on 6 ms at the median, the same
+as from the server.
+
+**The radio** is the page's: Chrome's Gamepad API, a gamepad or the keyboard (§12), sent to the
+worker as `rc`. No sticks for 0.2 s and nothing more is fed to Betaflight's receiver, so its
+own failsafe flies, as with the server. Chrome's Gamepad API zeroes the LiteRadio 2's CH5 and
+CH8 (its arm switch), which the server works round by reading it through Linux; the web
+version cannot, until the radio is read over WebHID (ROADMAP.md).
+
+**The map** is the free globe (Esri). The page is public, so it ships no key; a player may
+type their own Google Maps key into Options → Graphics, kept in that browser only, for Google's
+3D tiles in flight.
+
+**Licence.** `sim.wasm` contains Betaflight, so it is GPL-3.0, as is `bfweb.c`; publishing the
+page distributes it, and the source is cudaflight at the pinned commit with this repository's
+patch and harness.
+
+**Tests.** `web/test/sim-session.test.ts` flies the whole thing under bun as
+`tests/test_sitl_betaflight.py` flies the native one: ready to arm, armed on its switch, up in
+ANGLE and level, the sticks' senses, POSHOLD holding in the place's wind, the radio lost and
+Betaflight's failsafe landing and disarming it, a reset, the other video system's OSD grid.
+They need the simulator built and are skipped without it.
+

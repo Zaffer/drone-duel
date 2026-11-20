@@ -44,6 +44,21 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
 - Failure scripts: failures to practise (GPS loss, failsafe, low battery, wind shear).
 - INAV missions over MSP, drawn like ArduPilot's.
 
+## The web version
+
+- **The radio over WebHID**, read in the simulator's worker (dedicated workers, Chrome 131+):
+  the LiteRadio 2's CH5 and CH8, which Chrome's Gamepad API zeroes, so its arm switch works in
+  the web version, and no radio's sticks pass through the page's thread.
+- A battery for Betaflight in the page: the model has the pack; feed its volts and amps to a
+  virtual sensor (the native SITL's simulator protocol carries none either).
+- Shoot Down: the target flown by the worker on Betaflight's switches (POSHOLD, as the server
+  flies it), and hits (the model's damage, ported).
+- The quad's dynamics overlay and the turbulence's rotation, with the server's.
+- Upstream the web target to cudaflight (the patch is 70 lines and the harness one file), and
+  move this repository's skyflow-dynamics pin to a commit with the C backend, so
+  `duels gen-web` owns `web/wasm/sfd.c`.
+- INAV for the browser (its SITL has no lockstep target yet), for the Chupito.
+
 ## Controllers and platforms
 
 - Test and tune more radio profiles; a shared profile format others can contribute.

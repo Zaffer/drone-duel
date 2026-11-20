@@ -1,0 +1,74 @@
+diff --git a/src/main/pg/pg.h b/src/main/pg/pg.h
+index 8159a44..4dd9d02 100644
+--- a/src/main/pg/pg.h
++++ b/src/main/pg/pg.h
+@@ -72,6 +72,16 @@ extern const pgRegistry_t __pg_registry_end[] __asm("section$end$__DATA$__pg_reg
+ extern const uint8_t __pg_resetdata_start[] __asm("section$start$__DATA$__pg_resetdata");
+ extern const uint8_t __pg_resetdata_end[] __asm("section$end$__DATA$__pg_resetdata");
+ #define PG_RESETDATA_ATTRIBUTES __attribute__ ((section("__DATA,__pg_resetdata"), used, aligned(2)))
++#elif defined(__EMSCRIPTEN__)
++// drone-duels: WebAssembly. wasm-ld takes no linker script; it gives a section named as a C
++// identifier __start_ and __stop_ symbols, and keeps what is marked `retain`.
++extern const pgRegistry_t __pg_registry_start[] __asm("__start_pg_registry");
++extern const pgRegistry_t __pg_registry_end[] __asm("__stop_pg_registry");
++#define PG_REGISTER_ATTRIBUTES __attribute__ ((section("pg_registry"), used, retain, aligned(4)))
++
++extern const uint8_t __pg_resetdata_start[] __asm("__start_pg_resetdata");
++extern const uint8_t __pg_resetdata_end[] __asm("__stop_pg_resetdata");
++#define PG_RESETDATA_ATTRIBUTES __attribute__ ((section("pg_resetdata"), used, retain, aligned(2)))
+ #else
+ extern const pgRegistry_t __pg_registry_start[];
+ extern const pgRegistry_t __pg_registry_end[];
+diff --git a/src/platform/SIMULATOR/mk/SITL_LOCKSTEP.mk b/src/platform/SIMULATOR/mk/SITL_LOCKSTEP.mk
+index e5a8362..be390db 100644
+--- a/src/platform/SIMULATOR/mk/SITL_LOCKSTEP.mk
++++ b/src/platform/SIMULATOR/mk/SITL_LOCKSTEP.mk
+@@ -27,6 +27,17 @@ MCU_COMMON_SRC  := \
+         SIMULATOR/sitl_lockstep_instance.c \
+         SIMULATOR/sitl_lockstep_main.c
+ 
++# drone-duels: the page's build (BFL_WEB=yes, CROSS_CC=emcc). Its harness is
++# SIMULATOR/bfweb.c (web/wasm/bfweb.c in drone-duels, copied in by its
++# scripts/setup-web.sh): the boot, in-memory UARTs, the sensors. No golden-trace harness,
++# no instances, no sink serial.
++ifeq ($(BFL_WEB),yes)
++MCU_COMMON_SRC  := \
++        SIMULATOR/sitl_lockstep.c \
++        SIMULATOR/sitl_lockstep_osd.c \
++        SIMULATOR/bfweb.c
++endif
++
+ ARCH_FLAGS      =
+ DEVICE_FLAGS    =
+ LD_SCRIPT       = $(LINKER_DIR)/sitl.ld
+@@ -79,6 +90,9 @@ CFLAGS_DISABLED += -Wunsafe-loop-optimizations -flto=auto -fuse-linker-plugin
+ ifneq ($(findstring clang,$(CROSS_CC)),)
+ DEVICE_FLAGS += -Wno-nan-infinity-disabled -Wno-parentheses-equality
+ endif
++ifneq ($(findstring emcc,$(CROSS_CC)),)
++DEVICE_FLAGS += -Wno-nan-infinity-disabled -Wno-parentheses-equality -Wno-unused-but-set-global
++endif
+ 
+ ifneq ($(DEBUG),GDB)
+ OPTIMISE_DEFAULT    := -O3
+diff --git a/src/platform/SIMULATOR/target/SITL_LOCKSTEP/target.h b/src/platform/SIMULATOR/target/SITL_LOCKSTEP/target.h
+index ff760ce..a81c872 100644
+--- a/src/platform/SIMULATOR/target/SITL_LOCKSTEP/target.h
++++ b/src/platform/SIMULATOR/target/SITL_LOCKSTEP/target.h
+@@ -64,3 +64,16 @@
+ // real-quad CLI dumps agree ('feature OSD').
+ #undef DEFAULT_FEATURES
+ #define DEFAULT_FEATURES (FEATURE_GPS | FEATURE_TELEMETRY | FEATURE_OSD)
++
++#ifdef __EMSCRIPTEN__
++// drone-duels: the page's build. The OSD goes out over MSP DisplayPort, SD or HD, as to a DJI
++// air unit (the game's native SITL does the same), through the in-memory UARTs of
++// web/wasm/bfweb.c; no framebuffer OSD.
++#define USE_OSD_SD
++#define USE_OSD_HD
++#define USE_CMS
++#define USE_MSP_DISPLAYPORT
++#define USE_OSD_OVER_MSP_DISPLAYPORT
++#undef ENABLE_FB_OSD
++#define ENABLE_FB_OSD 0
++#endif

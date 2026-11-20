@@ -14,6 +14,7 @@ import type { ModeContext, ModeDef } from "../modes/types.ts";
 import { api } from "../net/api.ts";
 import type { Location, Vehicle } from "../net/protocol.ts";
 import { link } from "../net/server.ts";
+import { WEB } from "../net/target.ts";
 import {
   content,
   location,
@@ -104,7 +105,12 @@ export function mountApp(root: HTMLElement, world: World): void {
   };
 
   const menuChips = () => {
-    const server = h("span", { class: "chip" }, h("span", { class: "dot" }), "Server");
+    const server = h(
+      "span",
+      { class: "chip" },
+      h("span", { class: "dot" }),
+      WEB ? "Simulator" : "Server",
+    );
     const ctl = h("span", { class: "chip" }, h("span", { class: "dot" }), "");
     const map = h("span", { class: "chip" }, h("span", { class: "dot" }), "");
     const dispose = effect(() => {
@@ -336,7 +342,8 @@ export function mountApp(root: HTMLElement, world: World): void {
         "header",
         { class: "menu-top" },
         brand,
-        h("div", { class: "menu-corner" }, options, exit.node),
+        // The web version is a page like any other: nothing to stop, and the tab closes it.
+        h("div", { class: "menu-corner" }, options, ...(WEB ? [] : [exit.node])),
       ),
       h("div", { class: "menu-cols" }, scenario.node, place.node, ride.node),
       chips.node,

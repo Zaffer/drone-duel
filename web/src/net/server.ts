@@ -1,8 +1,14 @@
 // The link to the game's server (/ws, DESIGN.md §8): JSON messages by channel, and the true pose
 // as binary frames. It reconnects on its own. Everything that arrives is an event on `link`, so
 // any module can take it as an Observable: `link.on("telemetry")`, `link.poses()`.
+//
+// The web version (DESIGN.md §18) has no server: its `link` is to the simulator in a worker of
+// the page, which takes and sends the same messages (`WorkerLink`). Nothing above this module
+// can tell which it has.
 
 import { signal } from "alien-signals";
+import type { Init as SimInit } from "../sim/worker.ts";
+import { content } from "../state/app.ts";
 import schema from "./protocol.schema.json";
 import type {
   DynamicsData,
@@ -23,6 +29,7 @@ import type {
   VideoMsg,
   WindMsg,
 } from "./protocol.ts";
+import { asset, WEB } from "./target.ts";
 
 export type ServerMsg =
   | StatusMsg
@@ -92,8 +99,34 @@ class MsgEvent<M> extends Event {
   }
 }
 
-export class ServerLink extends EventTarget {
+/** The link's two ends' common part: every message that arrives is an event on it. */
+export abstract class Link extends EventTarget {
   readonly connected = signal(false);
+
+  abstract open(): void;
+  abstract send(msg: ClientMsg): void;
+
+  protected message(msg: ServerMsg): void {
+    this.dispatchEvent(new MsgEvent(msg.ch, msg));
+  }
+
+  protected pose(buf: ArrayBuffer): void {
+    this.dispatchEvent(new MsgEvent("pose", decodePose(buf, performance.now())));
+  }
+
+  /** Every message on channel `ch`. */
+  on<C extends ServerMsg["ch"]>(ch: C): Observable<ByCh<C>> {
+    return this.when<MsgEvent<ByCh<C>>>(ch).map((e) => e.msg);
+  }
+
+  /** Every true pose, as it arrives. */
+  poses(): Observable<Pose> {
+    return this.when<MsgEvent<Pose>>("pose").map((e) => e.msg);
+  }
+}
+
+/** The game's server, over its WebSocket. */
+export class ServerLink extends Link {
   private ws: WebSocket | null = null;
   private retry = 500;
 
@@ -117,30 +150,53 @@ export class ServerLink extends EventTarget {
       this.retry = Math.min(this.retry * 2, 5000);
     };
     ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
-      if (typeof e.data === "string") {
-        const msg = JSON.parse(e.data) as ServerMsg;
-        this.dispatchEvent(new MsgEvent(msg.ch, msg));
-      } else {
-        this.dispatchEvent(new MsgEvent("pose", decodePose(e.data, performance.now())));
-      }
+      if (typeof e.data === "string") this.message(JSON.parse(e.data) as ServerMsg);
+      else this.pose(e.data);
     };
   }
 
   send(msg: ClientMsg): void {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
+}
 
-  /** Every message on channel `ch`. */
-  on<C extends ServerMsg["ch"]>(ch: C): Observable<ByCh<C>> {
-    return this.when<MsgEvent<ByCh<C>>>(ch).map((e) => e.msg);
+/** The web version's simulator (sim/worker.ts), in a worker of this page: the same messages
+ * as the server's, posted, not sent; a pose comes as its 18 doubles. */
+export class WorkerLink extends Link {
+  private worker: Worker | null = null;
+
+  open(): void {
+    const worker = new Worker(asset("sim-worker.js"), { type: "module", name: "simulator" });
+    this.worker = worker;
+    worker.onmessage = (e: MessageEvent<ServerMsg | Float64Array | { ch: "open" }>) => {
+      const data = e.data;
+      if (data instanceof Float64Array) {
+        this.pose(data.buffer as ArrayBuffer);
+      } else if (data.ch === "open") {
+        this.connected(true);
+        this.dispatchEvent(new Event("open"));
+      } else {
+        this.message(data);
+      }
+    };
+    worker.onerror = (e) => {
+      this.connected(false);
+      console.error("the simulator's worker failed", e.message);
+    };
+    const init: SimInit = {
+      ch: "init",
+      content: content()!,
+      simData: asset("data/sim.json"),
+      module: asset("sim/sim.wasm"),
+    };
+    worker.postMessage(init);
   }
 
-  /** Every true pose, as it arrives. */
-  poses(): Observable<Pose> {
-    return this.when<MsgEvent<Pose>>("pose").map((e) => e.msg);
+  send(msg: ClientMsg): void {
+    this.worker?.postMessage(msg);
   }
 }
 
-export const link = new ServerLink(
-  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
-);
+export const link: Link = WEB
+  ? new WorkerLink()
+  : new ServerLink(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);

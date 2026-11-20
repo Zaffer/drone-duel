@@ -1,0 +1,52 @@
+# The web version (DESIGN.md §18) to GitHub Pages: the simulator built from source (Betaflight
+# and the quad's plant to WebAssembly, scripts/setup-web.sh), the page built for it and its data
+# written (`duels web --build-only`), and web/dist-web/ published.
+#
+# On every push to main, and by hand (Actions, "Web version to GitHub Pages", Run workflow).
+# Pages must be set to deploy from GitHub Actions (Settings, Pages).
+name: Web version to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Python and the page's packages
+        run: |
+          uv sync
+          cd web && bun install --frozen-lockfile
+      - name: The simulator (Betaflight and the plant, to WebAssembly)
+        run: scripts/setup-web.sh
+      - name: The web version
+        run: uv run duels web --build-only
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist-web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

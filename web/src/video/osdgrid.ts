@@ -7,6 +7,7 @@
 // rows and columns alike (DJI, HDZero, Walksnail).
 
 import type { OsdMsg } from "../net/protocol.ts";
+import { asset, WEB } from "../net/target.ts";
 
 /** Glyphs in a font: one column of 256. */
 export const GLYPHS = 256;
@@ -79,4 +80,7 @@ export function codeAt(osd: Pick<OsdMsg, "cols" | "codes">, row: number, col: nu
 export const isBlank = (code: number): boolean => code === 0x20 || code === 0;
 
 /** The font's image, as the server serves it. */
-export const fontUrl = (font: string): string => `/osd/font/${encodeURIComponent(font)}.png`;
+export const fontUrl = (font: string): string =>
+  WEB
+    ? asset(`data/osd/font/${encodeURIComponent(font)}.png`)
+    : `/osd/font/${encodeURIComponent(font)}.png`;

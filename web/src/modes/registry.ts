@@ -1,6 +1,7 @@
 // The game's modes, in the main menu's order (its scenarios) (DESIGN.md §7). A new mode is a ModeDef here.
 
 import type { Location, Vehicle } from "../net/protocol.ts";
+import { WEB } from "../net/target.ts";
 import { content, mode } from "../state/app.ts";
 import { duel } from "./duel/duel.ts";
 import { freefly } from "./freefly.ts";
@@ -8,7 +9,9 @@ import { race } from "./race/race.ts";
 import { shoot } from "./shoot/shoot.ts";
 import type { ModeDef } from "./types.ts";
 
-export const MODES: ModeDef[] = [freefly, duel, race, shoot];
+/** Shoot Down's target flies itself (the server on its switches, a mission over MAVLink) and
+ * takes hits: not in the web version (DESIGN.md §18). */
+export const MODES: ModeDef[] = WEB ? [freefly, duel, race] : [freefly, duel, race, shoot];
 
 /** The vehicles the current mode lets the player fly. */
 export function modeVehicles(m = MODES.find((x) => x.id === mode())): Vehicle[] {

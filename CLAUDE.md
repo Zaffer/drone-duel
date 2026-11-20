@@ -7,6 +7,16 @@ is TypeScript in `web/` (bun). ArduPilot, INAV and Betaflight SITL and mavlink-r
 `external/` via `scripts/setup.sh`; Betaflight is built there with `scripts/betaflight-sitl.patch`
 (change the patch, not the checkout).
 
+- The web version (DESIGN.md §18) is the same page with no server: Betaflight's 5" quad and
+  the truck, in Free Fly, Race and Duel. `scripts/setup-web.sh` builds its simulator
+  (`external/web/sim/sim.wasm`: cudaflight's lockstep Betaflight with
+  `scripts/cudaflight-web.patch` and `web/wasm/bfweb.c`, and the plant's generated C);
+  `uv run duels web` builds the page into `web/dist-web/` and serves it. The page reaches its
+  server only through `link` and `api` (`web/src/net/`); the web build swaps both for a worker
+  (`web/src/sim/`, which imports nothing of the page's) and files. A change to the protocol,
+  the session, the quad's model, the weather or Betaflight's MSP on the server has its twin in
+  `web/src/sim/`. `uv run duels gen-web` rewrites what is generated for it (its tests'
+  fixtures; `web/wasm/sfd.c`, never by hand).
 - Run everything with `uv run`; never bare `python`. The game is `uv run duels` (serves the page
   on port 8600 and opens Chrome); `uv run duels doctor` says what is missing.
 - No node here: use bun (`~/.bun/bin/bun`, `bunx`). `cd web && bun run build` builds the page;

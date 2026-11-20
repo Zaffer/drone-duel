@@ -7,6 +7,8 @@ import { effect } from "alien-signals";
 import { type Flight, sendWind } from "../flight.ts";
 import { radio } from "../input/radio.ts";
 import { modeVehicles } from "../modes/registry.ts";
+import { ownMapKeys, saveOwnMapKeys } from "../net/api.ts";
+import { WEB } from "../net/target.ts";
 import { config, location, paused, vehicleId, view, wind } from "../state/app.ts";
 import { channels, controllerName, inputSource } from "../state/input.ts";
 import { type Prefs, prefs, updatePrefs, type ViewId } from "../state/prefs.ts";
@@ -31,6 +33,40 @@ const CALM = {
 
 const opt = (label: string, ...ctl: (Node | string)[]) =>
   h("div", { class: "opt" }, h("label", null, label), h("div", { class: "ctl" }, ...ctl));
+
+/** The web version: the player's own Google Maps key, for Google's 3D tiles in flight. The page
+ * is public, so it ships none; a key typed here is kept in this browser only (net/api.ts) and
+ * billed to its owner. The world reads it as it is built, so the page loads again. */
+function ownGoogleKey(): HTMLElement {
+  const input = h("input", {
+    type: "password",
+    placeholder: "none: the free map",
+    value: ownMapKeys().google_maps_api_key ?? "",
+    autocomplete: "off",
+    spellcheck: false,
+  }) as HTMLInputElement;
+  const use = h(
+    "button",
+    {
+      title: "Keep the key in this browser and load the page again",
+      onclick: () => {
+        saveOwnMapKeys({ ...ownMapKeys(), google_maps_api_key: input.value.trim() || null });
+        window.location.reload();
+      },
+    },
+    "Use",
+  );
+  return h(
+    "div",
+    null,
+    opt("Google 3D tiles", input, use),
+    h(
+      "p",
+      { style: "font-size:12px; color: var(--muted); margin: 6px 0 0 214px" },
+      "Your own Google Maps key (Map Tiles API), kept in this browser only. Google bills its owner for each flight's tiles; leave it empty for the free map.",
+    ),
+  );
+}
 
 function segmented<T extends string>(
   values: [T, string][],
@@ -536,9 +572,12 @@ export function openPause(
                 ? "Google Photorealistic 3D Tiles in flight; the free globe in the menus"
                 : config()?.map_keys.cesium_ion_token
                   ? "Cesium ion"
-                  : "Esri imagery (set GOOGLE_MAPS_API_KEY in .env.local for 3D tiles)",
+                  : WEB
+                    ? "Esri imagery"
+                    : "Esri imagery (set GOOGLE_MAPS_API_KEY in .env.local for 3D tiles)",
             ),
           ),
+          ...(WEB ? [ownGoogleKey()] : []),
           opt(
             "Detail",
             segmented(
@@ -642,14 +681,18 @@ export function openPause(
               `${status().vehicle ?? "-"} · ${status().state}${status().step ? ` · ${status().step}` : ""}`,
             ),
           ),
-          opt(
-            "QGroundControl",
-            h(
-              "span",
-              { class: "num" },
-              `UDP ${config()?.qgc_port ?? 14550}: plan and upload missions; the Map view draws them`,
-            ),
-          ),
+          ...(WEB
+            ? []
+            : [
+                opt(
+                  "QGroundControl",
+                  h(
+                    "span",
+                    { class: "num" },
+                    `UDP ${config()?.qgc_port ?? 14550}: plan and upload missions; the Map view draws them`,
+                  ),
+                ),
+              ]),
           opt(
             "Player name",
             (() => {
@@ -682,8 +725,12 @@ export function openPause(
   ];
 
   const onFoot = flight?.ownsView ?? false;
+  // The web version has no Shoot Down, so no rifle to set.
   const shown = tabs.filter(
-    (t) => (flight || !t.flight) && !(onFoot && ["vehicle", "view", "video"].includes(t.id)),
+    (t) =>
+      (flight || !t.flight) &&
+      !(onFoot && ["vehicle", "view", "video"].includes(t.id)) &&
+      !(WEB && t.id === "rifle"),
   );
   let current = shown.find((t) => t.id === tab) ?? shown[0]!;
   const body = h("div", { class: "tab-body" });
