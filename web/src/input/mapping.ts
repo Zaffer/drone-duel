@@ -10,6 +10,7 @@
 import type { Controller, Vehicle } from "../net/protocol.ts";
 import { toUs } from "../state/input.ts";
 import type { AxisCal, Calibration } from "../state/prefs.ts";
+import type { TouchSticks } from "./touch.ts";
 
 /** Channels whose travel has a centre (the sticks other than the throttle). */
 export const CENTRED = new Set([0, 1, 3]);
@@ -76,6 +77,17 @@ export function switchPos(x: number | undefined): 0 | 1 | 2 {
   return x > 0.33 ? 2 : 1;
 }
 
+/** Modes Betaflight will not arm in: its height and position holds are switched on in the air. */
+const NOT_ARMED_IN = new Set(["POSHOLD", "ALTHOLD"]);
+
+/** Where a made-up mode switch (the keyboard's, a gamepad's, a touch screen's) starts for a
+ * vehicle whose switch picks `modes`, low to high: the first position it can be armed in. A
+ * real radio's switch is wherever its pilot left it. */
+export function startMode(modes: readonly string[]): number {
+  const i = modes.slice(0, 3).findIndex((m) => !NOT_ARMED_IN.has(m));
+  return Math.max(i, 0);
+}
+
 /** A standard-mapping gamepad (Xbox layout) as a mode 2 radio: left stick throttle and yaw,
  * right stick roll and pitch, A arms (toggles), X steps the flight mode. The throttle is the left
  * stick's travel, centre at half. */
@@ -105,4 +117,12 @@ export function keyboardChannels(keys: ReadonlySet<string>, state: KeyState, dt:
     -1,
     -1,
   ];
+}
+
+/** A touch screen's sticks (input/touch.ts) as a mode 2 radio: the left stick throttle and yaw,
+ * the right roll and pitch, its Arm and Mode buttons the two switches. */
+export function touchChannels(
+  t: Pick<TouchSticks, "left" | "right" | "armed" | "modePos">,
+): number[] {
+  return [t.right.x, t.right.y, t.left.y, t.left.x, t.armed ? 1 : -1, t.modePos - 1, -1, -1];
 }

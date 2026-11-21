@@ -71,6 +71,11 @@ Race and Duel, on the free map (type your own Google Maps key into Options → G
 tiles; it stays in your browser). ArduPilot, INAV, Shoot Down and QGroundControl need the
 game's server.
 
+It plays on a phone or a tablet too, in Chrome on Android: with no controller, two sticks on
+the glass fly it as a mode 2 radio (left throttle and yaw, right roll and pitch, with Arm and
+the flight mode as buttons), and the menus fit the screen either way up. Safari has no
+Observables yet, which the page is built on, so it does not run on an iPhone or iPad.
+
 `.github/workflows/pages.yml` publishes `web/dist-web/` to GitHub Pages on every push to
 `main`. The
 simulator's module contains Betaflight, so it is GPL-3.0. DESIGN.md §18 has the design.

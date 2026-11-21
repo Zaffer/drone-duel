@@ -15,6 +15,7 @@ const SOURCES = {
   radio: "the radio, from the page",
   gamepad: "a gamepad, from the page",
   keyboard: "the keyboard, from the page",
+  touch: "the touch screen's sticks, from the page",
   none: "none",
 } as const;
 

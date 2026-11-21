@@ -21,6 +21,31 @@ body {
   color: var(--text);
   font: 14px / 1.45 var(--sans);
   -webkit-font-smoothing: antialiased;
+  /* A game on the glass, not a document: panels scroll under a finger, but the page is never
+     pinched or double-tapped bigger, pulled down to reload, or selected by a long press. */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* A phone's notch and rounded corners (index.html's viewport-fit=cover lets the page under
+   them): what must stay clear of them is inset by these. */
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
 }
 
 #world {

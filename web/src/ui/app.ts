@@ -2,6 +2,9 @@
 // location, vehicle; Duel and Race add their lobby under the vehicles), and flying (ui/hud.ts,
 // with the pause menu, ui/pause.ts, whose Vehicle tab switches vehicle). Options and Exit sit in
 // the menu's top corner. While in the menus the world turns slowly round the chosen place.
+//
+// On a phone (ui.css) the columns are narrow, or one under the other on a screen too narrow for
+// three, each coming into view as it opens; a touch screen gets Full screen beside Options.
 
 import { effect, signal } from "alien-signals";
 import * as C from "cesium";
@@ -27,7 +30,7 @@ import {
   vehicleId,
   wind,
 } from "../state/app.ts";
-import { controllerName, inputSource } from "../state/input.ts";
+import { controllerName, inputSource, touchScreen } from "../state/input.ts";
 import { after, frames } from "../streams/time.ts";
 import type { World } from "../world/world.ts";
 import { h, render, untracked } from "./h.ts";
@@ -61,6 +64,8 @@ export function mountApp(root: HTMLElement, world: World): void {
   /** The location clicked in the menu (hovering one only shows it), kept for the next visit. */
   let chosenPlace: string | null = null;
   radio.start();
+  // For the style sheets: what a touch screen shows and hides (ui.css).
+  effect(() => document.documentElement.classList.toggle("touch", touchScreen()));
   // The channels for the UI (the Controls tab's bars, the HUD), in the menus as in flight.
   frames("radio to the UI", "input").subscribe(() => radio.publish());
   window.addEventListener("pointerdown", () => sounds.unlock(), { once: true });
@@ -206,6 +211,11 @@ export function mountApp(root: HTMLElement, world: World): void {
       lobbyTeardown = null;
     };
 
+    // A column just opened, brought into view where they are one under the other (a phone held
+    // upright); where they sit side by side it is in view already.
+    const reveal = (col: HTMLElement) =>
+      setTimeout(() => col.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+
     const scenarioButtons = MODES.map((m, i) =>
       h(
         "button",
@@ -248,6 +258,7 @@ export function mountApp(root: HTMLElement, world: World): void {
       );
       place.node.hidden = false;
       const loc = all.find((l) => l.id === chosenPlace);
+      if (!loc) reveal(place.node);
       if (loc) {
         locationId(loc.id);
         drawVehicles(m, loc);
@@ -280,6 +291,7 @@ export function mountApp(root: HTMLElement, world: World): void {
         lobby,
       );
       ride.node.hidden = false;
+      reveal(ride.node);
       const ctx: ModeContext = {
         location: loc,
         vehicle: picked,
@@ -322,11 +334,35 @@ export function mountApp(root: HTMLElement, world: World): void {
       {
         class: "corner-btn",
         title: "Controls, keys and how to fly, video, wind, graphics, audio (O)",
+        "aria-label": "Options",
         onclick: () => openPause(root, null, "controls"),
       },
       svg(icons.options),
       h("span", null, "Options"),
     );
+    // A phone's browser keeps its bars over the page; full screen gives the game the glass.
+    const fullLabel = h("span", null, "Full screen");
+    const full = h(
+      "button",
+      {
+        class: "corner-btn touch-only",
+        title: "The whole screen, or back",
+        "aria-label": "Full screen",
+        onclick: () =>
+          void (
+            document.fullscreenElement
+              ? document.exitFullscreen()
+              : document.documentElement.requestFullscreen({ navigationUI: "hide" })
+          ).catch(() => toast("This browser has no full screen for pages", "warn")),
+      },
+      svg(icons.fullscreen),
+      fullLabel,
+    );
+    const onFull = () => {
+      fullLabel.textContent = document.fullscreenElement ? "Exit full screen" : "Full screen";
+    };
+    document.addEventListener("fullscreenchange", onFull);
+    onFull();
     const toastBox = h("div", { class: "toasts" });
     const disposeToasts = effect(() =>
       toastBox.replaceChildren(
@@ -343,7 +379,13 @@ export function mountApp(root: HTMLElement, world: World): void {
         { class: "menu-top" },
         brand,
         // The web version is a page like any other: nothing to stop, and the tab closes it.
-        h("div", { class: "menu-corner" }, options, ...(WEB ? [] : [exit.node])),
+        h(
+          "div",
+          { class: "menu-corner" },
+          ...(document.fullscreenEnabled ? [full] : []),
+          options,
+          ...(WEB ? [] : [exit.node]),
+        ),
       ),
       h("div", { class: "menu-cols" }, scenario.node, place.node, ride.node),
       chips.node,
@@ -363,6 +405,7 @@ export function mountApp(root: HTMLElement, world: World): void {
       chips.dispose();
       exit.dispose();
       disposeToasts();
+      document.removeEventListener("fullscreenchange", onFull);
       keys.dispose();
       closeLobby();
     };

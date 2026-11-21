@@ -1,8 +1,9 @@
 // The Inputs tab (Options): every key, and how to fly or drive each vehicle on a radio, a
-// gamepad or the keyboard. The hotkeys are drawn from the very tables the code mounts
+// gamepad, the keyboard or a touch screen's sticks (a touch screen shows that column, not the
+// keyboard's: ui.css). The hotkeys are drawn from the very tables the code mounts
 // (ui/keys.ts, shoot/controls.ts: input/actions.ts). The sticks' rows say what input/mapping.ts
-// and input/radio.ts (the aircraft) and vehicles/truck/controls.ts (the truck) do: change one,
-// change this.
+// and input/radio.ts (the aircraft), vehicles/truck/controls.ts (the truck) and ui/sticks.ts
+// and flight.ts (the touch screen) do: change one, change this.
 
 import { LAYERS } from "../dynamics/overlay.ts";
 import { hotkeys } from "../input/actions.ts";
@@ -65,7 +66,7 @@ export function hotkeyTable(keys: Hotkey[]): HTMLElement {
   );
 }
 
-type Row = [job: string, radio: string, gamepad: string, keyboard: string[]];
+type Row = [job: string, radio: string, gamepad: string, keyboard: string[], touch: string];
 
 function controlTable(rows: Row[]): HTMLElement {
   return h(
@@ -77,22 +78,29 @@ function controlTable(rows: Row[]): HTMLElement {
       h(
         "tr",
         null,
-        ["", "Radio", "Gamepad", "Keyboard"].map((t) => h("th", null, t)),
+        h("th"),
+        h("th", null, "Radio"),
+        h("th", null, "Gamepad"),
+        h("th", { class: "for-keys" }, "Keyboard"),
+        h("th", { class: "for-touch" }, "Touch screen"),
       ),
     ),
     h(
       "tbody",
       null,
-      rows.map(([job, radio, pad, keys]) =>
-        h(
+      rows.map(([job, radio, pad, keys, glass]) => {
+        const keyboard = keys.length ? keyCell(keys) : h("td", { class: "muted" }, "—");
+        keyboard.classList.add("for-keys");
+        return h(
           "tr",
           null,
           h("td", null, job),
           h("td", { class: "num" }, radio),
           h("td", null, pad),
-          keys.length ? keyCell(keys) : h("td", { class: "muted" }, "—"),
-        ),
-      ),
+          keyboard,
+          h("td", { class: "for-touch" }, glass),
+        );
+      }),
     ),
   );
 }
@@ -107,16 +115,22 @@ function aircraft(v: Vehicle): HTMLElement[] {
     ? "Arm with the throttle down, raise the throttle, then throw it: T, or flick the launch switch up. Bank to turn, pull to climb."
     : "On the ground, arm with the throttle down, then raise the throttle to lift off.";
   const rows: Row[] = [
-    ["Roll", "CH1", "Right stick ←→", ["←", "→"]],
-    ["Pitch", "CH2", "Right stick ↑↓", ["↑", "↓"]],
-    ["Throttle", "CH3", "Left stick ↑↓ (centre is half)", ["W", "S"]],
-    ["Yaw", "CH4", "Left stick ←→", ["Q", "E"]],
+    ["Roll", "CH1", "Right stick ←→", ["←", "→"], "Right stick ←→"],
+    ["Pitch", "CH2", "Right stick ↑↓", ["↑", "↓"], "Right stick ↑↓"],
+    ["Throttle", "CH3", "Left stick ↑↓ (centre is half)", ["W", "S"], "Left stick ↑↓ (it stays)"],
+    ["Yaw", "CH4", "Left stick ←→", ["Q", "E"], "Left stick ←→"],
   ];
-  if (aux) rows.push(["Arm", `CH${aux.arm} high`, "A (toggles)", ["Enter"]]);
+  if (aux) rows.push(["Arm", `CH${aux.arm} high`, "A (toggles)", ["Enter"], "Arm (toggles)"]);
   if (aux?.mode && aux.modes.length) {
-    rows.push(["Flight mode", `CH${aux.mode}`, "X (steps through)", ["M"]]);
+    rows.push([
+      "Flight mode",
+      `CH${aux.mode}`,
+      "X (steps through)",
+      ["M"],
+      "The mode's button (steps through)",
+    ]);
   }
-  if (hand) rows.push(["Throw", aux?.launch ? `CH${aux.launch} flick up` : "—", "—", ["T"]]);
+  if (hand) rows.push(["Throw", aux?.launch ? `CH${aux.launch} flick up` : "—", "—", ["T"], "—"]);
   const modes =
     aux?.mode && aux.modes.length
       ? h(
@@ -152,12 +166,12 @@ function ground(v: Vehicle): HTMLElement[] {
       "On a radio the throttle stick drives in the gear the mode switch picks; it does nothing until it has been at the bottom once after each start or reset.",
     ),
     controlTable([
-      ["Throttle", "CH3, its whole travel", "Right trigger", ["W", "↑"]],
-      ["Brake, then reverse", "CH6 low (reverse gear)", "Left trigger", ["S", "↓"]],
-      ["Gear", "CH6: high forward, middle neutral, low reverse", "—", []],
-      ["Steer", "CH4", "Left stick ←→", ["A", "D", "←", "→"]],
-      ["Handbrake", "CH5 high", "A", ["Space"]],
-      ["Back on its wheels", "CH7, flicked either way", "Y", ["R"]],
+      ["Throttle", "CH3, its whole travel", "Right trigger", ["W", "↑"], "Left stick ↑"],
+      ["Brake, then reverse", "CH6 low (reverse gear)", "Left trigger", ["S", "↓"], "Left stick ↓"],
+      ["Gear", "CH6: high forward, middle neutral, low reverse", "—", [], "—"],
+      ["Steer", "CH4", "Left stick ←→", ["A", "D", "←", "→"], "Right stick ←→"],
+      ["Handbrake", "CH5 high", "A", ["Space"], "Brake (held)"],
+      ["Back on its wheels", "CH7, flicked either way", "Y", ["R"], "Reset, on the top bar"],
     ]),
   ];
 }
@@ -172,7 +186,7 @@ export function inputsTab(): HTMLElement {
     h(
       "p",
       { class: "muted" },
-      "A radio's channels are as the Controls tab shows them (a mode 2 radio: throttle and yaw on the left stick). A gamepad flies as a mode 2 radio. The keyboard flies when there is no controller, or when Keyboard flying is on.",
+      "A radio's channels are as the Controls tab shows them (a mode 2 radio: throttle and yaw on the left stick). A gamepad flies as a mode 2 radio. With no controller the keyboard flies, or on a touch screen two sticks on the glass, each moved by a thumb anywhere on its side; Keyboard flying on, the keyboard flies whatever else there is.",
     ),
     ...vehicles.flatMap((v) => (v.kind === "ground" ? ground(v) : aircraft(v))),
     h("h4", { class: "section" }, "Hotkeys"),

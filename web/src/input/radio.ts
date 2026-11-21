@@ -1,6 +1,7 @@
 // The pilot's controller (DESIGN.md §12): a drone radio through Chrome's Gamepad API, or the same
 // radio read by the server through Linux (when Chrome cannot see all its axes), or a standard
-// gamepad, or the keyboard. Sampled at RATE_HZ; `samples()` is that stream, and the `channels`
+// gamepad, or, with none of those, a touch screen's sticks (input/touch.ts) or the keyboard.
+// Sampled at RATE_HZ; `samples()` is that stream, and the `channels`
 // signal (state/input.ts) its latest value for the UI.
 //
 // The source with the most axes wins; on a tie, the server's: Chrome can list an axis and never
@@ -12,9 +13,10 @@
 // its channels as the server maps them, for the UI and the truck. Flight sends `rc` only for the
 // page's own controllers.
 
+import { effect } from "alien-signals";
 import { link } from "../net/server.ts";
-import { content } from "../state/app.ts";
-import { channels, controllerName, inputSource } from "../state/input.ts";
+import { content, vehicle } from "../state/app.ts";
+import { channels, controllerName, inputSource, touchScreen } from "../state/input.ts";
 import { prefs } from "../state/prefs.ts";
 import { Controls, input } from "./actions.ts";
 import {
@@ -22,8 +24,11 @@ import {
   type KeyState,
   keyboardChannels,
   profileFor,
+  startMode,
   toChannels,
+  touchChannels,
 } from "./mapping.ts";
+import { touch, watchTouch } from "./touch.ts";
 
 export const RATE_HZ = 250;
 
@@ -74,6 +79,14 @@ class Radio extends EventTarget {
       .on("mode", () => {
         if (inputSource() === "keyboard") this.keyState.modePos = (this.keyState.modePos + 1) % 3;
       });
+    watchTouch();
+    // A made-up mode switch starts where the vehicle can be armed (Betaflight will not in
+    // POSHOLD, its switch's low end).
+    effect(() => {
+      const pos = startMode(vehicle()?.aux?.modes ?? []);
+      this.keyState.modePos = pos;
+      this.padArm.modePos = pos;
+    });
     this.timer = setInterval(() => this.sample(), 1000 / RATE_HZ);
   }
 
@@ -129,7 +142,12 @@ class Radio extends EventTarget {
       link.send({ ch: "radio_source", on: true, fly: serverFlies });
     }
     let out: number[];
-    if (this.keyboard || !raw) {
+    if (!this.keyboard && !raw && touchScreen()) {
+      // No controller, on a touch screen: the sticks on the glass.
+      out = touchChannels(touch);
+      if (inputSource() !== "touch") inputSource("touch");
+      if (controllerName() !== "Touch sticks") controllerName("Touch sticks");
+    } else if (this.keyboard || !raw) {
       // The keyboard: chosen in Controls, or the only controller there is.
       out = keyboardChannels(input.codes, this.keyState, dt);
       if (inputSource() !== "keyboard") inputSource("keyboard");

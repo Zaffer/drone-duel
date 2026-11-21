@@ -52,6 +52,11 @@ is TypeScript in `web/` (bun). ArduPilot, INAV and Betaflight SITL and mavlink-r
   on the free map and Google's tiles (8600, costs money); `uvx --with playwright python
   scripts/perf.py --map free` is free and runs beside the game: run it when the frame's work
   changes.
+- The page plays on a phone (DESIGN.md §11, §12): sticks on the glass when there is no
+  controller (`input/touch.ts`, `ui/sticks.ts`), and the layout by size and touch at the end
+  of `ui/ui.css` (`html.touch`, `html.touch-sticks`). A key's job needs a button there too.
+  Try it headless as a phone: Playwright's `is_mobile`, `has_touch`, and CDP's
+  `Input.dispatchTouchEvent` for two thumbs.
 - The page's state is alien-signals; anything over time (the WebSocket, gamepad samples, frames,
   timers, peer messages) is a native Chrome Observable (`web/src/types/observable.d.ts`).
   Chrome only. Colours come from `web/src/theme/tokens.css` ("Dusk").

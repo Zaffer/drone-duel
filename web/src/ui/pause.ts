@@ -62,7 +62,7 @@ function ownGoogleKey(): HTMLElement {
     opt("Google 3D tiles", input, use),
     h(
       "p",
-      { style: "font-size:12px; color: var(--muted); margin: 6px 0 0 214px" },
+      { class: "opt-note" },
       "Your own Google Maps key (Map Tiles API), kept in this browser only. Google bills its owner for each flight's tiles; leave it empty for the free map.",
     ),
   );

@@ -20,6 +20,7 @@ import { Minimap } from "./hud/minimap.ts";
 import { perf } from "./hud/perf.ts";
 import { toFirmware } from "./input/mapping.ts";
 import { radio } from "./input/radio.ts";
+import { touch } from "./input/touch.ts";
 import type { RcMsg, Vehicle } from "./net/protocol.ts";
 import { link, type Pose } from "./net/server.ts";
 import { GOGGLES_M, Operator, operatorSpot } from "./people/operator.ts";
@@ -396,10 +397,24 @@ export class Flight {
     if (!v || this.ownsView) return;
     if (body instanceof Truck) {
       if (paused()) return;
+      const source = inputSource();
+      if (source === "touch") {
+        // The sticks on the glass: the left one forward and back, the right one steers.
+        body.setControls({
+          throttle: touch.left.y,
+          steer: touch.right.x,
+          handbrake: touch.handbrake,
+        });
+        return;
+      }
       const pads = navigator
         .getGamepads()
         .filter((p): p is Gamepad => !!p && p.mapping === "standard");
-      body.setControls(truckControls(ch, radio.held, pads[0] ?? null));
+      // Only a radio's channels drive it: the keyboard's and a gamepad's are an aircraft's
+      // sticks made up from keys and buttons (a throttle that stays where W left it, in the
+      // gear its mode switch happens to pick), and the truck reads the keys and the pad itself.
+      const radioCh = source === "radio" || source === "server" ? ch : [];
+      body.setControls(truckControls(radioCh, radio.held, pads[0] ?? null));
       return;
     }
     // The server's radio flies from the server (rc/pilot.py), never through this page's busy

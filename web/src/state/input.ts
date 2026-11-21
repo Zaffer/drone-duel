@@ -9,7 +9,12 @@ export const channels = signal<number[]>([]);
 /** The controller in use, by name; null with none. */
 export const controllerName = signal<string | null>(null);
 /** Where the sticks come from. */
-export const inputSource = signal<"radio" | "gamepad" | "keyboard" | "server" | "none">("none");
+export const inputSource = signal<"radio" | "gamepad" | "keyboard" | "touch" | "server" | "none">(
+  "none",
+);
+/** Whether the player is on a touch screen (input/touch.ts): with no controller, the sticks are
+ * on the glass (ui/sticks.ts), and the UI says "tap", not a key. */
+export const touchScreen = signal(false);
 
 /** A channel's value (-1..1) as a pulse width, µs. */
 export const toUs = (x: number): number => Math.round(1500 + 500 * Math.max(-1, Math.min(1, x)));

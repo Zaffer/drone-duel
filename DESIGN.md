@@ -303,7 +303,8 @@ drone-duels/
       engine/               frame loop, exact spring, local frame, ground + physics (§3.2)
       streams/              Observable sources: ws channels, frames, timers
       net/                  server ws client, protocol types (generated, §8), peer link
-      ui/                   menu (scenario, location, vehicle), pause menu, top bar, toasts
+      ui/                   menu (scenario, location, vehicle), pause menu, top bar, toasts,
+                            a touch screen's sticks
       world/                Cesium viewer, basemap, world.add, Cesium's lookups (metered)
       vehicles/             quad, wing, truck: models, animation; truck physics (Rapier)
       people/               the operator standing behind the pad
@@ -312,7 +313,7 @@ drone-duels/
       modes/                freefly/, duel/, race/, shoot/
       shoot/                Shoot Down: ballistics, air, rounds, recoil, hold, shooter (§7.1)
       dynamics/             wing dynamics overlay
-      input/                actions (the controls' tables), radio, mapping, calibration
+      input/                actions (the controls' tables), radio, mapping, calibration, touch
       audio/
       sim/                  the web version's simulator, in a worker (§18): module (the
                             WebAssembly), quad, weather, msp, vehicle, session, worker
@@ -761,6 +762,30 @@ It fades after 3 s in FPV and comes back on mouse movement or a menu key. In the
 Both hide in FPV, where the OSD is the instrument panel. The quick keys: V cycles views, 1–6 jump
 to a view, R resets, B switches vehicle, D shows the dynamics overlay (Chupito), Esc pauses.
 
+**On a phone** (`ui/ui.css`'s last sections; a touch screen with no controller, §12). The same
+page, laid out again by size and by touch, not another one:
+
+- A small screen (under 900 px wide or 560 px high) gets the menu's three columns sharing the
+  width, or one under the other below 700 px with the menu itself scrolling and each column
+  brought into view as it opens; Options and the pause menu fill the screen, their tabs a strip
+  along the top when held upright; the top bar keeps only the view, the mode's clock and the
+  menu.
+- A touch screen (`<html class="touch">`, kept to what the player last used: `input/touch.ts`)
+  gets what the keys did as buttons: Reset on the top bar, Full screen beside Options, a tap
+  on "Crashed" to reset. The top bar does not fade: it is the only way to the menu.
+- While the sticks on the glass fly (`<html class="touch-sticks">`, `ui/sticks.ts`), the bottom
+  of the screen is theirs: the minimap and the dials move up under the top bar, a mode's panel
+  under the dials. Held upright, the switches sit in a row over the sticks and the camera's
+  picture keeps to what is left above them (the feed fits its host, §10).
+- The page is not pinched, double-tapped bigger, pulled down to reload or selected by a long
+  press (`theme/base.css`), and it keeps clear of a notch (`viewport-fit=cover` and the
+  safe-area insets).
+- A touch screen draws at 1.5 device pixels to a CSS pixel at most (`world.ts`): a phone has
+  three, and a fraction of a desktop's GPU. A judgement: not yet measured on a phone.
+
+A browser without Observables (§9: Safari, so every browser on an iPhone or iPad, and Firefox)
+is told so in place of the menu (`main.ts`).
+
 **Pause/Options (Esc)**, in tabs. Pausing stops the page's own world (the truck), not the
 firmware: the radio keeps flying the aircraft, as a lost link would otherwise trip its failsafe.
 
@@ -771,7 +796,7 @@ firmware: the radio keeps flying the aircraft, as a lost link would otherwise tr
 | Video | analog/digital, VTX power, camera tilt override, OSD on/off |
 | Wind | speed, direction, turbulence level, gusts on/off, "gust now" |
 | Controls | controller profile, calibration wizard, channel map, expo/rates for the truck, keyboard |
-| Inputs | every hotkey, and each vehicle's sticks and switches on a radio, gamepad and keyboard (`ui/inputs.ts`, which the HUD's key strip also reads) |
+| Inputs | every hotkey, and each vehicle's sticks and switches on a radio, gamepad and keyboard, or on a touch screen its sticks' (`ui/inputs.ts`, which the HUD's key strip also reads) |
 | Graphics | map source and keys (Google, Cesium ion, Esri), quality, frame cap, time of day (the sun's local solar hour, noon by default, or the real time) |
 | Audio | master, effects, motor sound |
 | Session | QGroundControl port info, restart firmware, quit to menu |
@@ -819,7 +844,8 @@ at runtime). The firmware OSD keeps its own fonts and colours, as real goggles s
   the mapped channels at 60 Hz, for the HUD, the Controls tab, the calibration wizard and the
   truck (its physics is in the page).
 - `input/radio.ts` picks the controller: the source that sees the most axes, the server's on a
-  tie, the keyboard when there is none or the player chose it. It tells the server whether its
+  tie, a touch screen's sticks or the keyboard when there is none, the keyboard when the player
+  chose it. It tells the server whether its
   radio flies (`radio_source`). Otherwise the page flies: it samples `navigator.getGamepads()` or
   the keys at 250 Hz with a timer and sends `rc`. Channels are -1..1, "natural" for every
   firmware (stick forward +1); each firmware's conventions (ArduPilot's pitch) are applied on the
@@ -834,7 +860,21 @@ at runtime). The firmware OSD keeps its own fonts and colours, as real goggles s
 - The calibration wizard records centre and endpoints and which way each stick and switch moves
   ("move the throttle to full", as driveradio.js does). It saves to the server's prefs, keyed by
   the gamepad's id, so the result survives a browser reset.
-- The keyboard and an Xbox-style gamepad are fallbacks, mainly for the truck.
+- The keyboard and an Xbox-style gamepad are fallbacks, mainly for the truck. Their mode
+  switch is made up (M, X), and so is a touch screen's: it starts at the first mode the vehicle
+  arms in (`startMode`: Betaflight will not arm in POSHOLD, its switch's low end). The truck
+  takes a radio's channels only from a radio; the keyboard and a gamepad drive it by its own
+  keys and triggers (`vehicles/truck/controls.ts`).
+- **A touch screen with no controller flies by two sticks on the glass** (`input/touch.ts`
+  their state, `ui/sticks.ts` the thumbs and the drawing), a mode 2 radio: the left stick
+  throttle and yaw, the right roll and pitch, and the two switches as buttons, Arm and the
+  flight mode. Each stick is the whole of its side of the bottom of the screen to a thumb, and
+  moves by the thumb's travel from where it came down, so nothing jumps to the thumb. Let go,
+  the sprung axes centre; the throttle stays, as a radio's. A reset by a tap lets the sticks go
+  first (disarmed, the throttle down), or the aircraft would leap off the pad. The truck reads
+  the sticks itself (`flight.ts`): the left one, sprung, forward and back, the right one
+  steers, and a Brake button held is the handbrake. A radio or a gamepad plugged into the phone
+  takes over, and the sticks go.
 - Everything else (hotkeys, Shoot Down's controls) is an action in a table
   (`input/actions.ts`, §3.2): `ui/keys.ts` (the menu, flight, on foot, the dynamics overlay) and
   `shoot/controls.ts`. Codes are KeyboardEvent codes, `Mouse0`/`Mouse2` (only while the mouse is
@@ -997,8 +1037,8 @@ than 100 ms (the machine asleep) is not caught up. Measured in Chrome (2026-11-2
 the RTX 4090, 1600×900, the free map): 60 fps, the pose carried on 6 ms at the median, the same
 as from the server.
 
-**The radio** is the page's: Chrome's Gamepad API, a gamepad or the keyboard (§12), sent to the
-worker as `rc`. No sticks for 0.2 s and nothing more is fed to Betaflight's receiver, so its
+**The radio** is the page's: Chrome's Gamepad API, a gamepad, the keyboard, or on a phone the
+sticks on the glass (§11, §12), sent to the worker as `rc`. No sticks for 0.2 s and nothing more is fed to Betaflight's receiver, so its
 own failsafe flies, as with the server. Chrome's Gamepad API zeroes the LiteRadio 2's CH5 and
 CH8 (its arm switch), which the server works round by reading it through Linux; the web
 version cannot, until the radio is read over WebHID (ROADMAP.md).

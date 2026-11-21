@@ -19,6 +19,9 @@ const MODEL_CREDITS = [
   'Operator model: "Quantum Modular Character Free Sample" (Fab)',
 ];
 
+/** A touch screen's device pixels to a CSS pixel, at most: the rest are not drawn. */
+const PHONE_PIXEL_RATIO = 1.5;
+
 export type GroundSource = "google" | "ion" | "esri";
 
 // Cesium 1.145 copies a 3D tileset's statistics into two scratch objects every frame, and with
@@ -109,6 +112,13 @@ export class World {
       }
     });
     this.scene = viewer.scene;
+    // A phone has three device pixels to a CSS pixel and a GPU a fraction of a desktop's: drawn
+    // at PHONE_PIXEL_RATIO at most (a judgement, not measured on a phone: about a megapixel on
+    // today's screens).
+    const ratio = window.devicePixelRatio || 1;
+    if (window.matchMedia?.("(pointer: coarse)").matches && ratio > PHONE_PIXEL_RATIO) {
+      viewer.resolutionScale = PHONE_PIXEL_RATIO / ratio;
+    }
     viewer.clock.clockStep = C.ClockStep.SYSTEM_CLOCK;
     viewer.scene.globe.depthTestAgainstTerrain = true;
     viewer.scene.globe.baseColor = C.Color.fromCssColorString("#151724");

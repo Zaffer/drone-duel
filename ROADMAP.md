@@ -58,6 +58,13 @@ After v1 (DESIGN.md §17). Roughly in priority order within each group.
   move this repository's skyflow-dynamics pin to a commit with the C backend, so
   `duels gen-web` owns `web/wasm/sfd.c`.
 - INAV for the browser (its SITL has no lockstep target yet), for the Chupito.
+- iPhone and iPad: Safari has no Observables (DESIGN.md §9), so the page only says it needs
+  Chrome there. A polyfill loaded where they are missing (`observable-polyfill`), then a
+  flight on a real one: the worker, the analog feed's float targets and the sound's unlock are
+  untried in Safari.
+- On a phone: measure the frame time on a real one (the 1.5× pixel cap in `world.ts` is a
+  judgement) and wire Graphics → Detail to it; a manifest, to install it to the home screen
+  full screen; pinch to zoom the Orbit view.
 
 ## Controllers and platforms
 

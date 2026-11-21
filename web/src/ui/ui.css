@@ -10,7 +10,8 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 36px;
-  padding: 48px 48px 28px;
+  padding: calc(48px + var(--safe-t)) calc(48px + var(--safe-r)) calc(28px + var(--safe-b))
+    calc(48px + var(--safe-l));
   background:
     linear-gradient(
       to right,
@@ -50,6 +51,10 @@
 .corner-btn:hover {
   color: var(--text);
   border-color: #3d4366;
+}
+
+.corner-btn {
+  white-space: nowrap;
 }
 
 .corner-btn .icon {
@@ -409,8 +414,11 @@
    rifleman's mouse); `#app > *` would otherwise take them, so this names #app to outrank it. */
 #app > .hud {
   position: absolute;
-  inset: 0;
+  inset: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
   pointer-events: none;
+  /* A stick on the glass (ui/sticks.ts), and the strip along the bottom the pair takes. */
+  --stick: clamp(116px, min(40vw, 42vh), 200px);
+  --sticks-h: calc(var(--stick) + 40px);
 }
 
 .hud > * {
@@ -418,7 +426,8 @@
 }
 
 .feed-layer,
-.dyn-layer {
+.dyn-layer,
+.hud > .sticks-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -552,6 +561,11 @@
   white-space: normal;
 }
 
+/* Crashed or destroyed: a tap on it resets. */
+.starting.tap {
+  cursor: pointer;
+}
+
 .spinner {
   width: 16px;
   height: 16px;
@@ -670,6 +684,7 @@
 .pause {
   position: absolute;
   inset: 0;
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
   display: grid;
   place-items: center;
   background: rgb(8 9 14 / 0.55);
@@ -759,6 +774,13 @@
 .opt .val {
   min-width: 70px;
   text-align: right;
+}
+
+/* A note under an option, in line with its control. */
+.opt-note {
+  margin: 6px 0 0 214px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .seg-ctl {
@@ -924,5 +946,470 @@
   from {
     opacity: 0;
     transform: scale(1.4);
+  }
+}
+
+/* ---------- A touch screen ---------- */
+
+/* What only a touch screen shows (the top bar's Reset, the menu's Full screen), and what only
+   keys are for. `touch` is on <html> while the player is on a touch screen (ui/app.ts);
+   `touch-sticks` while the sticks on the glass fly (ui/sticks.ts). */
+.touch-only,
+.topbar .seg-reset {
+  display: none;
+}
+
+html.touch .touch-only {
+  display: inline-flex;
+}
+
+html.touch .topbar .seg-reset {
+  display: flex;
+}
+
+html.touch .topbar .seg-menu .key,
+html.touch .mode-btn .kbd,
+html.touch .keys-help,
+html.touch .for-keys,
+html:not(.touch) .for-touch {
+  display: none;
+}
+
+/* Text boxes under 16 px make a phone's browser zoom the page in on them. */
+html.touch input:not([type="range"], [type="checkbox"]),
+html.touch select {
+  font-size: 16px;
+}
+
+/* The sticks: each zone is its side of the bottom of the screen, the ring only where the
+   stick is drawn. A thumb anywhere in the zone moves it (input/touch.ts). */
+.touch-controls {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  pointer-events: none;
+}
+
+.touch-controls > * {
+  pointer-events: auto;
+}
+
+.stick-zone {
+  display: flex;
+  align-items: center;
+  height: var(--sticks-h);
+  padding: 0 22px;
+  touch-action: none;
+}
+
+.stick-zone.right {
+  justify-content: flex-end;
+}
+
+.stick {
+  position: relative;
+  flex: none;
+  width: var(--stick);
+  height: var(--stick);
+  border-radius: 50%;
+  border: 1.5px solid rgb(238 240 247 / 0.34);
+  background:
+    linear-gradient(rgb(238 240 247 / 0.16), rgb(238 240 247 / 0.16)) center / 1px 62% no-repeat,
+    linear-gradient(rgb(238 240 247 / 0.16), rgb(238 240 247 / 0.16)) center / 62% 1px no-repeat,
+    rgb(13 14 21 / 0.3);
+}
+
+.stick .knob {
+  position: absolute;
+  left: 31%;
+  top: 31%;
+  width: 38%;
+  height: 38%;
+  border-radius: 50%;
+  border: 1.5px solid rgb(238 240 247 / 0.6);
+  background: rgb(238 240 247 / 0.2);
+  will-change: transform;
+}
+
+.stick.held {
+  border-color: rgb(255 107 53 / 0.7);
+}
+
+.stick.held .knob {
+  border-color: var(--ember);
+  background: rgb(255 107 53 / 0.35);
+}
+
+.touch-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 14px;
+}
+
+.tbtn {
+  min-width: 96px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgb(21 23 36 / 0.72);
+  font: 600 12px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  touch-action: none;
+}
+
+.tbtn.arm {
+  border-color: var(--leaf);
+  color: var(--leaf);
+}
+
+.tbtn.on {
+  border-color: var(--rose);
+  background: rgb(255 79 110 / 0.22);
+  color: var(--rose);
+}
+
+/* Held upright there is no room between the sticks: the switches go in a row over them, and
+   the camera's picture keeps to what is left above (video/feed.ts fits its host). */
+@media (orientation: portrait) {
+  .touch-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .touch-buttons {
+    grid-area: 1 / 1 / 2 / -1;
+    flex-direction: row;
+    justify-content: center;
+    padding: 0 0 6px;
+  }
+
+  .stick-zone,
+  .stick-zone.right {
+    justify-content: center;
+    padding: 0;
+  }
+
+  html.touch-sticks .feed-layer {
+    bottom: calc(var(--sticks-h) + 50px);
+  }
+}
+
+/* The bottom corners are the thumbs': the minimap and the dials go up under the top bar, the
+   minimap left, the dials right, a mode's panel under the dials; what the session says sits
+   mid-screen. */
+html.touch-sticks .corner.right {
+  top: 60px;
+  bottom: auto;
+  right: auto;
+  left: 12px;
+}
+
+html.touch-sticks .corner.left {
+  top: 60px;
+  bottom: auto;
+  left: auto;
+  right: 12px;
+}
+
+html.touch-sticks .scoreboard {
+  top: calc(68px + var(--dials-width, 380px) * 0.29);
+  right: 12px;
+}
+
+html.touch-sticks .starting {
+  bottom: auto;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  max-width: 86vw;
+  white-space: normal;
+}
+
+/* ---------- A small screen: a phone, either way up ---------- */
+
+@media (max-width: 900px), (max-height: 560px) {
+  /* The menu: tight, its columns sharing the width. */
+  .menu {
+    gap: 14px;
+    padding: calc(14px + var(--safe-t)) calc(14px + var(--safe-r)) calc(10px + var(--safe-b))
+      calc(14px + var(--safe-l));
+  }
+
+  .brand {
+    gap: 10px;
+  }
+
+  .brand svg {
+    width: 30px;
+    height: 30px;
+  }
+
+  .brand h1 {
+    font-size: 20px;
+  }
+
+  .brand h1 {
+    white-space: nowrap;
+  }
+
+  .brand p {
+    display: none;
+  }
+
+  .corner-btn {
+    padding: 7px 12px 7px 9px;
+  }
+
+  .menu-cols {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .menu-col {
+    gap: 8px;
+  }
+
+  .col-body,
+  .col-list {
+    gap: 8px;
+  }
+
+  .mode-btn {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 9px 10px;
+  }
+
+  .mode-btn .icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .mode-btn .title {
+    font-size: 15px;
+  }
+
+  .card {
+    min-height: 0;
+    padding: 11px 12px;
+  }
+
+  .field input {
+    min-width: 0;
+  }
+
+  /* Options and the pause menu: the whole screen. */
+  .pause-box {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+    grid-template-columns: 148px minmax(0, 1fr);
+  }
+
+  .tabs {
+    padding: 8px;
+    overflow-y: auto;
+  }
+
+  .tabs h3 {
+    display: none;
+  }
+
+  .tabs > button {
+    padding: 8px 10px;
+  }
+
+  .tabs .bottom {
+    position: sticky;
+    bottom: -8px;
+    padding: 8px 0;
+    background: var(--surface);
+  }
+
+  .tab-body {
+    padding: 14px 16px;
+  }
+
+  .opt {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+
+  .opt .ctl {
+    flex-wrap: wrap;
+  }
+
+  .opt .val {
+    min-width: 56px;
+  }
+
+  .opt-note {
+    margin-left: 0;
+  }
+
+  .seg-ctl {
+    flex-wrap: wrap;
+  }
+
+  .keys-table td.keys {
+    width: auto;
+  }
+
+  /* The HUD: a short top bar (the view, reset, the mode's clock, the menu; the rest is in the
+     pause menu), small panels. */
+  #app > .hud {
+    --minimap-size: 104px;
+    --dials-width: 232px;
+  }
+
+  .topbar {
+    top: 8px;
+  }
+
+  .topbar .seg {
+    padding: 7px 10px;
+  }
+
+  .topbar .seg-mode,
+  .topbar .seg-vehicle,
+  .topbar .seg-video,
+  .topbar .seg-wind,
+  .topbar .sep {
+    display: none;
+  }
+
+  html.touch-sticks .corner.right,
+  html.touch-sticks .corner.left {
+    top: 54px;
+  }
+
+  html.touch-sticks .scoreboard {
+    top: calc(62px + var(--dials-width) * 0.29);
+  }
+
+  .toasts {
+    top: 54px;
+    width: max-content;
+    max-width: 92%;
+  }
+
+  .toast {
+    text-align: center;
+  }
+
+  .banner .big {
+    font-size: min(88px, 13vw);
+  }
+
+  .banner .small {
+    font-size: 15px;
+  }
+
+  .scoreboard {
+    min-width: 150px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+}
+
+/* A phone on its side is short: the three scenarios fit their column. */
+@media (max-height: 480px) {
+  .mode-btn {
+    padding: 7px 10px;
+  }
+
+  .mode-btn .desc {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    font-size: 12px;
+  }
+
+  .col-body,
+  .col-list {
+    gap: 6px;
+  }
+}
+
+/* Too narrow for three columns (a phone held upright): one under the other, the menu itself
+   scrolling; the options' tabs a strip along the top, each option's control under its name. */
+@media (max-width: 700px) {
+  .menu {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    background: linear-gradient(rgb(13 14 21 / 0.9), rgb(13 14 21 / 0.72));
+  }
+
+  /* Each part its own height: the menu scrolls, nothing in it is squeezed. */
+  .menu > * {
+    flex: none;
+  }
+
+  .controls-table td:nth-child(3) {
+    white-space: normal;
+  }
+
+  .menu-cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .menu-col {
+    max-height: none;
+  }
+
+  .col-body {
+    overflow-y: visible;
+  }
+
+  .status-row {
+    margin-top: 6px;
+  }
+
+  .pause-box {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .tabs {
+    flex-direction: row;
+    align-items: center;
+    padding: 6px 8px;
+    overflow: auto hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .tabs > button {
+    flex: none;
+  }
+
+  .tabs .bottom {
+    flex-direction: row;
+    margin: 0 -8px 0 auto;
+    right: -8px;
+    bottom: auto;
+    padding: 0 8px;
+  }
+
+  .opt {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+}
+
+/* The narrowest: the top corner's buttons are their icons. */
+@media (max-width: 480px) {
+  .corner-btn {
+    padding: 9px;
+  }
+
+  .corner-btn > span:not(.icon) {
+    display: none;
   }
 }
