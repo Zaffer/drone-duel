@@ -9,7 +9,7 @@
         "@fontsource/inter": "5.2.8",
         "@fontsource/jetbrains-mono": "5.2.8",
         "alien-signals": "3.1.2",
-        "analog-vision": "github:Synetic-Labs/Analog-Vision#d5548dc",
+        "analog-vision": "github:Synetic-Labs/Analog-Vision#06b33b6",
         "cesium": "1.145.0",
         "milsymbol": "3.0.4",
         "trystero": "0.26.0",
@@ -85,7 +85,7 @@
 
     "alien-signals": ["alien-signals@3.1.2", "", {}, "sha512-d9dYqZTS90WLiU0I5c6DHj/HcKkF8ZyGN3G5x8wSbslulz70KOxaqCT0hQCo9KOyhVqzqGojvNdJXoTumZOtcw=="],
 
-    "analog-vision": ["analog-vision@github:Synetic-Labs/Analog-Vision#d5548dc", {}, "Synetic-Labs-Analog-Vision-d5548dc", "sha512-8qaCbMJ1OL3wVRBRgMrt94cOs+bEhJIKWtzIL76GXcXn4XeuDzyBI2aapkEeUuXLMeua5AmllbMb68aSPXyfsg=="],
+    "analog-vision": ["analog-vision@github:Synetic-Labs/Analog-Vision#06b33b6", {}, "Synetic-Labs-Analog-Vision-06b33b6", "sha512-RT70OQKv7vopQpJ4ey7LbL/bDVxzCLJ0aQiidFE9tvJbWTg8RSURTwk6JbjfIuXKOUu0eCoaT2f36K8aRThKug=="],
 
     "argparse": ["argparse@2.0.1", "", {}, "sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q=="],
 

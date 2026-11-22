@@ -2,12 +2,15 @@
 // camera's picture with black round it, as goggles show it, and the firmware's own OSD.
 //
 // Analog: NTSC, 4:3. The world is drawn into the 4:3 frame at about FEED_RENDER_WIDTH px (the
-// analog chain resamples it to 754 × 480: more is wasted), then sent through analog-vision's
-// AnalogFeed, signal by signal: the OSD goes into the video before the transmitter, as the
-// flight controller's OSD chip puts it, so the link spoils it too. The link's carrier to noise
-// is free space from the pilot (setPilot: the operator's goggles, behind the start pad) at the
-// VTX power, each end a dipole standing up from its frame, with slow fading on top. Without
-// WebGL2's float targets, the world plain with the OSD laid over it.
+// picture is 754 × 480: more is wasted), then sent through analog-vision, signal by signal: the
+// OSD goes into the video before the transmitter, as the flight controller's OSD chip puts it,
+// so the link spoils it too. Its whole chain (AnalogFeed: the radio and the decoder's search
+// for the sync) is more than a phone's GPU gets through live, so a phone has its light one
+// (AnalogLight: the same signal and decoder's filters in two passes a field); the Video
+// options say which (prefs.video.analog). The link's carrier to noise is free space from the
+// pilot (setPilot: the operator's goggles, behind the start pad) at the VTX power, each end a
+// dipole standing up from its frame, with slow fading on top. Where neither chain runs (no
+// WebGL2 float targets), the world plain with the OSD laid over it.
 //
 // Digital: 16:9, letterboxed in the window, no effect, the HD OSD grid laid over the picture as
 // DJI/HDZero/Walksnail goggles draw it.
@@ -17,7 +20,7 @@
 // while its drawing buffer is still there.
 
 import { effect } from "alien-signals";
-import { AnalogFeed, linkCnrDb } from "analog-vision";
+import { AnalogFeed, AnalogLight, linkCnrDb } from "analog-vision";
 import type { OsdMsg } from "../net/protocol.ts";
 import type { Pose } from "../net/server.ts";
 import { prefs, type VideoSystem } from "../state/prefs.ts";
@@ -31,10 +34,19 @@ import "./video.css";
 /** The pictures' shapes. */
 export const ANALOG_ASPECT = 4 / 3;
 export const DIGITAL_ASPECT = 16 / 9;
-/** The analog chain takes the world at about this width, device px: more is wasted. */
-const FEED_RENDER_WIDTH = 1100;
+type Chain = "full" | "light";
+/** Each analog chain takes the world at about this width, device px: more is wasted. The whole
+ * chain resamples it to 754 × 480 and is the better for a little more; the light one reads it
+ * as it is, and copying more in is what costs a phone. */
+const FEED_RENDER_WIDTH: Record<Chain, number> = { full: 1100, light: 754 };
 /** An OSD screen older than this is gone (the firmware stopped drawing). */
 const OSD_STALE_MS = 1000;
+
+function pictureCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.className = "cf-picture";
+  return canvas;
+}
 
 /** A standard normal draw. */
 const gauss = (): number =>
@@ -42,11 +54,14 @@ const gauss = (): number =>
 
 export class CameraFeed {
   private readonly root: HTMLDivElement;
-  private readonly picture: HTMLCanvasElement;
+  private picture: HTMLCanvasElement;
   private readonly osdCanvas: HTMLCanvasElement;
   private readonly osdView: OsdView;
   private readonly raster = new OsdRaster();
-  private analog: AnalogFeed | null = null;
+  private analog: AnalogFeed | AnalogLight | null = null;
+  /** The chain `analog` is, and the one that was asked for when it was made. */
+  private chain: Chain = "full";
+  private chainAsked: Chain | null = null;
   private on = false;
   private system: VideoSystem = "analog";
   private pilot: { lat: number; lon: number; alt: number } | null = null;
@@ -62,8 +77,7 @@ export class CameraFeed {
     private readonly world: World,
     private readonly host: HTMLElement,
   ) {
-    this.picture = document.createElement("canvas");
-    this.picture.className = "cf-picture";
+    this.picture = pictureCanvas();
     this.osdCanvas = document.createElement("canvas");
     this.osdCanvas.className = "cf-osd";
     this.root = document.createElement("div");
@@ -79,6 +93,14 @@ export class CameraFeed {
       effect(() => {
         osd();
         this.osdAt = performance.now();
+      }),
+    );
+    this.stops.push(
+      effect(() => {
+        if (this.wanted() !== this.chainAsked && this.on && this.system === "analog") {
+          this.ensureAnalog()?.reset();
+          this.layout();
+        }
       }),
     );
     this.stops.push(world.scene.postRender.addEventListener(() => this.afterRender()));
@@ -97,7 +119,7 @@ export class CameraFeed {
     return this.cnr;
   }
 
-  /** Whether the analog chain runs here (WebGL2 with float targets); null until it is first
+  /** Whether an analog chain runs here (WebGL2 with float targets); null until it is first
    * needed. */
   get analogOk(): boolean | null {
     return this.analog?.ok ?? null;
@@ -163,13 +185,39 @@ export class CameraFeed {
 
   // -- inside --------------------------------------------------------------------------------
 
-  private ensureAnalog(): AnalogFeed | null {
-    if (!this.analog) {
+  /** The analog chain the options ask for: by the device, the light one where the pointer is a
+   * finger (a phone, a tablet). */
+  private wanted(): Chain {
+    const asked = prefs().video.analog;
+    if (asked !== "auto") return asked;
+    return window.matchMedia?.("(pointer: coarse)").matches ? "light" : "full";
+  }
+
+  /** The chain asked for, made when first needed and again when the choice changes; the other
+   * where that one cannot run (the light one needs less of WebGL2). */
+  private ensureAnalog(): AnalogFeed | AnalogLight | null {
+    const asked = this.wanted();
+    if (this.chainAsked === asked) return this.analog;
+    this.chainAsked = asked;
+    if (this.analog) {
+      // A chain keeps its canvas' context: a new canvas for the next.
+      const old = this.picture;
+      this.picture = pictureCanvas();
+      this.picture.hidden = old.hidden;
+      old.replaceWith(this.picture);
+      old.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
+      this.analog = null;
+    }
+    const order: Chain[] = asked === "light" ? ["light", "full"] : ["full", "light"];
+    for (const chain of order) {
       try {
-        this.analog = new AnalogFeed(this.picture);
+        const made =
+          chain === "light" ? new AnalogLight(this.picture) : new AnalogFeed(this.picture);
+        this.analog = made;
+        this.chain = chain;
+        if (made.ok) break;
       } catch (err) {
-        console.error("analog feed off:", err);
-        return null;
+        console.error(`analog feed (${chain}) off:`, err);
       }
     }
     return this.analog;
@@ -233,7 +281,7 @@ export class CameraFeed {
     this.picture.hidden = !analog;
     const dpr = window.devicePixelRatio || 1;
     viewer.resolutionScale = analog
-      ? Math.min(this.saved.scale, FEED_RENDER_WIDTH / Math.max(box.width * dpr, 1))
+      ? Math.min(this.saved.scale, FEED_RENDER_WIDTH[this.chain] / Math.max(box.width * dpr, 1))
       : this.saved.scale;
     viewer.resize();
   }

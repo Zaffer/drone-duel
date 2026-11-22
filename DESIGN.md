@@ -726,9 +726,18 @@ Toolchain: bun builds and serves the bundle (`bun build`, with watch in dev). Ty
 
 - **FPV** draws the world from the vehicle's camera (tilt, FOV and offset from its spec) at the
   physics' true pose, with no map symbols.
-- **Analog**: analog-vision's AnalogFeed (NTSC, 4:3). Link noise follows range from the pilot
+- **Analog**: analog-vision (NTSC, 4:3). Link noise follows range from the pilot
   and VTX power (Video options), and both antennas' angles (dipoles, their nulls filled to
-  -8 dBi). INAV's analog OSD is its Betaflight-compatible 30×16 mode (BF43COMPAT), laid out for
+  -8 dBi). It has two makers of the picture, by the Video options' "Analog picture":
+  `AnalogFeed`, the whole chain (the radio at 8fsc, the decoder's search for the sync), and
+  `AnalogLight`, for a phone: the same composite signal, the link's noise as a discriminator
+  leaves it and the decoder's filters, in two passes a field, with the decoder's flywheel and
+  colour killer stepped on modelled measurements. The whole chain is 263 lines of signal a
+  field whatever the screen: 23 ms for each 1/60 s on a phone's Adreno 740, measured, so a
+  phone could not fly FPV by it. Auto picks the light one where the pointer is a finger, the
+  whole one elsewhere; either falls back to the other where it cannot run. The world is drawn
+  for the light one at 754 px across (its picture, read as it is: copying more in costs a
+  phone), for the whole one at 1100 (it resamples). INAV's analog OSD is its Betaflight-compatible 30×16 mode (BF43COMPAT), laid out for
   the 13 rows NTSC shows. The OSD is the firmware's SD grid (30×16, 13 rows shown on NTSC)
   laid into the video before the analog chain, as the OSD chip does.
 - **Digital**: 16:9, no effect, and the HD OSD grid laid over the picture as a DJI/HDZero/Walksnail

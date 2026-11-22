@@ -13,7 +13,7 @@
     "@fontsource/inter": "5.2.8",
     "@fontsource/jetbrains-mono": "5.2.8",
     "alien-signals": "3.1.2",
-    "analog-vision": "github:Synetic-Labs/Analog-Vision#d5548dc",
+    "analog-vision": "github:Synetic-Labs/Analog-Vision#06b33b6",
     "cesium": "1.145.0",
     "milsymbol": "3.0.4",
     "trystero": "0.26.0"

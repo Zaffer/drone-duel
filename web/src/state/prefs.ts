@@ -6,6 +6,7 @@ import { api } from "../net/api.ts";
 
 export type ViewId = "fpv" | "chase" | "far" | "spotter" | "map" | "orbit";
 export type VideoSystem = "analog" | "digital";
+export type AnalogChain = "auto" | "full" | "light";
 
 /** A channel's calibration: the raw axis value at its low end, centre and high end. */
 export interface AxisCal {
@@ -21,7 +22,15 @@ export interface Calibration {
 
 export interface Prefs {
   player: { name: string };
-  video: { system: VideoSystem; vtxMw: number; osd: boolean; tiltDeg: number | null };
+  video: {
+    system: VideoSystem;
+    /** The analog picture's maker: the whole signal chain, the light one for a phone's GPU, or
+     * by the device (light where it is flown by touch). */
+    analog: AnalogChain;
+    vtxMw: number;
+    osd: boolean;
+    tiltDeg: number | null;
+  };
   view: { initial: ViewId; chaseDistance: number; fovDeg: number };
   controls: {
     /** Gamepad id → its calibration from the wizard. */
@@ -60,7 +69,7 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   player: { name: "Pilot" },
-  video: { system: "analog", vtxMw: 25, osd: true, tiltDeg: null },
+  video: { system: "analog", analog: "auto", vtxMw: 25, osd: true, tiltDeg: null },
   view: { initial: "fpv", chaseDistance: 4, fovDeg: 75 },
   controls: { calibrations: {}, serverRadio: false },
   graphics: { quality: "high", maxFps: 0, timeOfDay: 12 },

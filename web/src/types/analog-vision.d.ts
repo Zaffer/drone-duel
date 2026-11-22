@@ -39,6 +39,25 @@ declare module "analog-vision" {
     draw(): void;
   }
 
+  /** The same picture for a small GPU (a phone): two passes a field, no radio and no search
+   * for the sync. It makes its canvas 754 × 480, for the page to scale. */
+  export class AnalogLight {
+    constructor(canvas: HTMLCanvasElement | OffscreenCanvas, settings?: AnalogSettings);
+    /** False where WebGL2 with half-float render targets is missing. */
+    readonly ok: boolean;
+    /** Carrier to noise, dB. */
+    cnrDb: number;
+    set(settings: AnalogSettings): void;
+    /** Start the signal again. */
+    reset(): void;
+    /** The fields due since the last frame, from `source` (best 754 × 480), with `osd` put in
+     * as the chip does; then the picture to the canvas. */
+    frame(source: TexImageSource, osd: ChipOsd | null, now: number): void;
+    /** How the signal was for the picture made last: the share of lines synced and in colour. */
+    stats(): { synced: number; colour: number };
+    draw(): void;
+  }
+
   /** CNR at the receiver over free space, dB. */
   export function linkCnrDb(
     distanceM: number,

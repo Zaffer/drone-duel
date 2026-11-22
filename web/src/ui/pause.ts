@@ -253,6 +253,23 @@ export function openPause(
             ),
           ),
           opt(
+            "Analog picture",
+            segmented(
+              [
+                ["auto", "Auto"],
+                ["full", "Full"],
+                ["light", "Light"],
+              ],
+              () => prefs().video.analog,
+              (v) => setP("video", { analog: v }),
+            ),
+          ),
+          h(
+            "p",
+            { class: "muted" },
+            "Full simulates the radio and the receiver whole and wants a desktop's graphics card. Light keeps the signal's noise and the decoder's filters and runs on a phone. Auto: light on a phone or tablet, full elsewhere.",
+          ),
+          opt(
             "VTX power",
             ...slider(
               25,
