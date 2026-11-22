@@ -775,8 +775,12 @@ page, laid out again by size and by touch, not another one:
   on "Crashed" to reset. The top bar does not fade: it is the only way to the menu.
 - While the sticks on the glass fly (`<html class="touch-sticks">`, `ui/sticks.ts`), the bottom
   of the screen is theirs: the minimap and the dials move up under the top bar, a mode's panel
-  under the dials. Held upright, the switches sit in a row over the sticks and the camera's
-  picture keeps to what is left above them (the feed fits its host, §10).
+  under the dials. Each stick is as big as its side of the screen holds (`--stick`, to 340 px:
+  a thumb's travel for the whole stick is 0.31 of it), beside a middle column kept for the top
+  bar and the switches. On a phone on its side that is nearly the screen's height, so the
+  minimap and the dials go in the top corners, beside the top bar. Held upright, each stick is
+  half the width, the switches sit in a row over them and the camera's picture keeps to what
+  is left above them (the feed fits its host, §10).
 - The page is not pinched, double-tapped bigger, pulled down to reload or selected by a long
   press (`theme/base.css`), and it keeps clear of a notch (`viewport-fit=cover` and the
   safe-area insets).

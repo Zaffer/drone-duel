@@ -416,9 +416,14 @@
   position: absolute;
   inset: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
   pointer-events: none;
-  /* A stick on the glass (ui/sticks.ts), and the strip along the bottom the pair takes. */
-  --stick: clamp(116px, min(40vw, 42vh), 200px);
-  --sticks-h: calc(var(--stick) + 40px);
+  /* A stick on the glass (ui/sticks.ts): as big as its side of the screen holds, up to the
+     reach of a thumb, beside a middle column kept for the top bar and the switches; and the
+     strip along the bottom the pair takes. */
+  --sticks-mid: 232px;
+  --stick-w: calc((100vw - var(--safe-l) - var(--safe-r) - var(--sticks-mid)) / 2 - 20px);
+  --stick-h: calc(100dvh - var(--safe-t) - var(--safe-b) - 16px);
+  --stick: clamp(116px, min(var(--stick-w), var(--stick-h)), 340px);
+  --sticks-h: calc(var(--stick) + 16px);
 }
 
 .hud > * {
@@ -1000,7 +1005,7 @@ html.touch select {
   display: flex;
   align-items: center;
   height: var(--sticks-h);
-  padding: 0 22px;
+  padding: 0 10px;
   touch-action: none;
 }
 
@@ -1018,7 +1023,7 @@ html.touch select {
   background:
     linear-gradient(rgb(238 240 247 / 0.16), rgb(238 240 247 / 0.16)) center / 1px 62% no-repeat,
     linear-gradient(rgb(238 240 247 / 0.16), rgb(238 240 247 / 0.16)) center / 62% 1px no-repeat,
-    rgb(13 14 21 / 0.3);
+    rgb(13 14 21 / 0.16);
 }
 
 .stick .knob {
@@ -1073,8 +1078,15 @@ html.touch select {
 }
 
 /* Held upright there is no room between the sticks: the switches go in a row over them, and
-   the camera's picture keeps to what is left above (video/feed.ts fits its host). */
+   the camera's picture keeps to what is left above (video/feed.ts fits its host). Each stick
+   is half the width, or what the height leaves under a 4:3 picture, the top bar and the
+   switches. */
 @media (orientation: portrait) {
+  #app > .hud {
+    --stick-w: calc((100vw - var(--safe-l) - var(--safe-r)) / 2 - 10px);
+    --stick-h: calc(100dvh - var(--safe-t) - var(--safe-b) - 75vw - 116px);
+  }
+
   .touch-controls {
     grid-template-columns: 1fr 1fr;
   }
@@ -1411,5 +1423,25 @@ html.touch-sticks .starting {
 
   .corner-btn > span:not(.icon) {
     display: none;
+  }
+}
+
+/* A phone on its side, flown by the sticks on the glass: they reach up the sides of the
+   screen, so the minimap and the dials go in the top corners, beside the top bar (the sticks
+   are round: the corners are clear of them), a mode's panel under the dials. Last, to
+   outrank the small screen's own places for them. */
+@media (orientation: landscape) and (max-height: 560px) {
+  html.touch-sticks #app > .hud {
+    --minimap-size: 88px;
+    --dials-width: min(232px, 50vw - 160px);
+  }
+
+  html.touch-sticks .corner.right,
+  html.touch-sticks .corner.left {
+    top: 8px;
+  }
+
+  html.touch-sticks .scoreboard {
+    top: calc(14px + var(--dials-width) * 0.29);
   }
 }
