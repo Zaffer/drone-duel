@@ -1,7 +1,7 @@
 // The cameras of the views (DESIGN.md §11), each placing Cesium's camera from the vehicle's true
 // pose every frame:
 //   fpv      the vehicle's own camera: on its frame, tilted up, its field of view
-//   chase    behind and above, on a lagged arm that follows the heading, not the roll
+//   chase    behind the nose and above, level, coming round with it on a spring (follow.ts)
 //   far      the same, farther back and higher
 //   spotter  the pilot's eye at the start pad, turning to keep the vehicle in sight (LOS flying)
 //   orbit    round the vehicle, by mouse: drag turns, wheel zooms
@@ -25,6 +25,7 @@ import {
   type Vec3,
 } from "../world/geo.ts";
 import type { World } from "../world/world.ts";
+import { NoseFollow } from "./follow.ts";
 
 export interface RigContext {
   world: World;
@@ -100,40 +101,24 @@ const fpv: Rig = {
   leave() {},
 };
 
-/** A chase camera `back` m behind and `high` m above, its arm easing toward the heading. */
+/** A chase camera `back` m behind the nose and `high` m above, level, coming round with it. */
 function chase(id: ViewId, back: (ctx: RigContext) => number, high: number): Rig {
-  let heading: number | null = null;
-  let eyeEnu: Vec3 | null = null;
+  const follow = new NoseFollow();
   return {
     id,
     mouse: false,
     showVehicle: true,
     enter(ctx) {
       frustum(ctx).fov = C.Math.toRadians(ctx.fovDeg);
-      heading = null;
-      eyeEnu = null;
+      follow.reset();
     },
     update(ctx, pose, dt) {
-      // Follow the direction of travel when moving, else the nose.
-      const speed = Math.hypot(pose.v[0], pose.v[1]);
-      const nose = eulerOf(pose.q).heading;
-      const want = speed > 3 ? Math.atan2(pose.v[1], pose.v[0]) : nose;
-      if (heading === null) heading = want;
-      const k = 1 - Math.exp(-dt * 3);
-      heading += Math.atan2(Math.sin(want - heading), Math.cos(want - heading)) * k;
+      const heading = follow.step(pose.q, dt);
+      const [east, north] = [Math.sin(heading), Math.cos(heading)];
       const target = toFixed(pose.lat, pose.lon, pose.alt, scratchPos);
       const b = back(ctx);
-      const desired: Vec3 = [-Math.sin(heading) * b, -Math.cos(heading) * b, high * ctx.scale];
-      // The eye lags on its own spring, so a quick turn swings the view round smoothly.
-      eyeEnu = eyeEnu
-        ? add3(eyeEnu, scale3(add3(desired, scale3(eyeEnu, -1)), 1 - Math.exp(-dt * 6)))
-        : desired;
-      const eye = offsetEnu(target, eyeEnu, new C.Cartesian3());
-      const ahead = offsetEnu(
-        target,
-        [Math.sin(heading) * 2, Math.cos(heading) * 2, 0.4],
-        new C.Cartesian3(),
-      );
+      const eye = offsetEnu(target, [-east * b, -north * b, high * ctx.scale], new C.Cartesian3());
+      const ahead = offsetEnu(target, [east * 2, north * 2, 0.4], new C.Cartesian3());
       lookAt(ctx, eye, ahead);
     },
     leave() {},

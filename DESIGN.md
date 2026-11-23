@@ -819,7 +819,7 @@ firmware: the radio keeps flying the aircraft, as a lost link would otherwise tr
 | # | View | What |
 |---|---|---|
 | 1 | FPV | the camera feed with the OSD, analog or digital |
-| 2 | Chase near | behind and above, lagged spring arm |
+| 2 | Chase near | behind the nose and above, level: it stays behind the vehicle whichever way it travels, and comes round with a yaw on a spring (`views/follow.ts`) |
 | 3 | Chase far | the far chase from today's wing.html |
 | 4 | Spotter | the pilot's eye at the start pad, tracking the vehicle (LOS flying) |
 | 5 | Map/COP | tilted map, trails, milsymbol marker, the uploaded mission and fence, the dials |
