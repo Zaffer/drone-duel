@@ -7,7 +7,7 @@
 // for the keys (Menu, View, Reset), and the corners' panels move up out of the thumbs' way
 // (ui.css).
 
-import { effect } from "alien-signals";
+import { computed, effect, signal } from "alien-signals";
 import { type Flight, sendWind } from "../flight.ts";
 import { mountDials } from "../hud/dials.ts";
 import { mountPerf } from "../hud/perf.ts";
@@ -30,6 +30,7 @@ import { clearHud, hudBanner, hudPanel, hudTimer } from "../state/hud.ts";
 import { inputSource, touchScreen } from "../state/input.ts";
 import { prefs, updatePrefs } from "../state/prefs.ts";
 import { phase, status, telemetry } from "../state/session.ts";
+import { every } from "../streams/time.ts";
 import { VIEW_NAMES, VIEW_ORDER } from "../views/rigs.ts";
 import { h } from "./h.ts";
 import { flightKeys, shooterKeys } from "./inputs.ts";
@@ -44,6 +45,8 @@ const MODE_NAMES = {
   shoot: "Shoot Down",
 } as const;
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+/** A crash resets itself after this long (R or a tap sooner). */
+const AUTO_RESET_S = 3;
 
 export interface HudSlots {
   feed: HTMLElement;
@@ -120,6 +123,13 @@ export function mountHud(
   const dials = h("div", { class: "corner left" });
   const disposeDials = mountDials(dials);
   const toastBox = h("div", { class: "toasts" });
+  // Crashed, it counts down to a reset of its own (paused, it waits; a Duel's destroyed aircraft
+  // is the mode's to bring back). Seconds left, or null.
+  const crashedHere = computed(
+    () => phase() === "crashed" && !onFoot && status().state !== "destroyed" && !paused(),
+  );
+  const resetIn = signal<number | null>(null);
+  let countdown: AbortController | null = null;
   // Crashed or destroyed, it says how to reset, and a tap on it does.
   const starting = h("div", {
     class: "starting",
@@ -206,6 +216,29 @@ export function mountHud(
 
   const disposers = [
     effect(() => {
+      countdown?.abort();
+      countdown = null;
+      if (!crashedHere()) {
+        resetIn(null);
+        return;
+      }
+      const stop = new AbortController();
+      countdown = stop;
+      const due = performance.now() + AUTO_RESET_S * 1000;
+      resetIn(AUTO_RESET_S);
+      every(100).subscribe(
+        (now) => {
+          const left = Math.ceil((due - now) / 1000);
+          if (left > 0) resetIn(left);
+          else {
+            stop.abort();
+            tapReset();
+          }
+        },
+        { signal: stop.signal },
+      );
+    }),
+    effect(() => {
       const m = mode();
       modeSeg.el.replaceChildren(
         h("b", null, m ? MODE_NAMES[m] : ""),
@@ -270,12 +303,14 @@ export function mountHud(
           `${vehicle()?.name ?? ""}: ${s.step}…`,
         );
       else if (s.state === "failed") starting.replaceChildren(`Could not start: ${s.step}`);
-      else if (s.state === "destroyed" || crashed)
+      else if (s.state === "destroyed" || crashed) {
+        const left = resetIn();
+        const now = touchScreen() ? ["Tap"] : [h("span", { class: "kbd" }, "R")];
         starting.replaceChildren(
           crashed ? "Crashed. " : "Destroyed. ",
-          ...(touchScreen() ? ["Tap"] : [h("span", { class: "kbd" }, "R")]),
-          " to reset",
+          ...(left !== null ? [`Resetting in ${left}… `, ...now, " now"] : [...now, " to reset"]),
         );
+      }
       starting.classList.toggle("tap", s.state === "destroyed" || crashed);
     }),
     effect(() => {
@@ -315,6 +350,7 @@ export function mountHud(
     disposeDials();
     perfPanel.dispose();
     for (const d of disposers) d();
+    countdown?.abort();
     clearInterval(fadeTimer);
     controls.dispose();
     window.removeEventListener("keydown", wake);

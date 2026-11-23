@@ -14,6 +14,7 @@ import { Controls } from "../input/actions.ts";
 import { radio } from "../input/radio.ts";
 import { MODES, modePicks, modePlaces } from "../modes/registry.ts";
 import type { ModeContext, ModeDef } from "../modes/types.ts";
+import { countEvent } from "../net/analytics.ts";
 import { api } from "../net/api.ts";
 import type { Location, Vehicle } from "../net/protocol.ts";
 import { link } from "../net/server.ts";
@@ -456,6 +457,10 @@ export function mountApp(root: HTMLElement, world: World): void {
       // Started first, so the mode sees this session starting, not the last one's "ready".
       f.start(loc.id, vehicle, pad, def?.payload ?? null);
       f.mode = attach(f);
+      countEvent(
+        `fly/${def?.id ?? "none"}/${loc.id}`,
+        `${def?.id ?? "none"} at ${loc.name}, ${vehicle}`,
+      );
     } catch (err) {
       console.error("could not start the flight", err);
       flight?.dispose();

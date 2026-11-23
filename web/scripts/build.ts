@@ -13,6 +13,9 @@ const root = new URL("..", import.meta.url).pathname;
 const web = process.argv.includes("--web");
 const dist = `${root}${web ? "dist-web" : "dist"}`;
 const MODULE = `${root}../external/web/sim/sim.wasm`;
+/** The web version's analytics (src/net/analytics.ts): GoatCounter, cookieless; not in the page
+ * the game's server serves. */
+const ANALYTICS = `<script data-goatcounter="https://droneduels.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>`;
 
 async function bundle(entrypoints: string[], entry: string): Promise<boolean> {
   const result = await Bun.build({
@@ -37,7 +40,11 @@ async function bundle(entrypoints: string[], entry: string): Promise<boolean> {
 async function build(): Promise<boolean> {
   const started = performance.now();
   if (!(await bundle([`${root}src/main.ts`], "[name].[ext]"))) return false;
-  await cp(`${root}index.html`, `${dist}/index.html`);
+  const html = await Bun.file(`${root}index.html`).text();
+  await Bun.write(
+    `${dist}/index.html`,
+    web ? html.replace("</head>", `  ${ANALYTICS}\n  </head>`) : html,
+  );
   if (web) {
     // The worker is a bundle of its own: nothing of the page's (Cesium, the DOM) is in it.
     if (!(await bundle([`${root}src/sim/worker.ts`], "sim-[name].[ext]"))) return false;
