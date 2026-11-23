@@ -9,7 +9,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-LatLon = Annotated[tuple[float, float], Field(description="[latitude, longitude], degrees")]
+LatLon = Annotated[
+    tuple[Annotated[float, Field(ge=-90, le=90)], Annotated[float, Field(ge=-180, le=180)]],
+    Field(description="[latitude, longitude], degrees"),
+]
 
 
 class Strict(BaseModel):

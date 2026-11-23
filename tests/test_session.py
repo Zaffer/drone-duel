@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, cast
 
+from drone_duels.content.schema import StartPad
 from drone_duels.content.store import load
 from drone_duels.session.base import Firmware, FirmwareError, PhysicsProcess, SpawnContext
 from drone_duels.session.session import Session
@@ -55,6 +56,34 @@ def test_the_truck_starts_without_firmware_and_stops() -> None:
         )
         s.command("stop")
         events.wait_state("idle")
+    finally:
+        s.close()
+
+
+def test_a_place_of_the_players_own_starts_there() -> None:
+    """A GPS point typed in the menu: not in the content, so the start carries it whole."""
+    events = Recorder()
+    s = Session(load(), events, slot=7)
+    s.start()
+    base = load().location("billy-bishop")
+    place = base.model_copy(
+        update={
+            "id": "gps:51.5007,-0.1246",
+            "origin": (51.5007, -0.1246),
+            "ground_alt_m": 12.0,
+            "pads": [StartPad(at=(51.5007, -0.1246), heading_deg=0.0)],
+        }
+    )
+    try:
+        s.command("start", place.id, "truck", place=place)
+        ready = events.wait_state("ready")
+        assert ready["location"] == place.id
+        assert tuple(ready["origin"]) == (51.5007, -0.1246, 12.0)
+        s.command("switch", vehicle="truck")  # spawns again: still there
+        deadline = time.monotonic() + 5
+        while events.states().count("ready") < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert tuple(events.wait_state("ready")["origin"]) == (51.5007, -0.1246, 12.0)
     finally:
         s.close()
 

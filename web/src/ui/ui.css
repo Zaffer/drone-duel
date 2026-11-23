@@ -130,6 +130,22 @@
   min-height: 0;
 }
 
+/* Under the places: any GPS point (ui/app.ts gpsEntry). */
+.gps-entry {
+  margin: 0;
+}
+
+.gps-row {
+  display: flex;
+  gap: 8px;
+}
+
+.gps-entry .gps-row input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+}
+
 .col-body .hint {
   margin: 0;
   color: var(--muted);

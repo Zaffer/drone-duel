@@ -3,7 +3,7 @@
 
 import { computed, signal } from "alien-signals";
 import type { ConfigMsg, ContentMsg, Course, Location, Vehicle } from "../net/protocol.ts";
-import type { ViewId } from "./prefs.ts";
+import { prefs, type ViewId } from "./prefs.ts";
 
 export type Screen = "loading" | "menu" | "lobby" | "flying";
 export type ModeId = "freefly" | "duel" | "race" | "shoot";
@@ -23,9 +23,15 @@ export const perfOn = signal(false);
 /** The current wind, as set in the Wind tab (or the location's). */
 export const wind = signal<Location["wind"] | null>(null);
 
+/** Every place: the content's, then the player's own GPS points (prefs). */
+export const locations = computed<Record<string, Location>>(() => {
+  const all = { ...content()?.locations };
+  for (const p of prefs().places) all[p.id] = p;
+  return all;
+});
 export const location = computed<Location | null>(() => {
   const id = locationId();
-  return id ? (content()?.locations[id] ?? null) : null;
+  return id ? (locations()[id] ?? null) : null;
 });
 export const vehicle = computed<Vehicle | null>(() => {
   const id = vehicleId();

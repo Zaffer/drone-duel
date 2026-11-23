@@ -2,7 +2,7 @@
 
 import type { Location, Vehicle } from "../net/protocol.ts";
 import { WEB } from "../net/target.ts";
-import { content, mode } from "../state/app.ts";
+import { content, locations, mode } from "../state/app.ts";
 import { duel } from "./duel/duel.ts";
 import { freefly } from "./freefly.ts";
 import { race } from "./race/race.ts";
@@ -27,6 +27,6 @@ export function modePicks(m: ModeDef): Vehicle[] {
 
 /** Where the mode can be played. */
 export function modePlaces(m: ModeDef): Location[] {
-  const all = Object.values(content()?.locations ?? {});
+  const all = Object.values(locations());
   return m.places ? m.places(all) : all;
 }

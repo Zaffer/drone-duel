@@ -4,8 +4,9 @@
 // second. Needs the simulator built (scripts/setup-web.sh); skipped without it.
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import type { ContentMsg, OsdMsg, StatusMsg, TelemetryMsg } from "../src/net/protocol.ts";
+import type { ContentMsg, Location, OsdMsg, StatusMsg, TelemetryMsg } from "../src/net/protocol.ts";
 import { type Outgoing, type SimData, WebSession } from "../src/sim/session.ts";
+import { gpsPlace } from "../src/world/places.ts";
 import data from "./fixtures/sim-data.json";
 import { simModule } from "./sim-module.ts";
 
@@ -23,6 +24,9 @@ class Game {
   pose: Float64Array | null = null;
   poses = 0;
   readonly rc = [1500, 1500, 1000, 1500, 1000, 1500, 1000, 1000];
+  /** The ground heights the session looked up (a GPS point's), and what the lookup answers. */
+  readonly groundAsks: [number, number][] = [];
+  ground: number | Error = 63.5;
   readonly session = new WebSession({
     content: data.content as unknown as ContentMsg,
     sim: data.sim as SimData,
@@ -33,6 +37,11 @@ class Game {
       this.poses++;
     },
     yield: async () => {},
+    groundAlt: async (lat, lon) => {
+      this.groundAsks.push([lat, lon]);
+      if (this.ground instanceof Error) throw this.ground;
+      return this.ground;
+    },
   });
 
   last<C extends Outgoing["ch"]>(ch: C): Extract<Outgoing, { ch: C }> | undefined {
@@ -56,10 +65,14 @@ class Game {
     return this.pose![3]! - this.status.origin![2];
   }
 
-  async start(vehicle = QUAD, video: "analog" | "digital" = "analog"): Promise<void> {
+  async start(
+    vehicle = QUAD,
+    video: "analog" | "digital" = "analog",
+    place: Location | null = null,
+  ): Promise<void> {
     this.session.handle({ ch: "video", system: video }, this.now);
     this.session.handle(
-      { ch: "session", action: "start", location: PLACE, vehicle, pad: 0 },
+      { ch: "session", action: "start", location: place?.id ?? PLACE, vehicle, pad: 0, place },
       this.now,
     );
     await this.settle();
@@ -280,5 +293,42 @@ describe.skipIf(!module)("the web version's session", () => {
     other.session.handle({ ch: "session", action: "stop" }, other.now);
     expect(other.status.state).toBe("idle");
     expect(other.status.origin).toBeNull();
+  });
+});
+
+// Needs no simulator: the truck has no firmware.
+describe("a place of the player's own (a GPS point)", () => {
+  const place = gpsPlace(51.5007, -0.1246);
+
+  test("starts there, its ground looked up once, and again after a respawn", async () => {
+    const game = new Game();
+    await game.start("truck", "analog", place);
+    expect(game.status.state).toBe("ready");
+    expect(game.status.location).toBe(place.id);
+    expect(game.status.origin).toEqual([51.5007, -0.1246, 63.5]);
+    expect(game.out.some((m) => m.ch === "status" && m.step === "finding the ground")).toBe(true);
+    game.session.handle({ ch: "session", action: "reset" }, game.now);
+    game.session.handle({ ch: "session", action: "switch", vehicle: "truck" }, game.now);
+    await game.settle();
+    expect(game.status.origin).toEqual([51.5007, -0.1246, 63.5]);
+    expect(game.groundAsks).toEqual([[51.5007, -0.1246]]);
+  });
+
+  test("player 2 starts on its own pad", async () => {
+    const game = new Game();
+    game.session.handle(
+      { ch: "session", action: "start", location: place.id, vehicle: "truck", pad: 1, place },
+      game.now,
+    );
+    await game.settle();
+    expect(game.status.origin?.slice(0, 2)).toEqual(place.pads[1]!.at);
+  });
+
+  test("a ground it cannot look up fails the start, saying so", async () => {
+    const game = new Game();
+    game.ground = new Error("offline");
+    await game.start("truck", "analog", place);
+    expect(game.status.state).toBe("failed");
+    expect(game.status.step).toContain("offline");
   });
 });

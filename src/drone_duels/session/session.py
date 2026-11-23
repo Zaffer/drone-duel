@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from drone_duels import ports
-from drone_duels.content.schema import Vehicle, Wind
+from drone_duels.content.schema import Location, Vehicle, Wind
 from drone_duels.content.store import Content
 from drone_duels.server.protocol import SessionState, VideoSystem
 from drone_duels.session.base import (
@@ -72,6 +72,7 @@ class _Command:
     of: object = None
     height_m: float = 0.0
     payload: str | None = None
+    place: Location | None = None
 
 
 class Session:
@@ -91,6 +92,8 @@ class Session:
         self.state: SessionState = "idle"
         self.step = ""
         self.location: str | None = None
+        self._place: Location | None = None
+        """Where it started: the content's location, or the player's own."""
         self.vehicle: str | None = None
         self.payload: str | None = None
         """The payload fitted to it (content/payloads), kept by a switch."""
@@ -136,10 +139,12 @@ class Session:
         vehicle: str | None = None,
         pad: int = 0,
         payload: str | None = None,
+        place: Location | None = None,
     ) -> None:
+        """`place`: a start at a place not in the content (a GPS point the player typed in)."""
         if action in ("start", "switch", "stop"):
             self._cancel.set()  # overtake a spawn in progress
-        self._commands.put(_Command(action, location, vehicle, pad, payload=payload))
+        self._commands.put(_Command(action, location, vehicle, pad, payload=payload, place=place))
 
     def send_rc(self, us: Sequence[int]) -> None:
         """The pilot's channels, µs, from the server's radio (rc.pilot) or the page's."""
@@ -264,11 +269,12 @@ class Session:
 
     def _do(self, cmd: _Command) -> None:
         if cmd.action == "start":
-            location = self.content.location(cmd.location or "")
+            location = cmd.place or self.content.location(cmd.location or "")
             vehicle = self.content.vehicle(cmd.vehicle or "").id
             if cmd.payload is not None:
                 self.content.payload(cmd.payload)  # there is one
             self.location, self.pad, self.payload = location.id, cmd.pad, cmd.payload
+            self._place = location
             self.wind = location.wind
             self._spawn(vehicle)
         elif cmd.action == "switch":
@@ -305,6 +311,7 @@ class Session:
         elif cmd.action == "stop":
             self._teardown()
             self.state, self.step, self.location, self.vehicle = "idle", "", None, None
+            self._place = None
             self.payload = None
             self.origin = None
             self._status()
@@ -329,8 +336,8 @@ class Session:
         self._teardown()
         self._cancel = threading.Event()
         cancel = self._cancel
-        assert self.location is not None
-        location = self.content.location(self.location)
+        location = self._place
+        assert location is not None
         vehicle: Vehicle = self.content.fitted(vehicle_id, self.payload)
         pad = location.pads[min(self.pad, len(location.pads) - 1)]
         self.vehicle = vehicle_id

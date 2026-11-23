@@ -36,7 +36,8 @@ VideoSystem = Literal["analog", "digital"]
 class SessionMsg(Msg):
     """Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a
     crash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a
-    payload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it."""
+    payload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it. A start
+    at a place of the player's own (the menu's GPS point) carries it whole, as `place`."""
 
     ch: Literal["session"] = "session"
     action: Literal["start", "switch", "reset", "destroy", "throw", "stop"]
@@ -44,6 +45,11 @@ class SessionMsg(Msg):
     vehicle: str | None = None
     pad: int = Field(default=0, ge=0, description="the start pad: 0 player 1, 1 player 2")
     payload: str | None = Field(default=None, description="start: a payload to fit, its id")
+    place: Location | None = Field(
+        default=None,
+        description="start: a place not in the content (a GPS point typed in the menu), "
+        "whose id is `location`",
+    )
 
 
 class RcMsg(Msg):

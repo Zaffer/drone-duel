@@ -19,6 +19,7 @@
 
 import type {
   ContentMsg,
+  Location,
   LogMsg,
   OsdMsg,
   PhysicsMsg,
@@ -44,6 +45,8 @@ export type Incoming =
       location?: string | null;
       vehicle?: string | null;
       pad?: number;
+      /** A place not in the content: a GPS point typed in the menu. */
+      place?: Location | null;
     }
   | { ch: "rc"; us: number[] }
   | { ch: "ground"; alt: number }
@@ -64,6 +67,9 @@ export interface Host {
   pose(frame: Float64Array): void;
   /** Wait a turn of the event loop (so a long start can be overtaken). */
   yield(): Promise<void>;
+  /** The ground's height above sea level at a point, looked up (a place whose ground is
+   * "auto": one the player typed in; the content's are numbers in the web version's data). */
+  groundAlt(lat: number, lon: number): Promise<number>;
 }
 
 /** No sticks for this long, s: the radio link is lost. */
@@ -82,6 +88,10 @@ export class WebSession {
   private state: StatusMsg["state"] = "idle";
   private step = "";
   private location: string | null = null;
+  /** Where it started: the content's location, or the player's own. */
+  private place: Location | null = null;
+  /** Ground heights looked up, by "lat,lon": a respawn asks once. */
+  private readonly grounds = new Map<string, number>();
   private vehicle: string | null = null;
   private pad = 0;
   private video: "analog" | "digital" = "analog";
@@ -159,12 +169,13 @@ export class WebSession {
   private command(msg: Extract<Incoming, { ch: "session" }>, now: number): void {
     switch (msg.action) {
       case "start": {
-        const location = this.host.content.locations[msg.location ?? ""];
+        const location = msg.place ?? this.host.content.locations[msg.location ?? ""];
         if (!location) {
           this.fail(`no location ${msg.location}`);
           return;
         }
         this.location = location.id;
+        this.place = location;
         this.pad = msg.pad ?? 0;
         this.wind = location.wind;
         void this.spawn(msg.vehicle ?? "", now);
@@ -197,6 +208,7 @@ export class WebSession {
         this.state = "idle";
         this.step = "";
         this.location = this.vehicle = this.origin = null;
+        this.place = null;
         this.status();
         break;
       default:
@@ -221,14 +233,35 @@ export class WebSession {
     const mine = ++this.generation;
     const { content, sim } = this.host;
     const vehicle = content.vehicles[vehicleId];
-    const location = content.locations[this.location ?? ""];
+    const location = this.place;
     if (!vehicle || !location) return this.fail(`no vehicle ${vehicleId}`);
     const pad = location.pads[Math.min(this.pad, location.pads.length - 1)]!;
-    if (typeof location.ground_alt_m !== "number") {
-      return this.fail(`${location.name}: its ground's height is not in the web version's data`);
+    let ground = location.ground_alt_m;
+    if (typeof ground !== "number") {
+      const [lat, lon] = location.origin;
+      const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+      const known = this.grounds.get(key);
+      if (known === undefined) {
+        this.state = "starting";
+        this.setStep("finding the ground");
+        try {
+          ground = await this.host.groundAlt(lat, lon);
+        } catch (err) {
+          if (mine === this.generation) {
+            this.fail(
+              `ground height of ${location.name}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+          return;
+        }
+        if (mine !== this.generation) return;
+        this.grounds.set(key, ground);
+      } else {
+        ground = known;
+      }
     }
     this.vehicle = vehicle.id;
-    this.origin = [pad.at[0], pad.at[1], location.ground_alt_m];
+    this.origin = [pad.at[0], pad.at[1], ground];
     this.headingDeg = pad.heading_deg;
     this.state = "starting";
     if (vehicle.firmware.kind === "none") {

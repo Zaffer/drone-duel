@@ -20,6 +20,24 @@ export interface Init {
   module: string;
 }
 
+/** Open-Meteo's elevation API (Copernicus DEM, 90 m; no key, open to pages), as the game's
+ * server asks it (drone_duels.world.elevation): the ground under a place the player typed in. */
+const ELEVATION_URL = "https://api.open-meteo.com/v1/elevation";
+
+async function groundAlt(lat: number, lon: number): Promise<number> {
+  const url = `${ELEVATION_URL}?latitude=${lat.toFixed(6)}&longitude=${lon.toFixed(6)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  } catch (err) {
+    throw new Error(`could not look it up (${String(err)})`);
+  }
+  if (!response.ok) throw new Error(`could not look it up (${response.status})`);
+  const alt = ((await response.json()) as { elevation?: unknown[] }).elevation?.[0];
+  if (typeof alt !== "number" || !Number.isFinite(alt)) throw new Error("no height in the answer");
+  return alt;
+}
+
 /** Between runs of the quad, ms: a timer's least. */
 const TICK_MS = 4;
 
@@ -49,6 +67,7 @@ async function start(init: Init): Promise<void> {
     send: (msg: Outgoing) => scope.postMessage(msg),
     pose: (frame) => scope.postMessage(frame, [frame.buffer]),
     yield: () => new Promise((done) => setTimeout(done, 0)),
+    groundAlt,
   });
   for (const msg of early.splice(0)) session.handle(msg, now());
   setInterval(() => session?.tick(now()), TICK_MS);

@@ -21,7 +21,7 @@ import { perf } from "./hud/perf.ts";
 import { toFirmware } from "./input/mapping.ts";
 import { radio } from "./input/radio.ts";
 import { touch } from "./input/touch.ts";
-import type { RcMsg, Vehicle } from "./net/protocol.ts";
+import type { Location, RcMsg, Vehicle } from "./net/protocol.ts";
 import { link, type Pose } from "./net/server.ts";
 import { GOGGLES_M, Operator, operatorSpot } from "./people/operator.ts";
 import {
@@ -45,6 +45,7 @@ import { CameraFeed } from "./video/feed.ts";
 import { MapLayer } from "./views/mapview.ts";
 import { makeRigs, type Rig, type RigContext } from "./views/rigs.ts";
 import { mapOffset, moveBy } from "./world/geo.ts";
+import { isGpsPlace } from "./world/places.ts";
 import type { World } from "./world/world.ts";
 
 /** What a mode adds to a flight (modes/*). A mode with systems of its own joins the frame loop
@@ -132,12 +133,14 @@ export class Flight {
   private dynamicsData: () => Record<string, unknown> | null;
 
   /** Start a vehicle at a location, on a pad (0 player 1, 1 player 2), with a payload fitted
-   * (content/payloads: the mode's), if one is named. */
-  start(locationId: string, vehicle: string, pad = 0, payload: string | null = null): void {
+   * (content/payloads: the mode's), if one is named. A place of the player's own (a GPS point,
+   * world/places.ts) goes whole: the session has only the content's. */
+  start(loc: Location, vehicle: string, pad = 0, payload: string | null = null): void {
     vehicleId(vehicle);
     link.send({ ch: "video", system: prefs().video.system });
-    link.send({ ch: "session", action: "start", location: locationId, vehicle, pad, payload });
-    sessionStarting(locationId, vehicle, pad);
+    const place = isGpsPlace(loc.id) ? loc : null;
+    link.send({ ch: "session", action: "start", location: loc.id, vehicle, pad, payload, place });
+    sessionStarting(loc.id, vehicle, pad);
   }
 
   switchVehicle(vehicle: string): void {
@@ -150,6 +153,7 @@ export class Flight {
       vehicle,
       pad: s.pad,
       payload: null,
+      place: null,
     });
     sessionStarting(s.location, vehicle, s.pad);
   }
@@ -165,6 +169,7 @@ export class Flight {
         vehicle: null,
         pad: status().pad,
         payload: null,
+        place: null,
       });
   }
 
@@ -176,6 +181,7 @@ export class Flight {
       vehicle: null,
       pad: 0,
       payload: null,
+      place: null,
     });
   }
 
@@ -188,6 +194,7 @@ export class Flight {
       vehicle: null,
       pad: 0,
       payload: null,
+      place: null,
     });
   }
 
@@ -221,6 +228,7 @@ export class Flight {
       vehicle: null,
       pad: 0,
       payload: null,
+      place: null,
     });
   }
 

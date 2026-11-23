@@ -292,7 +292,9 @@ def handle(session: Session, text: str) -> object:
         case GroundMsg():
             session.set_ground(msg.lat, msg.lon, msg.alt)
         case SessionMsg():
-            session.command(msg.action, msg.location, msg.vehicle, msg.pad, msg.payload)
+            session.command(
+                msg.action, msg.location, msg.vehicle, msg.pad, msg.payload, msg.place
+            )
         case WindMsg():
             session.set_wind(msg.wind, msg.gust_now)
         case VideoMsg():

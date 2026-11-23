@@ -921,7 +921,8 @@ export interface RcMsg {
 /**
  * Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a
  * crash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a
- * payload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it.
+ * payload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it. A start
+ * at a place of the player's own (the menu's GPS point) carries it whole, as `place`.
  *
  * This interface was referenced by `Protocol`'s JSON-Schema
  * via the `definition` "SessionMsg".
@@ -939,6 +940,10 @@ export interface SessionMsg {
    * start: a payload to fit, its id
    */
   payload: string | null;
+  /**
+   * start: a place not in the content (a GPS point typed in the menu), whose id is `location`
+   */
+  place: Location | null;
 }
 /**
  * This interface was referenced by `Protocol`'s JSON-Schema

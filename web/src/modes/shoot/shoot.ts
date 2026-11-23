@@ -34,7 +34,7 @@ import { Rounds } from "../../shoot/rounds.ts";
 import { Shooter } from "../../shoot/shooter.ts";
 import { Sights } from "../../shoot/sights.ts";
 import { payloadZone } from "../../shoot/target.ts";
-import { content, vehicle as currentVehicle, toast, wind } from "../../state/app.ts";
+import { content, vehicle as currentVehicle, locations, toast, wind } from "../../state/app.ts";
 import { hudBanner, hudPanel } from "../../state/hud.ts";
 import { prefs } from "../../state/prefs.ts";
 import { damage, phase, status } from "../../state/session.ts";
@@ -228,7 +228,7 @@ class ShootRuntime implements ModeRuntime {
     const [e, n, z] = ground.frame.fromMap(lat, lon, map);
     ground.focus("shooter", [e, n, z]);
     const groundSim = map - mapOffset();
-    const w = wind() ?? content()?.locations[status().location ?? ""]?.wind;
+    const w = wind() ?? locations()[status().location ?? ""]?.wind;
     if (!w) return;
     this.air = new Air(w);
     const air = this.air;

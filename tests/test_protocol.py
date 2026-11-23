@@ -31,6 +31,31 @@ def test_page_messages_validate() -> None:
         client_msg.validate_json('{"ch":"session","action":"explode"}')
 
 
+def test_a_start_may_carry_a_place_of_the_players_own() -> None:
+    place = {
+        "id": "gps:51.5007,-0.1246",
+        "name": "51.50070, -0.12460",
+        "blurb": "",
+        "origin": [51.5007, -0.1246],
+        "ground_alt_m": "auto",
+        "heading_deg": 0,
+        "pads": [{"at": [51.5007, -0.1246], "heading_deg": 0}],
+        "wind": {
+            "speed_ms": 2,
+            "from_deg": 270,
+            "turbulence": 1,
+            "eddy_scale": 1,
+            "gust_factor": 1,
+            "gust_every_s": 10,
+        },
+    }
+    start = {"ch": "session", "action": "start", "location": place["id"], "vehicle": "truck"}
+    m = client_msg.validate_python({**start, "place": place})
+    assert m.ch == "session" and m.place is not None and m.place.ground_alt_m == "auto"
+    with pytest.raises(ValidationError):  # off the globe
+        client_msg.validate_python({**start, "place": {**place, "origin": [95.0, 0.0]}})
+
+
 def test_target_and_hit_messages_validate() -> None:
     m = client_msg.validate_json('{"ch":"target","action":"hover","height_m":30}')
     assert m.ch == "target"

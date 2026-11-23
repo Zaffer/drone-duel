@@ -3,6 +3,7 @@
 
 import { effect, signal } from "alien-signals";
 import { api } from "../net/api.ts";
+import type { Location } from "../net/protocol.ts";
 
 export type ViewId = "fpv" | "chase" | "far" | "spotter" | "map" | "orbit";
 export type VideoSystem = "analog" | "digital";
@@ -65,6 +66,8 @@ export interface Prefs {
     /** The wind meter on the HUD. */
     windMeter: boolean;
   };
+  /** The places the player typed in as GPS points (world/places.ts), newest first. */
+  places: Location[];
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -85,6 +88,7 @@ export const DEFAULT_PREFS: Prefs = {
     holoBright: 0.8,
     windMeter: true,
   },
+  places: [],
 };
 
 function merge<T>(base: T, over: unknown): T {

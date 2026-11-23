@@ -3,9 +3,170 @@
   "title": "Protocol",
   "type": "object",
   "$defs": {
+    "Location": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "description": "[latitude, longitude], degrees",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            {
+              "maximum": 180,
+              "minimum": -180,
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "ground_alt_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "const": "auto",
+              "type": "string"
+            }
+          ],
+          "description": "ground height at the origin above sea level, or \"auto\" to look it up"
+        },
+        "heading_deg": {
+          "description": "the way the start pads face",
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        },
+        "pads": {
+          "description": "where vehicles start; the first is player 1's",
+          "items": {
+            "$ref": "#/$defs/StartPad"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "wind": {
+          "$ref": "#/$defs/Wind"
+        },
+        "blurb": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "origin",
+        "ground_alt_m",
+        "heading_deg",
+        "pads",
+        "wind",
+        "blurb"
+      ],
+      "title": "Location",
+      "type": "object"
+    },
+    "StartPad": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "description": "[latitude, longitude], degrees",
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "items": [
+            {
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            {
+              "maximum": 180,
+              "minimum": -180,
+              "type": "number"
+            }
+          ],
+          "additionalItems": false
+        },
+        "heading_deg": {
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "heading_deg"
+      ],
+      "title": "StartPad",
+      "type": "object"
+    },
+    "Wind": {
+      "additionalProperties": false,
+      "properties": {
+        "speed_ms": {
+          "description": "mean wind at 6 m, m/s",
+          "maximum": 30,
+          "minimum": 0,
+          "type": "number"
+        },
+        "from_deg": {
+          "description": "where it blows from, degrees true",
+          "exclusiveMaximum": 360,
+          "minimum": 0,
+          "type": "number"
+        },
+        "turbulence": {
+          "description": "MIL-F-8785C's turbulence for this wind (\u03c3_w 0.1 \u00d7 the wind at 6 m) times this: 0 smooth air, 1 the standard's, 2 and 3 as rough as its moderate and severe",
+          "maximum": 3,
+          "minimum": 0,
+          "type": "number"
+        },
+        "eddy_scale": {
+          "description": "the turbulence's scale lengths times this: larger is slower, rolling air; 1 is MIL-F-8785C's",
+          "maximum": 4,
+          "minimum": 0.25,
+          "type": "number"
+        },
+        "gust_factor": {
+          "description": "the strongest gust over the mean wind, as a weather report gives it; 1: no gusts on top of the turbulence",
+          "maximum": 2.5,
+          "minimum": 1,
+          "type": "number"
+        },
+        "gust_every_s": {
+          "description": "mean time between gusts, s",
+          "maximum": 120,
+          "minimum": 2,
+          "type": "number"
+        }
+      },
+      "required": [
+        "speed_ms",
+        "from_deg",
+        "turbulence",
+        "eddy_scale",
+        "gust_factor",
+        "gust_every_s"
+      ],
+      "title": "Wind",
+      "type": "object"
+    },
     "SessionMsg": {
       "additionalProperties": false,
-      "description": "Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a\npayload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it.",
+      "description": "Start a vehicle at a location, switch vehicle (back at the start), reset, destroy (a\ncrash: the physics stops dead), throw (a hand-launched wing), or stop. A start may fit a\npayload (content/payloads: Shoot Down's charge) to the vehicle; a switch keeps it. A start\nat a place of the player's own (the menu's GPS point) carries it whole, as `place`.",
       "properties": {
         "ch": {
           "const": "session",
@@ -62,6 +223,18 @@
           ],
           "default": null,
           "description": "start: a payload to fit, its id"
+        },
+        "place": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "start: a place not in the content (a GPS point typed in the menu), whose id is `location`"
         }
       },
       "required": [
@@ -70,7 +243,8 @@
         "location",
         "vehicle",
         "pad",
-        "payload"
+        "payload",
+        "place"
       ],
       "title": "SessionMsg",
       "type": "object"
@@ -130,57 +304,6 @@
         "alt"
       ],
       "title": "GroundMsg",
-      "type": "object"
-    },
-    "Wind": {
-      "additionalProperties": false,
-      "properties": {
-        "speed_ms": {
-          "description": "mean wind at 6 m, m/s",
-          "maximum": 30,
-          "minimum": 0,
-          "type": "number"
-        },
-        "from_deg": {
-          "description": "where it blows from, degrees true",
-          "exclusiveMaximum": 360,
-          "minimum": 0,
-          "type": "number"
-        },
-        "turbulence": {
-          "description": "MIL-F-8785C's turbulence for this wind (\u03c3_w 0.1 \u00d7 the wind at 6 m) times this: 0 smooth air, 1 the standard's, 2 and 3 as rough as its moderate and severe",
-          "maximum": 3,
-          "minimum": 0,
-          "type": "number"
-        },
-        "eddy_scale": {
-          "description": "the turbulence's scale lengths times this: larger is slower, rolling air; 1 is MIL-F-8785C's",
-          "maximum": 4,
-          "minimum": 0.25,
-          "type": "number"
-        },
-        "gust_factor": {
-          "description": "the strongest gust over the mean wind, as a weather report gives it; 1: no gusts on top of the turbulence",
-          "maximum": 2.5,
-          "minimum": 1,
-          "type": "number"
-        },
-        "gust_every_s": {
-          "description": "mean time between gusts, s",
-          "maximum": 120,
-          "minimum": 2,
-          "type": "number"
-        }
-      },
-      "required": [
-        "speed_ms",
-        "from_deg",
-        "turbulence",
-        "eddy_scale",
-        "gust_factor",
-        "gust_every_s"
-      ],
-      "title": "Wind",
       "type": "object"
     },
     "WindMsg": {
@@ -1396,9 +1519,13 @@
           "type": "array",
           "items": [
             {
+              "maximum": 90,
+              "minimum": -90,
               "type": "number"
             },
             {
+              "maximum": 180,
+              "minimum": -180,
               "type": "number"
             }
           ],
@@ -1481,77 +1608,6 @@
         "depth_m"
       ],
       "title": "GateFrame",
-      "type": "object"
-    },
-    "Location": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "origin": {
-          "description": "[latitude, longitude], degrees",
-          "maxItems": 2,
-          "minItems": 2,
-          "type": "array",
-          "items": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "number"
-            }
-          ],
-          "additionalItems": false
-        },
-        "ground_alt_m": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "const": "auto",
-              "type": "string"
-            }
-          ],
-          "description": "ground height at the origin above sea level, or \"auto\" to look it up"
-        },
-        "heading_deg": {
-          "description": "the way the start pads face",
-          "exclusiveMaximum": 360,
-          "minimum": 0,
-          "type": "number"
-        },
-        "pads": {
-          "description": "where vehicles start; the first is player 1's",
-          "items": {
-            "$ref": "#/$defs/StartPad"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "wind": {
-          "$ref": "#/$defs/Wind"
-        },
-        "blurb": {
-          "default": "",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "origin",
-        "ground_alt_m",
-        "heading_deg",
-        "pads",
-        "wind",
-        "blurb"
-      ],
-      "title": "Location",
       "type": "object"
     },
     "Payload": {
@@ -1648,37 +1704,6 @@
         "airframe"
       ],
       "title": "PhysicsSpec",
-      "type": "object"
-    },
-    "StartPad": {
-      "additionalProperties": false,
-      "properties": {
-        "at": {
-          "description": "[latitude, longitude], degrees",
-          "maxItems": 2,
-          "minItems": 2,
-          "type": "array",
-          "items": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "number"
-            }
-          ],
-          "additionalItems": false
-        },
-        "heading_deg": {
-          "exclusiveMaximum": 360,
-          "minimum": 0,
-          "type": "number"
-        }
-      },
-      "required": [
-        "at",
-        "heading_deg"
-      ],
-      "title": "StartPad",
       "type": "object"
     },
     "Vehicle": {

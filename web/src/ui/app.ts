@@ -1,7 +1,8 @@
 // The game's screens (DESIGN.md §11): the main menu, three columns picked in turn (scenario,
-// location, vehicle; Duel and Race add their lobby under the vehicles), and flying (ui/hud.ts,
-// with the pause menu, ui/pause.ts, whose Vehicle tab switches vehicle). Options and Exit sit in
-// the menu's top corner. While in the menus the world turns slowly round the chosen place.
+// location, vehicle; Duel and Race add their lobby under the vehicles; under the locations, any
+// GPS point), and flying (ui/hud.ts, with the pause menu, ui/pause.ts, whose Vehicle tab switches
+// vehicle). Options and Exit sit in the menu's top corner. While in the menus the world turns
+// slowly round the chosen place.
 //
 // On a phone (ui.css) the columns are narrow, or one under the other on a screen too narrow for
 // three, each coming into view as it opens; a touch screen gets Full screen beside Options.
@@ -32,13 +33,18 @@ import {
   wind,
 } from "../state/app.ts";
 import { controllerName, inputSource, touchScreen } from "../state/input.ts";
+import { updatePrefs } from "../state/prefs.ts";
 import { after, frames } from "../streams/time.ts";
+import { gpsPlace, isGpsPlace, parseLatLon } from "../world/places.ts";
 import type { World } from "../world/world.ts";
 import { h, render, untracked } from "./h.ts";
 import { hudSlots, mountHud } from "./hud.ts";
 import { icons } from "./icons.ts";
 import { menuBindings } from "./keys.ts";
 import { openPause } from "./pause.ts";
+
+/** The player's own GPS points the menu keeps, newest first. */
+const GPS_KEPT = 4;
 
 const svg = (markup: string): HTMLElement => {
   const span = h("span", { class: "icon" });
@@ -256,6 +262,8 @@ export function mountApp(root: HTMLElement, world: World): void {
           { class: "col-list", onmouseleave: () => chosenPlace && locationId(chosenPlace) },
           cards,
         ),
+        // Anywhere else: a GPS point (not where a place must have more, as Race's course).
+        ...(m.places ? [] : [gpsEntry(m)]),
       );
       place.node.hidden = false;
       const loc = all.find((l) => l.id === chosenPlace);
@@ -267,6 +275,52 @@ export function mountApp(root: HTMLElement, world: World): void {
         ride.node.hidden = true;
         render(ride.body);
       }
+    };
+
+    // Under the places: a latitude and longitude, typed or pasted (world/places.ts says what it
+    // reads). It becomes a place of the player's own, kept with the last few (prefs), and picked.
+    const gpsEntry = (m: ModeDef) => {
+      const input = h("input", {
+        placeholder: "45.31982, -75.75863",
+        autocomplete: "off",
+        spellcheck: "false",
+        enterkeyhint: "go",
+        "aria-label": "Latitude, longitude",
+      }) as HTMLInputElement;
+      const go = (e: Event) => {
+        e.preventDefault();
+        const at = parseLatLon(input.value);
+        if (!at) {
+          toast("A latitude and longitude, as 45.31982, -75.75863", "warn", 5000);
+          input.focus();
+          return;
+        }
+        sounds.click();
+        const loc = gpsPlace(...at);
+        updatePrefs((p) => ({
+          ...p,
+          places: [loc, ...p.places.filter((x) => x.id !== loc.id)].slice(0, GPS_KEPT),
+        }));
+        input.blur();
+        chosenPlace = loc.id;
+        wind(loc.wind);
+        drawPlaces(m);
+      };
+      return h(
+        "form",
+        { class: "gps-entry", onsubmit: go },
+        h(
+          "label",
+          { class: "field" },
+          "Anywhere: a GPS point",
+          h(
+            "div",
+            { class: "gps-row" },
+            input,
+            h("button", { type: "submit", title: "Fly here" }, "Go"),
+          ),
+        ),
+      );
     };
 
     // Column 3: what to fly. Free Fly flies on the pick; Duel and Race draw their lobby under it.
@@ -455,11 +509,13 @@ export function mountApp(root: HTMLElement, world: World): void {
         screen("menu");
       });
       // Started first, so the mode sees this session starting, not the last one's "ready".
-      f.start(loc.id, vehicle, pad, def?.payload ?? null);
+      f.start(loc, vehicle, pad, def?.payload ?? null);
       f.mode = attach(f);
+      // A GPS point the player typed in is theirs: counted as one, never where it is.
+      const where = isGpsPlace(loc.id) ? { id: "gps", name: "a GPS point" } : loc;
       countEvent(
-        `fly/${def?.id ?? "none"}/${loc.id}`,
-        `${def?.id ?? "none"} at ${loc.name}, ${vehicle}`,
+        `fly/${def?.id ?? "none"}/${where.id}`,
+        `${def?.id ?? "none"} at ${where.name}, ${vehicle}`,
       );
     } catch (err) {
       console.error("could not start the flight", err);
