@@ -47,6 +47,10 @@ const TILE_CACHE = 96;
 /** The trail: a point every so often, ms, if it moved this far, m; kept this long, s; a jump
  * further than this, m, is a respawn and starts it again. */
 const TRAIL = { everyMs: 250, minM: 1, seconds: 120, jumpM: 300 };
+/** Between redraws, ms. A map 400 m across moves a pixel or two in this long at racing speed,
+ * and repainting it every frame held the frame up (0.4 ms of 5 on a phone-speed thread,
+ * measured 2026-11-22: a 2D canvas over Cesium is painted on the GPU's thread too). */
+const REDRAW_MS = 100;
 /** Marks that wait on the rim when off the map. */
 const PINNED: ReadonlySet<MarkKind> = new Set(["next-gate", "peer", "truck"]);
 
@@ -89,6 +93,11 @@ export class Minimap {
   private marks: Mark[] = [];
   private trail: { lat: number; lon: number; t: number }[] = [];
   private last: Pose | null = null;
+  private drawnAt = Number.NEGATIVE_INFINITY;
+  /** The canvas' size on the page, CSS px, kept by an observer: asking the canvas each frame
+   * makes the page lay itself out there and then. */
+  private size: [number, number] | null = null;
+  private readonly resized: ResizeObserver;
 
   constructor(
     private readonly el: HTMLElement,
@@ -101,12 +110,20 @@ export class Minimap {
     this.canvas = document.createElement("canvas");
     el.append(this.canvas);
     this.ctx = this.canvas.getContext("2d")!;
+    this.resized = new ResizeObserver(() => {
+      this.size = [this.canvas.clientWidth, this.canvas.clientHeight];
+      this.drawnAt = Number.NEGATIVE_INFINITY;
+    });
+    this.resized.observe(this.canvas);
   }
 
   /** The vehicle's true pose now (null before it has one): draws the map round it. */
   update(pose: Pose | null): void {
     if (pose) this.remember(pose);
     this.last = pose;
+    const now = performance.now();
+    if (now - this.drawnAt < REDRAW_MS) return;
+    this.drawnAt = now;
     this.draw();
   }
 
@@ -116,6 +133,7 @@ export class Minimap {
   }
 
   dispose(): void {
+    this.resized.disconnect();
     for (const img of this.tiles.values()) img.src = "";
     this.tiles.clear();
     this.canvas.remove();
@@ -150,8 +168,7 @@ export class Minimap {
     if (!this.colors) this.colors = palette(this.el);
     const c = this.colors;
     const dpr = window.devicePixelRatio || 1;
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
+    const [w, h] = this.size ?? [0, 0];
     if (!w || !h) return;
     const W = Math.round(w * dpr);
     const H = Math.round(h * dpr);

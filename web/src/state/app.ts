@@ -18,6 +18,8 @@ export const vehicleId = signal<string | null>(null);
 export const view = signal<ViewId>("fpv");
 export const paused = signal(false);
 export const dynamicsOn = signal(false);
+/** The performance panel (hud/perf.ts): P, or Options → Graphics where there are no keys. */
+export const perfOn = signal(false);
 /** The current wind, as set in the Wind tab (or the location's). */
 export const wind = signal<Location["wind"] | null>(null);
 

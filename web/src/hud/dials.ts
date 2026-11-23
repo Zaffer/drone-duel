@@ -171,8 +171,19 @@ function drum(svg: SVGElement, cx: number, id: string, digits: number): SVGGElem
   return columns;
 }
 
+// What moves is written only when it changes. The sticks redraw the dials every frame, and an
+// SVG takes every write, the same value or not, as a change: restyled and painted again (with
+// the minimap, a quarter of a frame's time on a phone-speed thread, measured 2026-11-22). The
+// telemetry comes ten times a second; between, nothing is written.
+const put = (node: Element, name: string, value: string): void => {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+};
+const say = (node: Element, text: string): void => {
+  if (node.textContent !== text) node.textContent = text;
+};
+
 const rotate = (node: Element, cx: number, cy: number, angle: number): void =>
-  node.setAttribute("transform", `translate(${f(cx)} ${f(cy)}) rotate(${f(angle)})`);
+  put(node, "transform", `translate(${f(cx)} ${f(cy)}) rotate(${f(angle)})`);
 
 /** The dials as one SVG, for `scales`. */
 class Dials {
@@ -299,29 +310,31 @@ class Dials {
     const alt = (t?.alt_rel ?? 0) * s.alt.perM;
     rotate(this.altNeedle, this.cx.alt, CY, altNeedleDeg(alt, s.alt.turn));
     for (const [i, pos] of drumPositions(Math.max(alt, 0), s.alt.digits).entries()) {
-      this.drum[i]?.setAttribute("transform", `translate(0 ${f(-pos * DRUM_LINE)})`);
+      const column = this.drum[i];
+      if (column) put(column, "transform", `translate(0 ${f(-pos * DRUM_LINE)})`);
     }
 
     const roll = t?.roll_deg ?? 0;
     const pitch = t?.pitch_deg ?? 0;
     const { att } = this.cx;
-    this.horizon.setAttribute(
+    put(
+      this.horizon,
       "transform",
       `translate(${att} ${f(CY + horizonDy(pitch))}) rotate(${f(-roll)})`,
     );
     rotate(this.bank, att, CY, -roll);
-    this.attText.textContent = t ? `R${Math.round(roll)} P${Math.round(pitch)}` : "–";
+    say(this.attText, t ? `R${Math.round(roll)} P${Math.round(pitch)}` : "–");
 
     rotate(this.needle, this.cx.hdg, CY, headingOf(t?.yaw_deg ?? 0));
-    this.hdgText.textContent = t ? headingText(t.yaw_deg) : "–";
+    say(this.hdgText, t ? headingText(t.yaw_deg) : "–");
 
     const climb = (t?.climb ?? 0) * s.climb.perMs;
     rotate(this.climbNeedle, this.cx.vs, CY, climbNeedleDeg(climb, s.climb.full));
-    this.vsText.textContent = t ? climbText(climb, s.climb.decimals) : "–";
+    say(this.vsText, t ? climbText(climb, s.climb.decimals) : "–");
 
     const speed = (t?.groundspeed ?? 0) * s.speed.perMs;
     rotate(this.speedNeedle, this.cx.gs, CY, speedNeedleDeg(speed, s.speed.full));
-    this.gsText.textContent = t ? speed.toFixed(s.speed.perMs === 1 ? 1 : 0) : "–";
+    say(this.gsText, t ? speed.toFixed(s.speed.perMs === 1 ? 1 : 0) : "–");
   }
 
   /** The stick meters; hidden without sticks. */
@@ -329,15 +342,14 @@ class Dials {
     this.svg.classList.toggle("no-sticks", m === null);
     if (!m) return;
     const across = (mark: SVGRectElement, cx0: number, v: number): void =>
-      mark.setAttribute("x", f(cx0 + v * (R - 2) - 1.5));
-    const up = (mark: SVGRectElement, v: number): void =>
-      mark.setAttribute("y", f(CY - v * (R - 2) - 1.5));
+      put(mark, "x", f(cx0 + v * (R - 2) - 1.5));
+    const up = (mark: SVGRectElement, v: number): void => put(mark, "y", f(CY - v * (R - 2) - 1.5));
     across(this.rollMeter, this.cx.att, m.roll);
     up(this.pitchMeter.mark, m.pitch);
     across(this.yawMeter, this.cx.hdg, m.yaw);
     up(this.throttleMeter.mark, 2 * m.throttle - 1);
-    this.throttleMeter.fill.setAttribute("y", f(CY + R - 2 * R * m.throttle));
-    this.throttleMeter.fill.setAttribute("height", f(2 * R * m.throttle));
+    put(this.throttleMeter.fill, "y", f(CY + R - 2 * R * m.throttle));
+    put(this.throttleMeter.fill, "height", f(2 * R * m.throttle));
   }
 }
 

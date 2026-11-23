@@ -22,6 +22,24 @@ const MODEL_CREDITS = [
 /** A touch screen's device pixels to a CSS pixel, at most: the rest are not drawn. */
 const PHONE_PIXEL_RATIO = 1.5;
 
+/** The ground's detail (Options → Graphics), a step a level of the map's tiles: each level down
+ * is a tile twice as wide for the same ground, at half the sharpness. `globe` and `tiles` are the
+ * screen pixels a tile may be out by before the next level is drawn (the globe's, and Google's
+ * tiles'): doubled, everything is drawn a level coarser. `deepest` is the last level of Esri's
+ * globe drawn at all. Esri's terrain ends at level 16 and its imagery at 19, which a level 18
+ * tile already carries (below 69° of latitude), but Cesium goes on splitting tiles for as long
+ * as the camera is near, past level 27 from a metre up, and every tile is 131 072 triangles
+ * whatever it shows: flying low on a phone's screen, 6 million triangles a frame, half of them
+ * the same ground drawn on smaller tiles (measured 2026-11-22). High stops at 18 and looks the
+ * same; Medium and Low stop a level and two sooner. The colliders are built from the drawn
+ * tiles' heights (engine/terrain.ts), so the ground driven on follows the ground seen. */
+export type Detail = "low" | "medium" | "high";
+const DETAIL: Record<Detail, { globe: number; deepest: number; tiles: number }> = {
+  high: { globe: 2, deepest: 18, tiles: 16 },
+  medium: { globe: 4, deepest: 17, tiles: 32 },
+  low: { globe: 8, deepest: 16, tiles: 64 },
+};
+
 export type GroundSource = "google" | "ion" | "esri";
 
 // Cesium 1.145 copies a 3D tileset's statistics into two scratch objects every frame, and with
@@ -66,12 +84,11 @@ export class World {
   private globeTerrain: C.TerrainProvider | null = null;
   /** The globe under Google's tiles, flying (backstop.ts). */
   private readonly backstop = backstopTerrain();
-  /** The globe's screen-space error in the menus, kept while the backstop stands in. */
-  private globeSse: number | null = null;
-  /** Whether the free mouse camera is kept above Google's tiles. Cesium does it by casting a ray
-   * through the tiles' meshes under the camera every frame, read back from the GPU (Scene's
-   * getGlobeHeight): a fifth of the page's time measured (2026-11-04), so only while the mouse
-   * moves the camera; the pilot views place it themselves. */
+  private detail: Detail = "high";
+  /** Whether the free mouse camera is kept above the ground. Cesium does it by casting a ray
+   * through the meshes under the camera every frame (Scene's getGlobeHeight; through Google's
+   * tiles, read back from the GPU): a fifth of the page's time measured (2026-11-04), so only
+   * while the mouse moves the camera; the pilot views place it themselves. */
   private collide = true;
   /** Everything the page draws itself (world.add): never ground to a lookup here. */
   private readonly ours = new Set<object>();
@@ -136,6 +153,33 @@ export class World {
     ]) {
       viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(click);
     }
+    // Cesium looks up the ground under its camera every frame the camera has moved (Scene's
+    // globe height, then a callback for when finer tiles come): a ray through the terrain tile
+    // there, and Esri's are 131 072 triangles each. It is what keeps the mouse's camera above
+    // the ground and tells Cesium the camera is under it; the pilot views place the camera
+    // themselves, so while they do it is not asked (a quarter of the frame on a phone-speed
+    // thread, 1.4 ms of 5.2, measured 2026-11-22). Nothing of the page's is clamped to the
+    // ground by Cesium (engine/ground.ts does that), so nothing else waits on these.
+    const lookups = this.scene as unknown as {
+      getHeight(...args: unknown[]): number | undefined;
+      updateHeight(...args: unknown[]): () => void;
+    };
+    const getHeight = lookups.getHeight.bind(lookups);
+    const updateHeight = lookups.updateHeight.bind(lookups);
+    lookups.getHeight = (...args) => (this.collide ? getHeight(...args) : undefined);
+    lookups.updateHeight = (...args) => (this.collide ? updateHeight(...args) : () => {});
+    // The deepest level of Esri's globe (DETAIL): from there a tile says it has no error left
+    // to split for, which is true, and is how Cesium is told a tile is good enough to draw.
+    // Less than none, in fact: Cesium divides the error by the camera's distance from the tile,
+    // which is 0 inside it (FPV on the ground), and 0 / 0 is not small enough for it.
+    const tiles = (
+      this.scene.globe as unknown as {
+        _surface: { tileProvider: { getLevelMaximumGeometricError(level: number): number } };
+      }
+    )._surface.tileProvider;
+    const errorAt = tiles.getLevelMaximumGeometricError.bind(tiles);
+    tiles.getLevelMaximumGeometricError = (level) =>
+      this.source === "esri" && level >= DETAIL[this.detail].deepest ? -1 : errorAt(level);
     this.googleKey = keys.google_maps_api_key ?? null;
     this.globeSource = keys.cesium_ion_token ? "ion" : "esri";
     this.source = this.globeSource;
@@ -152,7 +196,7 @@ export class World {
       if (this.tileset) this.tileset.show = false;
       this.tileset = null;
       if (this.globeTerrain) this.scene.terrainProvider = this.globeTerrain;
-      if (this.globeSse !== null) this.scene.globe.maximumScreenSpaceError = this.globeSse;
+      this.scene.globe.maximumScreenSpaceError = DETAIL[this.detail].globe;
       this.source = this.globeSource;
       this.ready = this.globeReady;
       return this.ready;
@@ -166,12 +210,21 @@ export class World {
       tiles.enableCollision = this.collide;
       this.tileset = tiles;
       this.globeTerrain ??= this.scene.terrainProvider;
-      this.globeSse ??= this.scene.globe.maximumScreenSpaceError;
       this.scene.terrainProvider = this.backstop;
       this.scene.globe.maximumScreenSpaceError = BACKSTOP_SSE;
       this.source = "google";
     });
     return this.ready;
+  }
+
+  /** How finely the ground is drawn (Options → Graphics). */
+  setDetail(detail: Detail): void {
+    this.detail = detail;
+    // Under Google's tiles the globe is the backstop, at its own coarse setting.
+    if (!this.tileset) this.scene.globe.maximumScreenSpaceError = DETAIL[detail].globe;
+    void this.google?.then((tiles) => {
+      if (tiles) tiles.maximumScreenSpaceError = DETAIL[this.detail].tiles;
+    });
   }
 
   /** The sun at `hour` (0–24) of local solar time at longitude `lon`, today, and held there; or,
@@ -215,6 +268,7 @@ export class World {
         onlyUsingWithGoogleGeocoder: true,
       });
       tiles.show = false;
+      tiles.maximumScreenSpaceError = DETAIL[this.detail].tiles;
       this.scene.primitives.add(tiles);
       return tiles;
     } catch (err) {

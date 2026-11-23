@@ -810,7 +810,7 @@ firmware: the radio keeps flying the aircraft, as a lost link would otherwise tr
 | Wind | speed, direction, turbulence level, gusts on/off, "gust now" |
 | Controls | controller profile, calibration wizard, channel map, expo/rates for the truck, keyboard |
 | Inputs | every hotkey, and each vehicle's sticks and switches on a radio, gamepad and keyboard, or on a touch screen its sticks' (`ui/inputs.ts`, which the HUD's key strip also reads) |
-| Graphics | map source and keys (Google, Cesium ion, Esri), quality, frame cap, time of day (the sun's local solar hour, noon by default, or the real time) |
+| Graphics | map source and keys (Google, Cesium ion, Esri), detail (how finely the ground is drawn, a level of the map's tiles a step, near and far; High is all the sources hold: `World.setDetail`), the performance panel (P, for a phone), frame cap, time of day (the sun's local solar hour, noon by default, or the real time) |
 | Audio | master, effects, motor sound |
 | Session | QGroundControl port info, restart firmware, quit to menu |
 

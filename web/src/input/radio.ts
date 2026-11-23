@@ -80,6 +80,10 @@ class Radio extends EventTarget {
         if (inputSource() === "keyboard") this.keyState.modePos = (this.keyState.modePos + 1) % 3;
       });
     watchTouch();
+    // A thumb's move goes to the firmware as it is heard, not at the next tick of the timer.
+    touch.onInput = () => {
+      if (inputSource() === "touch") this.sample();
+    };
     // A made-up mode switch starts where the vehicle can be armed (Betaflight will not in
     // POSHOLD, its switch's low end).
     effect(() => {
@@ -91,6 +95,7 @@ class Radio extends EventTarget {
   }
 
   stop(): void {
+    touch.onInput = null;
     clearInterval(this.timer);
   }
 

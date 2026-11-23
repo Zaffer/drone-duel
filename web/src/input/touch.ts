@@ -63,15 +63,23 @@ export class TouchSticks {
     this.onChange?.();
   }
 
+  /** Called as a thumb moves a stick or lets it go: the radio samples the sticks there and
+   * then (input/radio.ts). A phone hears its thumbs at the start of a frame, and the radio's
+   * own timer cannot run until the frame is drawn: the move waited 5 ms, 12 ms one time in
+   * ten, on a phone-speed thread (measured 2026-11-22). */
+  onInput: (() => void) | null = null;
+
   /** A thumb moved on a stick: where it stood when the thumb came down, and the travel since. */
   drag(side: "left" | "right", from: Stick, dx: number, dy: number, throwPx: number): void {
     this[side] = dragged(from, dx, dy, throwPx);
+    this.onInput?.();
   }
 
   /** The thumb is off the stick. */
   release(side: "left" | "right"): void {
     if (side === "right") this.right = { x: 0, y: 0 };
     else this.left = { x: 0, y: this.sprung ? 0 : this.left.y };
+    this.onInput?.();
   }
 }
 

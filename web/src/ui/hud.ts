@@ -19,6 +19,7 @@ import {
   location,
   mode,
   paused,
+  perfOn,
   toast,
   toasts,
   vehicle,
@@ -185,7 +186,7 @@ export function mountHud(
         .on("menu", () => pause())
         .on("help", toggleHelp)
         .on("gust", () => sendWind(true))
-        .on("perf", () => perfPanel.toggle())
+        .on("perf", () => perfOn(!perfOn()))
     : new Controls(flightBindings(VIEW_ORDER.map((v) => VIEW_NAMES[v])))
         .on("menu", () => pause())
         .on("nextView", () => cycleView(1))
@@ -200,7 +201,7 @@ export function mountHud(
         )
         .on("help", toggleHelp)
         .on("gust", () => sendWind(true))
-        .on("perf", () => perfPanel.toggle());
+        .on("perf", () => perfOn(!perfOn()));
   window.addEventListener("keydown", wake);
 
   const disposers = [

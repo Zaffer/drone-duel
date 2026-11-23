@@ -26,6 +26,7 @@ async function boot(): Promise<void> {
   const world = new World(document.getElementById("world")!, cfg.map_keys);
   // The sun: the time of day set in Graphics, at the place chosen.
   effect(() => world.setTimeOfDay(prefs().graphics.timeOfDay, location()?.origin[1] ?? 0));
+  effect(() => world.setDetail(prefs().graphics.quality));
   // For the console and the browser tests: the world, the link, the controller, the frame stats,
   // and Cesium itself (to time its insides).
   (window as unknown as { duels: unknown }).duels = { world, link, radio, perf, Cesium };

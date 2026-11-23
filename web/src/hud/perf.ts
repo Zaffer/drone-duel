@@ -4,7 +4,9 @@
 // from. `perf` records every frame whether the panel shows or not, so a test can read it
 // (window.duels.perf).
 
+import { effect } from "alien-signals";
 import { loop, type SystemStats } from "../engine/loop.ts";
+import { perfOn } from "../state/app.ts";
 import { inputSource } from "../state/input.ts";
 import "./hud.css";
 
@@ -63,10 +65,12 @@ class Perf {
 
 export const perf = new Perf();
 
-/** The panel in `el`, shown or hidden with `toggle()`; updated four times a second. */
-export function mountPerf(el: HTMLElement): { toggle(): void; dispose(): void } {
+/** The panel in `el`, shown while `perfOn` (state/app.ts); updated four times a second. */
+export function mountPerf(el: HTMLElement): { dispose(): void } {
   el.classList.add("perf");
-  el.hidden = true;
+  const shown = effect(() => {
+    el.hidden = !perfOn();
+  });
   const timer = setInterval(() => {
     if (el.hidden) return;
     const s = perf.stats();
@@ -86,9 +90,9 @@ export function mountPerf(el: HTMLElement): { toggle(): void; dispose(): void } 
     ].join("\n");
   }, 250);
   return {
-    toggle: () => {
-      el.hidden = !el.hidden;
+    dispose: () => {
+      shown();
+      clearInterval(timer);
     },
-    dispose: () => clearInterval(timer),
   };
 }

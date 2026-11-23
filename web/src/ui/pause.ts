@@ -9,7 +9,7 @@ import { radio } from "../input/radio.ts";
 import { modeVehicles } from "../modes/registry.ts";
 import { ownMapKeys, saveOwnMapKeys } from "../net/api.ts";
 import { WEB } from "../net/target.ts";
-import { config, location, paused, vehicleId, view, wind } from "../state/app.ts";
+import { config, location, paused, perfOn, vehicleId, view, wind } from "../state/app.ts";
 import { channels, controllerName, inputSource } from "../state/input.ts";
 import { type Prefs, prefs, updatePrefs, type ViewId } from "../state/prefs.ts";
 import { log, status } from "../state/session.ts";
@@ -606,6 +606,19 @@ export function openPause(
               () => prefs().graphics.quality,
               (v) => setP("graphics", { quality: v }),
             ),
+            h(
+              "span",
+              { class: "muted" },
+              "How finely the ground is drawn. Each step down is a level of the map coarser, near and far: softer, and lighter on a phone",
+            ),
+          ),
+          opt(
+            "Performance panel",
+            check(
+              () => perfOn(),
+              (v) => perfOn(v),
+            ),
+            h("span", { class: "muted" }, "The frame rate and where each frame's time goes (P)"),
           ),
           opt(
             "Time of day",
